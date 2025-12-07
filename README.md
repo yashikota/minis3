@@ -1,58 +1,60 @@
 # Minis3 🪣
 
-Sometimes you want to test code which uses S3, without making it a full-blown integration test. Minis3 implements (parts of) the S3 server, to be used in unittests. It enables a simple, cheap, in-memory, S3 replacement, with a real TCP interface. Think of it as the S3 version of `net/http/httptest`  
+Sometimes you want to test code which uses S3, without making it a full-blown integration test. Minis3 implements (parts of) the S3 server, to be used in unittests. It enables a simple, cheap, in-memory, S3 replacement, with a real TCP interface. Think of it as the S3 version of `net/http/httptest`
 
 ## 📋 Supported Operations
 
+**Legend:** ✅ = Full support | ⚠️ = Partial support (basic features only) | ⌛ = Not implemented
+
 ### 🪣 Bucket Operations
 
-| Operation | Status |
-| --------- | ------ |
-| ListBuckets | ✅ |
-| CreateBucket | ✅ |
-| DeleteBucket | ✅ |
-| HeadBucket | ✅ |
-| GetBucketLocation | ⌛ |
-| GetBucketVersioning | ⌛ |
-| PutBucketVersioning | ⌛ |
-| GetBucketTagging | ⌛ |
-| PutBucketTagging | ⌛ |
-| DeleteBucketTagging | ⌛ |
-| GetBucketPolicy | ⌛ |
-| PutBucketPolicy | ⌛ |
-| DeleteBucketPolicy | ⌛ |
+| Operation | Status | Unsupported Features |
+| --------- | ------ | -------------------- |
+| ListBuckets | ⚠️ | ContinuationToken, Prefix, MaxBuckets |
+| CreateBucket | ⚠️ | LocationConstraint, ACL, ObjectLockConfiguration, GrantFullControl, GrantRead, GrantReadACP, GrantWrite, GrantWriteACP, ObjectOwnership |
+| DeleteBucket | ⚠️ | ExpectedBucketOwner |
+| HeadBucket | ⚠️ | ExpectedBucketOwner |
+| GetBucketLocation | ⌛ | |
+| GetBucketVersioning | ⌛ | |
+| PutBucketVersioning | ⌛ | |
+| GetBucketTagging | ⌛ | |
+| PutBucketTagging | ⌛ | |
+| DeleteBucketTagging | ⌛ | |
+| GetBucketPolicy | ⌛ | |
+| PutBucketPolicy | ⌛ | |
+| DeleteBucketPolicy | ⌛ | |
 
 ### 📦 Object Operations
 
-| Operation | Status |
-| --------- | ------ |
-| PutObject | ✅ |
-| GetObject | ✅ |
-| DeleteObject | ✅ |
-| DeleteObjects | ✅ |
-| CopyObject | ✅ |
-| HeadObject | ✅ |
-| ListObjects | ⌛ |
-| ListObjectsV2 | ⌛ |
-| ListObjectVersions | ⌛ |
-| GetObjectAttributes | ⌛ |
-| GetObjectTagging | ⌛ |
-| PutObjectTagging | ⌛ |
-| DeleteObjectTagging | ⌛ |
-| GetObjectAcl | ⌛ |
-| PutObjectAcl | ⌛ |
+| Operation | Status | Unsupported Features |
+| --------- | ------ | -------------------- |
+| PutObject | ⚠️ | ACL, CacheControl, ContentDisposition, ContentEncoding, ContentLanguage, Expires, GrantFullControl, GrantRead, GrantReadACP, GrantWriteACP, Metadata, ServerSideEncryption, StorageClass, WebsiteRedirectLocation, SSECustomerAlgorithm, SSECustomerKey, SSEKMSKeyId, Tagging, ObjectLockMode, ObjectLockRetainUntilDate, ObjectLockLegalHoldStatus, ChecksumAlgorithm |
+| GetObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, ResponseCacheControl, ResponseContentDisposition, ResponseContentEncoding, ResponseContentLanguage, ResponseContentType, ResponseExpires, VersionId, SSECustomerAlgorithm, SSECustomerKey, PartNumber, ChecksumMode |
+| DeleteObject | ⚠️ | VersionId, MFA, BypassGovernanceRetention, ExpectedBucketOwner |
+| DeleteObjects | ⚠️ | VersionId (per object), MFA, BypassGovernanceRetention, ExpectedBucketOwner, ChecksumAlgorithm |
+| CopyObject | ⚠️ | ACL, CacheControl, ChecksumAlgorithm, ContentDisposition, ContentEncoding, ContentLanguage, ContentType, CopySourceIfMatch, CopySourceIfModifiedSince, CopySourceIfNoneMatch, CopySourceIfUnmodifiedSince, Expires, GrantFullControl, GrantRead, GrantReadACP, GrantWriteACP, Metadata, MetadataDirective, TaggingDirective, ServerSideEncryption, StorageClass, WebsiteRedirectLocation, SSECustomerAlgorithm, SSECustomerKey, SSEKMSKeyId, CopySourceSSECustomerAlgorithm, CopySourceSSECustomerKey, Tagging, ObjectLockMode, ObjectLockRetainUntilDate, ObjectLockLegalHoldStatus |
+| HeadObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, VersionId, SSECustomerAlgorithm, SSECustomerKey, PartNumber, ChecksumMode |
+| ListObjects | ⌛ | |
+| ListObjectsV2 | ⚠️ | ContinuationToken, StartAfter, FetchOwner, EncodingType, ExpectedBucketOwner, OptionalObjectAttributes |
+| ListObjectVersions | ⌛ | |
+| GetObjectAttributes | ⌛ | |
+| GetObjectTagging | ⌛ | |
+| PutObjectTagging | ⌛ | |
+| DeleteObjectTagging | ⌛ | |
+| GetObjectAcl | ⌛ | |
+| PutObjectAcl | ⌛ | |
 
 ### 📤 Multipart Upload Operations
 
-| Operation | Status |
-| --------- | ------ |
-| CreateMultipartUpload | ⌛ |
-| UploadPart | ⌛ |
-| UploadPartCopy | ⌛ |
-| CompleteMultipartUpload | ⌛ |
-| AbortMultipartUpload | ⌛ |
-| ListMultipartUploads | ⌛ |
-| ListParts | ⌛ |
+| Operation | Status | Unsupported Features |
+| --------- | ------ | -------------------- |
+| CreateMultipartUpload | ⌛ | |
+| UploadPart | ⌛ | |
+| UploadPartCopy | ⌛ | |
+| CompleteMultipartUpload | ⌛ | |
+| AbortMultipartUpload | ⌛ | |
+| ListMultipartUploads | ⌛ | |
+| ListParts | ⌛ | |
 
 ## Installation
 
