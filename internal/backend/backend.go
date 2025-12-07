@@ -3,9 +3,9 @@ package backend
 import (
 	"crypto/md5"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"sync"
 	"time"
 )
@@ -104,18 +104,19 @@ func (b *Backend) PutObject(
 		return nil, fmt.Errorf("bucket not found")
 	}
 
-	checksum := crc32.ChecksumIEEE(data)
-	checksumBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(checksumBytes, checksum)
+	md5Hash := md5.New()
+	crc32Hash := crc32.NewIEEE()
+	w := io.MultiWriter(md5Hash, crc32Hash)
+	_, _ = w.Write(data)
 
 	obj := &Object{
 		Key:           key,
 		LastModified:  time.Now().UTC(),
-		ETag:          fmt.Sprintf("\"%x\"", md5.Sum(data)),
+		ETag:          fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
 		Size:          int64(len(data)),
 		ContentType:   contentType,
 		Data:          data,
-		ChecksumCRC32: base64.StdEncoding.EncodeToString(checksumBytes),
+		ChecksumCRC32: base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
 	}
 
 	bucket.Objects[key] = obj
