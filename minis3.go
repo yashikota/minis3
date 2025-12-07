@@ -2,10 +2,12 @@ package minis3
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -200,6 +202,13 @@ func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName
 func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName, key string) {
 	switch r.Method {
 	case "PUT":
+		// Check for CopyObject (x-amz-copy-source header)
+		copySource := r.Header.Get("x-amz-copy-source")
+		if copySource != "" {
+			m.handleCopyObject(w, r, bucketName, key, copySource)
+			return
+		}
+
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -260,4 +269,66 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 			"The specified method is not allowed against this resource.",
 		)
 	}
+}
+
+func (m *Minis3) handleCopyObject(
+	w http.ResponseWriter,
+	_ *http.Request,
+	dstBucket, dstKey, copySource string,
+) {
+	// Parse x-amz-copy-source: /bucket/key or bucket/key
+	// URL decode the copy source as S3 object keys may contain special characters
+	decodedCopySource, err := url.PathUnescape(copySource)
+	if err != nil {
+		api.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidArgument",
+			"Invalid x-amz-copy-source header: malformed URL encoding",
+		)
+		return
+	}
+
+	srcBucket, srcKey := extractBucketAndKey(decodedCopySource)
+	if srcBucket == "" || srcKey == "" {
+		api.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidArgument",
+			"Invalid x-amz-copy-source header",
+		)
+		return
+	}
+
+	obj, err := m.backend.CopyObject(srcBucket, srcKey, dstBucket, dstKey)
+	if err != nil {
+		if errors.Is(err, backend.ErrSourceBucketNotFound) ||
+			errors.Is(err, backend.ErrDestinationBucketNotFound) {
+			api.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrSourceObjectNotFound) {
+			api.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+		} else {
+			api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	resp := api.CopyObjectResult{
+		ETag:         obj.ETag,
+		LastModified: obj.LastModified.Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
 }

@@ -3,11 +3,19 @@ package backend
 import (
 	"crypto/md5"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"sync"
 	"time"
+)
+
+// Sentinel errors for CopyObject
+var (
+	ErrSourceBucketNotFound      = errors.New("source bucket not found")
+	ErrDestinationBucketNotFound = errors.New("destination bucket not found")
+	ErrSourceObjectNotFound      = errors.New("source object not found")
 )
 
 // Backend holds the state of the S3 world.
@@ -144,6 +152,46 @@ func (b *Backend) DeleteObject(bucketName, key string) {
 		return
 	}
 	delete(bucket.Objects, key)
+}
+
+func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Object, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Get source bucket
+	srcBkt, ok := b.buckets[srcBucket]
+	if !ok {
+		return nil, ErrSourceBucketNotFound
+	}
+
+	// Get source object
+	srcObj, ok := srcBkt.Objects[srcKey]
+	if !ok {
+		return nil, ErrSourceObjectNotFound
+	}
+
+	// Get destination bucket
+	dstBkt, ok := b.buckets[dstBucket]
+	if !ok {
+		return nil, ErrDestinationBucketNotFound
+	}
+
+	// Create copied object
+	copiedData := make([]byte, len(srcObj.Data))
+	copy(copiedData, srcObj.Data)
+
+	obj := &Object{
+		Key:           dstKey,
+		LastModified:  time.Now().UTC(),
+		ETag:          srcObj.ETag,
+		Size:          srcObj.Size,
+		ContentType:   srcObj.ContentType,
+		Data:          copiedData,
+		ChecksumCRC32: srcObj.ChecksumCRC32,
+	}
+
+	dstBkt.Objects[dstKey] = obj
+	return obj, nil
 }
 
 func (b *Backend) ListObjects(bucketName string, prefix string) ([]*Object, bool) {

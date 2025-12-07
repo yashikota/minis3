@@ -22,6 +22,13 @@ type BucketInfo struct {
 	CreationDate string `xml:"CreationDate"`
 }
 
+// CopyObjectResult is the response for CopyObject
+type CopyObjectResult struct {
+	XMLName      xml.Name `xml:"CopyObjectResult"`
+	ETag         string   `xml:"ETag"`
+	LastModified string   `xml:"LastModified"`
+}
+
 // ErrorResponse is the standard S3 error response
 type ErrorResponse struct {
 	XMLName   xml.Name `xml:"Error"`
