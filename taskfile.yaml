@@ -1,0 +1,25 @@
+version: "3"
+
+tasks:
+  default:
+    desc: "Display this help message"
+    cmds:
+      - task -l
+
+  lint:
+    desc: "Lint"
+    cmds:
+      - golangci-lint run --fix
+      - golangci-lint fmt
+
+  test:
+    desc: "Test"
+    cmds:
+      - richgo test -v ./...
+      - task: integration
+
+  integration:
+    desc: "Integration test"
+    dir: integration
+    cmds:
+      - richgo test -v ./...
