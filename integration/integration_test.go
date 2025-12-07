@@ -12,13 +12,17 @@ import (
 	"github.com/yashikota/minis3"
 )
 
-func TestIntegrationWithSDK(t *testing.T) {
-	// Start Server
-	server := minis3.New()
-	server.Start()
-	defer server.Close()
+// setupTestClient creates a minis3 server and returns an S3 client configured to use it.
+// The server is automatically closed when the test completes.
+func setupTestClient(t *testing.T) *s3.Client {
+	t.Helper()
 
-	// Configure SDK
+	server := minis3.New()
+	if err := server.Start(); err != nil {
+		t.Fatalf("failed to start server: %v", err)
+	}
+	t.Cleanup(func() { server.Close() })
+
 	cfg, err := config.LoadDefaultConfig(
 		context.TODO(),
 		config.WithRegion("us-east-1"),
@@ -32,17 +36,21 @@ func TestIntegrationWithSDK(t *testing.T) {
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String("http://" + server.Addr())
 		o.UsePathStyle = true
 	})
+}
+
+func TestIntegrationWithSDK(t *testing.T) {
+	client := setupTestClient(t)
 
 	bucketName := "integration-test-bucket"
 	key := "test.txt"
 	content := "integration test content"
 
 	// 1. Create Bucket
-	_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	})
 	if err != nil {
@@ -92,29 +100,7 @@ func TestIntegrationWithSDK(t *testing.T) {
 }
 
 func TestCopyObject(t *testing.T) {
-	// Start Server
-	server := minis3.New()
-	server.Start()
-	defer server.Close()
-
-	// Configure SDK
-	cfg, err := config.LoadDefaultConfig(
-		context.TODO(),
-		config.WithRegion("us-east-1"),
-		config.WithCredentialsProvider(
-			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
-				return aws.Credentials{AccessKeyID: "test", SecretAccessKey: "test"}, nil
-			}),
-		),
-	)
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String("http://" + server.Addr())
-		o.UsePathStyle = true
-	})
+	client := setupTestClient(t)
 
 	srcBucket := "src-bucket"
 	dstBucket := "dst-bucket"
@@ -142,7 +128,7 @@ func TestCopyObject(t *testing.T) {
 	})
 
 	// 1. Create source and destination buckets
-	_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
 		Bucket: aws.String(srcBucket),
 	})
 	if err != nil {
@@ -214,29 +200,7 @@ func TestCopyObject(t *testing.T) {
 }
 
 func TestDeleteObjects(t *testing.T) {
-	// Start Server
-	server := minis3.New()
-	server.Start()
-	defer server.Close()
-
-	// Configure SDK
-	cfg, err := config.LoadDefaultConfig(
-		context.TODO(),
-		config.WithRegion("us-east-1"),
-		config.WithCredentialsProvider(
-			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
-				return aws.Credentials{AccessKeyID: "test", SecretAccessKey: "test"}, nil
-			}),
-		),
-	)
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String("http://" + server.Addr())
-		o.UsePathStyle = true
-	})
+	client := setupTestClient(t)
 
 	bucketName := "delete-objects-test"
 	keys := []string{"file1.txt", "file2.txt", "file3.txt"}
@@ -256,7 +220,7 @@ func TestDeleteObjects(t *testing.T) {
 	})
 
 	// 1. Create Bucket
-	_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	})
 	if err != nil {
@@ -332,29 +296,7 @@ func TestDeleteObjects(t *testing.T) {
 }
 
 func TestDeleteObjectsQuietMode(t *testing.T) {
-	// Start Server
-	server := minis3.New()
-	server.Start()
-	defer server.Close()
-
-	// Configure SDK
-	cfg, err := config.LoadDefaultConfig(
-		context.TODO(),
-		config.WithRegion("us-east-1"),
-		config.WithCredentialsProvider(
-			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
-				return aws.Credentials{AccessKeyID: "test", SecretAccessKey: "test"}, nil
-			}),
-		),
-	)
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String("http://" + server.Addr())
-		o.UsePathStyle = true
-	})
+	client := setupTestClient(t)
 
 	bucketName := "delete-objects-quiet-test"
 
@@ -370,7 +312,7 @@ func TestDeleteObjectsQuietMode(t *testing.T) {
 	})
 
 	// 1. Create Bucket
-	_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
 	})
 	if err != nil {

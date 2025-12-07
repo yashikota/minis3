@@ -336,25 +336,26 @@ func (m *Minis3) handleDeleteObjects(w http.ResponseWriter, r *http.Request, buc
 	}
 
 	for _, result := range results {
-		if result.Deleted {
-			// In quiet mode, don't include successful deletions
-			if !deleteReq.Quiet {
-				resp.Deleted = append(resp.Deleted, api.DeletedObject{
-					Key: result.Key,
-				})
-			}
-		} else if result.Error != nil {
-			resp.Errors = append(resp.Errors, api.DeleteError{
-				Key:     result.Key,
-				Code:    "InternalError",
-				Message: result.Error.Error(),
+		// In quiet mode, don't include successful deletions
+		if !deleteReq.Quiet {
+			resp.Deleted = append(resp.Deleted, api.DeletedObject{
+				Key: result.Key,
 			})
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, _ := xml.Marshal(resp)
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		api.WriteError(
+			w,
+			http.StatusInternalServerError,
+			"InternalError",
+			"Failed to marshal XML response",
+		)
+		return
+	}
 	_, _ = w.Write(output)
 }
 
