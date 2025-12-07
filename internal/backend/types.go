@@ -5,8 +5,12 @@ import (
 	"time"
 )
 
-// Sentinel errors for CopyObject
+// Sentinel errors
 var (
+	ErrBucketNotFound            = errors.New("bucket not found")
+	ErrBucketNotEmpty            = errors.New("bucket not empty")
+	ErrBucketAlreadyExists       = errors.New("bucket already exists")
+	ErrObjectNotFound            = errors.New("object not found")
 	ErrSourceBucketNotFound      = errors.New("source bucket not found")
 	ErrDestinationBucketNotFound = errors.New("destination bucket not found")
 	ErrSourceObjectNotFound      = errors.New("source object not found")
