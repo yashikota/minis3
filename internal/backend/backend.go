@@ -87,7 +87,11 @@ func (b *Backend) ListBuckets() []*Bucket {
 	return res
 }
 
-func (b *Backend) PutObject(bucketName, key string, data []byte, contentType string) (*Object, error) {
+func (b *Backend) PutObject(
+	bucketName, key string,
+	data []byte,
+	contentType string,
+) (*Object, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 

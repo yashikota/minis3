@@ -18,11 +18,14 @@ func TestIntegrationWithSDK(t *testing.T) {
 	defer server.Close()
 
 	// Configure SDK
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
 		config.WithRegion("us-east-1"),
-		config.WithCredentialsProvider(aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
-			return aws.Credentials{AccessKeyID: "test", SecretAccessKey: "test"}, nil
-		})),
+		config.WithCredentialsProvider(
+			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+				return aws.Credentials{AccessKeyID: "test", SecretAccessKey: "test"}, nil
+			}),
+		),
 	)
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)

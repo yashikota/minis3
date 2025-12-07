@@ -40,6 +40,7 @@ func WriteError(w http.ResponseWriter, code int, s3Code, message string) {
 		Message: message,
 	}
 	output, _ := xml.Marshal(resp)
-	w.Write([]byte(xml.Header))
-	w.Write(output)
+	// Ignore write errors as we cannot recover from them here.
+	_, _ = w.Write([]byte(xml.Header))
+	_, _ = w.Write(output)
 }

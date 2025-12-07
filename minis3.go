@@ -65,12 +65,13 @@ func (m *Minis3) Start() error {
 }
 
 // Close stops the server.
-func (m *Minis3) Close() {
+func (m *Minis3) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.server != nil {
-		m.server.Close()
+		return m.server.Close()
 	}
+	return nil
 }
 
 // Addr returns the address the server is listening on.
@@ -134,7 +135,12 @@ func extractBucketAndKey(path string) (string, string) {
 
 func (m *Minis3) handleService(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
-		api.WriteError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "The specified method is not allowed against this resource.")
+		api.WriteError(
+			w,
+			http.StatusMethodNotAllowed,
+			"MethodNotAllowed",
+			"The specified method is not allowed against this resource.",
+		)
 		return
 	}
 
@@ -149,9 +155,10 @@ func (m *Minis3) handleService(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Write([]byte(xml.Header))
+	// Ignore write error because we can't do anything about it if the connection is broken.
+	_, _ = w.Write([]byte(xml.Header))
 	output, _ := xml.Marshal(resp)
-	w.Write(output)
+	_, _ = w.Write(output)
 }
 
 func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName string) {
@@ -181,7 +188,12 @@ func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName
 		}
 		w.WriteHeader(http.StatusOK)
 	default:
-		api.WriteError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "The specified method is not allowed against this resource.")
+		api.WriteError(
+			w,
+			http.StatusMethodNotAllowed,
+			"MethodNotAllowed",
+			"The specified method is not allowed against this resource.",
+		)
 	}
 }
 
@@ -193,12 +205,17 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 			api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 
 		contentType := r.Header.Get("Content-Type")
 		obj, err := m.backend.PutObject(bucketName, key, data, contentType)
 		if err != nil {
-			api.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			api.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
 			return
 		}
 		w.Header().Set("ETag", obj.ETag)
@@ -214,7 +231,8 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
-		w.Write(obj.Data)
+		// Ignore write error because we can't do anything about it if the connection is broken.
+		_, _ = w.Write(obj.Data)
 
 	case "DELETE":
 		m.backend.DeleteObject(bucketName, key)
@@ -233,6 +251,11 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 		w.WriteHeader(http.StatusOK)
 
 	default:
-		api.WriteError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "The specified method is not allowed against this resource.")
+		api.WriteError(
+			w,
+			http.StatusMethodNotAllowed,
+			"MethodNotAllowed",
+			"The specified method is not allowed against this resource.",
+		)
 	}
 }

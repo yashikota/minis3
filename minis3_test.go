@@ -24,7 +24,7 @@ func TestMinis3(t *testing.T) {
 		t.Errorf("Expected 200 OK, got %d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if !strings.Contains(string(body), "ListAllMyBucketsResult") {
 		t.Errorf("Expected ListAllMyBucketsResult XML, got: %s", string(body))
 	}
@@ -38,7 +38,7 @@ func TestMinis3(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected 200 OK, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// 3. Put Object
 	content := "Hello S3"
@@ -51,7 +51,7 @@ func TestMinis3(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected 200 OK, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// 4. Get Object
 	resp, err = client.Get(server.URL + "/testbucket/hello.txt")
@@ -62,7 +62,7 @@ func TestMinis3(t *testing.T) {
 		t.Errorf("Expected 200 OK, got %d", resp.StatusCode)
 	}
 	data, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if string(data) != content {
 		t.Errorf("Expected content %q, got %q", content, string(data))
 	}
@@ -76,7 +76,7 @@ func TestMinis3(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("Expected 204 No Content, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// 6. Delete Bucket
 	req, _ = http.NewRequest("DELETE", server.URL+"/testbucket", nil)
@@ -87,5 +87,5 @@ func TestMinis3(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("Expected 204 No Content, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }

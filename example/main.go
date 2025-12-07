@@ -21,15 +21,18 @@ func main() {
 	fmt.Printf("minis3 started at %s\n", server.Addr())
 
 	// 2. Configure AWS SDK to use minis3
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
 		config.WithRegion("us-east-1"),
-		config.WithCredentialsProvider(aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
-			return aws.Credentials{
-				AccessKeyID:     "minis3",
-				SecretAccessKey: "minis3",
-				SessionToken:    "",
-			}, nil
-		})),
+		config.WithCredentialsProvider(
+			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+				return aws.Credentials{
+					AccessKeyID:     "minis3",
+					SecretAccessKey: "minis3",
+					SessionToken:    "",
+				}, nil
+			}),
+		),
 	)
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
