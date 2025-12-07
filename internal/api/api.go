@@ -29,6 +29,43 @@ type CopyObjectResult struct {
 	LastModified string   `xml:"LastModified"`
 }
 
+// DeleteRequest is the request body for DeleteObjects
+type DeleteRequest struct {
+	XMLName xml.Name           `xml:"Delete"`
+	Objects []ObjectIdentifier `xml:"Object"`
+	Quiet   bool               `xml:"Quiet"`
+}
+
+// ObjectIdentifier identifies an object to delete
+type ObjectIdentifier struct {
+	Key       string `xml:"Key"`
+	VersionId string `xml:"VersionId,omitempty"`
+}
+
+// DeleteResult is the response for DeleteObjects
+type DeleteResult struct {
+	XMLName xml.Name        `xml:"DeleteResult"`
+	Xmlns   string          `xml:"xmlns,attr,omitempty"`
+	Deleted []DeletedObject `xml:"Deleted,omitempty"`
+	Errors  []DeleteError   `xml:"Error,omitempty"`
+}
+
+// DeletedObject represents a successfully deleted object
+type DeletedObject struct {
+	Key                   string `xml:"Key"`
+	VersionId             string `xml:"VersionId,omitempty"`
+	DeleteMarker          bool   `xml:"DeleteMarker,omitempty"`
+	DeleteMarkerVersionId string `xml:"DeleteMarkerVersionId,omitempty"`
+}
+
+// DeleteError represents a failed delete operation
+type DeleteError struct {
+	Key       string `xml:"Key"`
+	VersionId string `xml:"VersionId,omitempty"`
+	Code      string `xml:"Code"`
+	Message   string `xml:"Message"`
+}
+
 // ErrorResponse is the standard S3 error response
 type ErrorResponse struct {
 	XMLName   xml.Name `xml:"Error"`

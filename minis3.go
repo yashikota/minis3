@@ -165,6 +165,17 @@ func (m *Minis3) handleService(w http.ResponseWriter, r *http.Request) {
 
 func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName string) {
 	switch r.Method {
+	case "POST":
+		if r.URL.Query().Has("delete") {
+			m.handleDeleteObjects(w, r, bucketName)
+			return
+		}
+		api.WriteError(
+			w,
+			http.StatusMethodNotAllowed,
+			"MethodNotAllowed",
+			"The specified method is not allowed against this resource.",
+		)
 	case "PUT":
 		err := m.backend.CreateBucket(bucketName)
 		if err != nil {
@@ -269,6 +280,82 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 			"The specified method is not allowed against this resource.",
 		)
 	}
+}
+
+func (m *Minis3) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucketName string) {
+	// Parse request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Failed to read request body")
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	var deleteReq api.DeleteRequest
+	if err := xml.Unmarshal(body, &deleteReq); err != nil {
+		api.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema",
+		)
+		return
+	}
+
+	if len(deleteReq.Objects) == 0 {
+		api.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema",
+		)
+		return
+	}
+
+	// Extract keys from request
+	keys := make([]string, len(deleteReq.Objects))
+	for i, obj := range deleteReq.Objects {
+		keys[i] = obj.Key
+	}
+
+	// Delete objects
+	results, err := m.backend.DeleteObjects(bucketName, keys)
+	if err != nil {
+		api.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+		return
+	}
+
+	// Build response
+	resp := api.DeleteResult{
+		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+	}
+
+	for _, result := range results {
+		if result.Deleted {
+			// In quiet mode, don't include successful deletions
+			if !deleteReq.Quiet {
+				resp.Deleted = append(resp.Deleted, api.DeletedObject{
+					Key: result.Key,
+				})
+			}
+		} else if result.Error != nil {
+			resp.Errors = append(resp.Errors, api.DeleteError{
+				Key:     result.Key,
+				Code:    "InternalError",
+				Message: result.Error.Error(),
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, _ := xml.Marshal(resp)
+	_, _ = w.Write(output)
 }
 
 func (m *Minis3) handleCopyObject(
