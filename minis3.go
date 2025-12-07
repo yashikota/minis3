@@ -231,6 +231,7 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
 		// Ignore write error because we can't do anything about it if the connection is broken.
 		_, _ = w.Write(obj.Data)
 
@@ -248,6 +249,7 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
 		w.WriteHeader(http.StatusOK)
 
 	default:
