@@ -2,10 +2,12 @@ package minis3
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -275,7 +277,19 @@ func (m *Minis3) handleCopyObject(
 	dstBucket, dstKey, copySource string,
 ) {
 	// Parse x-amz-copy-source: /bucket/key or bucket/key
-	srcBucket, srcKey := extractBucketAndKey(copySource)
+	// URL decode the copy source as S3 object keys may contain special characters
+	decodedCopySource, err := url.PathUnescape(copySource)
+	if err != nil {
+		api.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidArgument",
+			"Invalid x-amz-copy-source header: malformed URL encoding",
+		)
+		return
+	}
+
+	srcBucket, srcKey := extractBucketAndKey(decodedCopySource)
 	if srcBucket == "" || srcKey == "" {
 		api.WriteError(
 			w,
@@ -288,19 +302,18 @@ func (m *Minis3) handleCopyObject(
 
 	obj, err := m.backend.CopyObject(srcBucket, srcKey, dstBucket, dstKey)
 	if err != nil {
-		errMsg := err.Error()
-		switch errMsg {
-		case "source bucket not found", "destination bucket not found":
+		if errors.Is(err, backend.ErrSourceBucketNotFound) ||
+			errors.Is(err, backend.ErrDestinationBucketNotFound) {
 			api.WriteError(
 				w,
 				http.StatusNotFound,
 				"NoSuchBucket",
 				"The specified bucket does not exist.",
 			)
-		case "source object not found":
+		} else if errors.Is(err, backend.ErrSourceObjectNotFound) {
 			api.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
-		default:
-			api.WriteError(w, http.StatusInternalServerError, "InternalError", errMsg)
+		} else {
+			api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
@@ -312,6 +325,10 @@ func (m *Minis3) handleCopyObject(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, _ := xml.Marshal(resp)
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
 	_, _ = w.Write(output)
 }

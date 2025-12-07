@@ -119,7 +119,26 @@ func TestCopyObject(t *testing.T) {
 	dstBucket := "dst-bucket"
 	srcKey := "source.txt"
 	dstKey := "destination.txt"
+	sameKey := "same-bucket-copy.txt"
 	content := "copy object test content"
+
+	// Register cleanup to run even if test fails
+	t.Cleanup(func() {
+		client.DeleteObject(
+			context.TODO(),
+			&s3.DeleteObjectInput{Bucket: aws.String(srcBucket), Key: aws.String(srcKey)},
+		)
+		client.DeleteObject(
+			context.TODO(),
+			&s3.DeleteObjectInput{Bucket: aws.String(srcBucket), Key: aws.String(sameKey)},
+		)
+		client.DeleteObject(
+			context.TODO(),
+			&s3.DeleteObjectInput{Bucket: aws.String(dstBucket), Key: aws.String(dstKey)},
+		)
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{Bucket: aws.String(srcBucket)})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{Bucket: aws.String(dstBucket)})
+	})
 
 	// 1. Create source and destination buckets
 	_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
@@ -170,7 +189,6 @@ func TestCopyObject(t *testing.T) {
 	}
 
 	// 5. Test copy within same bucket
-	sameKey := "same-bucket-copy.txt"
 	_, err = client.CopyObject(context.TODO(), &s3.CopyObjectInput{
 		Bucket:     aws.String(srcBucket),
 		Key:        aws.String(sameKey),
@@ -192,20 +210,4 @@ func TestCopyObject(t *testing.T) {
 	if resp.ContentLength == nil || *resp.ContentLength != int64(len(content)) {
 		t.Errorf("Expected content length %d, got %v", len(content), resp.ContentLength)
 	}
-
-	// Cleanup
-	client.DeleteObject(
-		context.TODO(),
-		&s3.DeleteObjectInput{Bucket: aws.String(srcBucket), Key: aws.String(srcKey)},
-	)
-	client.DeleteObject(
-		context.TODO(),
-		&s3.DeleteObjectInput{Bucket: aws.String(srcBucket), Key: aws.String(sameKey)},
-	)
-	client.DeleteObject(
-		context.TODO(),
-		&s3.DeleteObjectInput{Bucket: aws.String(dstBucket), Key: aws.String(dstKey)},
-	)
-	client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{Bucket: aws.String(srcBucket)})
-	client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{Bucket: aws.String(dstBucket)})
 }

@@ -3,11 +3,19 @@ package backend
 import (
 	"crypto/md5"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"sync"
 	"time"
+)
+
+// Sentinel errors for CopyObject
+var (
+	ErrSourceBucketNotFound      = errors.New("source bucket not found")
+	ErrDestinationBucketNotFound = errors.New("destination bucket not found")
+	ErrSourceObjectNotFound      = errors.New("source object not found")
 )
 
 // Backend holds the state of the S3 world.
@@ -153,19 +161,19 @@ func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Obje
 	// Get source bucket
 	srcBkt, ok := b.buckets[srcBucket]
 	if !ok {
-		return nil, fmt.Errorf("source bucket not found")
+		return nil, ErrSourceBucketNotFound
 	}
 
 	// Get source object
 	srcObj, ok := srcBkt.Objects[srcKey]
 	if !ok {
-		return nil, fmt.Errorf("source object not found")
+		return nil, ErrSourceObjectNotFound
 	}
 
 	// Get destination bucket
 	dstBkt, ok := b.buckets[dstBucket]
 	if !ok {
-		return nil, fmt.Errorf("destination bucket not found")
+		return nil, ErrDestinationBucketNotFound
 	}
 
 	// Create copied object
