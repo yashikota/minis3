@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -208,4 +210,88 @@ func (b *Backend) ListObjects(bucketName string, prefix string) ([]*Object, bool
 		}
 	}
 	return result, true
+}
+
+// ListObjectsV2Result holds the result of ListObjectsV2
+type ListObjectsV2Result struct {
+	Objects        []*Object
+	CommonPrefixes []string
+	IsTruncated    bool
+	KeyCount       int
+}
+
+// ListObjectsV2 lists objects in a bucket with support for prefix, delimiter, and max-keys
+func (b *Backend) ListObjectsV2(
+	bucketName, prefix, delimiter string,
+	maxKeys int,
+) (*ListObjectsV2Result, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return nil, fmt.Errorf("bucket not found")
+	}
+
+	// Collect all keys and sort them
+	keys := make([]string, 0, len(bucket.Objects))
+	for key := range bucket.Objects {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := &ListObjectsV2Result{}
+	commonPrefixSet := make(map[string]struct{})
+
+	for _, key := range keys {
+		obj := bucket.Objects[key]
+
+		// Check prefix match
+		if prefix != "" && !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		// Handle delimiter
+		if delimiter != "" {
+			// Find delimiter after prefix
+			afterPrefix := key[len(prefix):]
+			delimIdx := strings.Index(afterPrefix, delimiter)
+			if delimIdx >= 0 {
+				// This key has a delimiter after the prefix, add to CommonPrefixes
+				commonPrefix := prefix + afterPrefix[:delimIdx+len(delimiter)]
+				commonPrefixSet[commonPrefix] = struct{}{}
+				continue
+			}
+		}
+
+		// Add to Contents
+		result.Objects = append(result.Objects, obj)
+	}
+
+	// Convert CommonPrefixes set to sorted slice
+	for cp := range commonPrefixSet {
+		result.CommonPrefixes = append(result.CommonPrefixes, cp)
+	}
+	sort.Strings(result.CommonPrefixes)
+
+	// Calculate total count (objects + common prefixes)
+	totalCount := len(result.Objects) + len(result.CommonPrefixes)
+
+	// Apply max-keys limit
+	if maxKeys > 0 && totalCount > maxKeys {
+		result.IsTruncated = true
+		// Truncate objects and common prefixes to fit within maxKeys
+		if len(result.Objects) >= maxKeys {
+			result.Objects = result.Objects[:maxKeys]
+			result.CommonPrefixes = nil
+		} else {
+			remaining := maxKeys - len(result.Objects)
+			if len(result.CommonPrefixes) > remaining {
+				result.CommonPrefixes = result.CommonPrefixes[:remaining]
+			}
+		}
+	}
+
+	result.KeyCount = len(result.Objects) + len(result.CommonPrefixes)
+	return result, nil
 }

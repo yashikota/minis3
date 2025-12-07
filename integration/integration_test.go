@@ -359,3 +359,164 @@ func TestDeleteObjectsQuietMode(t *testing.T) {
 		t.Error("Expected file.txt to be deleted, but GetObject succeeded")
 	}
 }
+
+func TestListObjectsV2(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "list-objects-v2-test"
+
+	// Cleanup
+	t.Cleanup(func() {
+		// Delete all test objects
+		keys := []string{
+			"file1.txt",
+			"file2.txt",
+			"photos/2024/jan/a.jpg",
+			"photos/2024/jan/b.jpg",
+			"photos/2024/feb/c.jpg",
+			"docs/readme.md",
+		}
+		for _, key := range keys {
+			client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(key),
+			})
+		}
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// 1. Create Bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// 2. Put test objects
+	testObjects := map[string]string{
+		"file1.txt":             "content1",
+		"file2.txt":             "content2",
+		"photos/2024/jan/a.jpg": "photo-a",
+		"photos/2024/jan/b.jpg": "photo-b",
+		"photos/2024/feb/c.jpg": "photo-c",
+		"docs/readme.md":        "readme",
+	}
+
+	for key, content := range testObjects {
+		_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Body:   strings.NewReader(content),
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed for %s: %v", key, err)
+		}
+	}
+
+	// 3. Test: List all objects (no prefix, no delimiter)
+	t.Run("ListAll", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+
+		if *resp.KeyCount != 6 {
+			t.Errorf("Expected 6 objects, got %d", *resp.KeyCount)
+		}
+		if resp.IsTruncated == nil || *resp.IsTruncated {
+			t.Error("Expected IsTruncated to be false")
+		}
+	})
+
+	// 4. Test: List with prefix
+	t.Run("ListWithPrefix", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket: aws.String(bucketName),
+			Prefix: aws.String("photos/"),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+
+		if *resp.KeyCount != 3 {
+			t.Errorf("Expected 3 objects with prefix 'photos/', got %d", *resp.KeyCount)
+		}
+	})
+
+	// 5. Test: List with delimiter (simulate directories)
+	t.Run("ListWithDelimiter", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:    aws.String(bucketName),
+			Delimiter: aws.String("/"),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+
+		// Should have 2 files (file1.txt, file2.txt) and 2 common prefixes (photos/, docs/)
+		if len(resp.Contents) != 2 {
+			t.Errorf("Expected 2 objects, got %d", len(resp.Contents))
+		}
+		if len(resp.CommonPrefixes) != 2 {
+			t.Errorf("Expected 2 common prefixes, got %d", len(resp.CommonPrefixes))
+		}
+	})
+
+	// 6. Test: List with prefix and delimiter
+	t.Run("ListWithPrefixAndDelimiter", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:    aws.String(bucketName),
+			Prefix:    aws.String("photos/2024/"),
+			Delimiter: aws.String("/"),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+
+		// Should have 0 direct objects and 2 common prefixes (jan/, feb/)
+		if len(resp.Contents) != 0 {
+			t.Errorf("Expected 0 objects, got %d", len(resp.Contents))
+		}
+		if len(resp.CommonPrefixes) != 2 {
+			t.Errorf("Expected 2 common prefixes (jan/, feb/), got %d", len(resp.CommonPrefixes))
+		}
+	})
+
+	// 7. Test: List with max-keys
+	t.Run("ListWithMaxKeys", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:  aws.String(bucketName),
+			MaxKeys: aws.Int32(2),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+
+		if *resp.KeyCount != 2 {
+			t.Errorf("Expected 2 objects with max-keys=2, got %d", *resp.KeyCount)
+		}
+		if resp.IsTruncated == nil || !*resp.IsTruncated {
+			t.Error("Expected IsTruncated to be true")
+		}
+	})
+
+	// 8. Test: Empty bucket (after prefix filter)
+	t.Run("ListNonExistentPrefix", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket: aws.String(bucketName),
+			Prefix: aws.String("nonexistent/"),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+
+		if *resp.KeyCount != 0 {
+			t.Errorf("Expected 0 objects for nonexistent prefix, got %d", *resp.KeyCount)
+		}
+	})
+}

@@ -76,6 +76,34 @@ type ErrorResponse struct {
 	HostId    string   `xml:"HostId"` // optional but common
 }
 
+// ListBucketResult is the response for ListObjectsV2
+type ListBucketResult struct {
+	XMLName        xml.Name       `xml:"ListBucketResult"`
+	Xmlns          string         `xml:"xmlns,attr,omitempty"`
+	Name           string         `xml:"Name"`
+	Prefix         string         `xml:"Prefix"`
+	Delimiter      string         `xml:"Delimiter,omitempty"`
+	MaxKeys        int            `xml:"MaxKeys"`
+	KeyCount       int            `xml:"KeyCount"`
+	IsTruncated    bool           `xml:"IsTruncated"`
+	Contents       []ObjectInfo   `xml:"Contents,omitempty"`
+	CommonPrefixes []CommonPrefix `xml:"CommonPrefixes,omitempty"`
+}
+
+// ObjectInfo represents an object in ListObjectsV2 response
+type ObjectInfo struct {
+	Key          string `xml:"Key"`
+	LastModified string `xml:"LastModified"`
+	ETag         string `xml:"ETag"`
+	Size         int64  `xml:"Size"`
+	StorageClass string `xml:"StorageClass"`
+}
+
+// CommonPrefix represents a common prefix in ListObjectsV2 response
+type CommonPrefix struct {
+	Prefix string `xml:"Prefix"`
+}
+
 func WriteError(w http.ResponseWriter, code int, s3Code, message string) {
 	w.WriteHeader(code)
 	// S3 errors are XML
