@@ -519,4 +519,22 @@ func TestListObjectsV2(t *testing.T) {
 			t.Errorf("Expected 0 objects for nonexistent prefix, got %d", *resp.KeyCount)
 		}
 	})
+
+	// 9. Test: max-keys=0 should return 0 objects
+	t.Run("ListWithMaxKeysZero", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:  aws.String(bucketName),
+			MaxKeys: aws.Int32(0),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+
+		if *resp.KeyCount != 0 {
+			t.Errorf("Expected 0 objects with max-keys=0, got %d", *resp.KeyCount)
+		}
+		if resp.IsTruncated == nil || !*resp.IsTruncated {
+			t.Error("Expected IsTruncated to be true with max-keys=0")
+		}
+	})
 }

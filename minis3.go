@@ -442,7 +442,7 @@ func (m *Minis3) handleListObjectsV2(w http.ResponseWriter, r *http.Request, buc
 	// Parse max-keys with default of 1000
 	maxKeys := 1000
 	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
-		if parsed, err := strconv.Atoi(maxKeysStr); err == nil && parsed > 0 {
+		if parsed, err := strconv.Atoi(maxKeysStr); err == nil && parsed >= 0 {
 			maxKeys = parsed
 		}
 	}

@@ -269,26 +269,49 @@ func (b *Backend) ListObjectsV2(
 	}
 
 	// Convert CommonPrefixes set to sorted slice
+	commonPrefixes := make([]string, 0, len(commonPrefixSet))
 	for cp := range commonPrefixSet {
-		result.CommonPrefixes = append(result.CommonPrefixes, cp)
+		commonPrefixes = append(commonPrefixes, cp)
 	}
-	sort.Strings(result.CommonPrefixes)
+	sort.Strings(commonPrefixes)
 
-	// Calculate total count (objects + common prefixes)
-	totalCount := len(result.Objects) + len(result.CommonPrefixes)
+	// Merge objects and common prefixes in lexicographical order, then apply max-keys
+	// This is required by S3 API: both objects and common prefixes count against MaxKeys
+	// and should be returned in lexicographical order
+	type listEntry struct {
+		key            string
+		isCommonPrefix bool
+		object         *Object
+	}
+
+	entries := make([]listEntry, 0, len(result.Objects)+len(commonPrefixes))
+	for _, obj := range result.Objects {
+		entries = append(entries, listEntry{key: obj.Key, isCommonPrefix: false, object: obj})
+	}
+	for _, cp := range commonPrefixes {
+		entries = append(entries, listEntry{key: cp, isCommonPrefix: true})
+	}
+
+	// Sort all entries lexicographically
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].key < entries[j].key
+	})
 
 	// Apply max-keys limit
-	if maxKeys > 0 && totalCount > maxKeys {
+	totalCount := len(entries)
+	if maxKeys >= 0 && totalCount > maxKeys {
 		result.IsTruncated = true
-		// Truncate objects and common prefixes to fit within maxKeys
-		if len(result.Objects) >= maxKeys {
-			result.Objects = result.Objects[:maxKeys]
-			result.CommonPrefixes = nil
+		entries = entries[:maxKeys]
+	}
+
+	// Separate back into objects and common prefixes
+	result.Objects = nil
+	result.CommonPrefixes = nil
+	for _, entry := range entries {
+		if entry.isCommonPrefix {
+			result.CommonPrefixes = append(result.CommonPrefixes, entry.key)
 		} else {
-			remaining := maxKeys - len(result.Objects)
-			if len(result.CommonPrefixes) > remaining {
-				result.CommonPrefixes = result.CommonPrefixes[:remaining]
-			}
+			result.Objects = append(result.Objects, entry.object)
 		}
 	}
 
