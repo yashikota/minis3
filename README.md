@@ -12,7 +12,7 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | PutObject | ✅ |
 | GetObject | ✅ |
 | DeleteObject | ✅ |
-| CopyObject | ⌛ |
+| CopyObject | ✅ |
 | HeadBucket | ✅ |
 | HeadObject | ✅ |
 | ListObjectsV2 | ⌛ |

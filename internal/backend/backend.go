@@ -146,6 +146,46 @@ func (b *Backend) DeleteObject(bucketName, key string) {
 	delete(bucket.Objects, key)
 }
 
+func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Object, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Get source bucket
+	srcBkt, ok := b.buckets[srcBucket]
+	if !ok {
+		return nil, fmt.Errorf("source bucket not found")
+	}
+
+	// Get source object
+	srcObj, ok := srcBkt.Objects[srcKey]
+	if !ok {
+		return nil, fmt.Errorf("source object not found")
+	}
+
+	// Get destination bucket
+	dstBkt, ok := b.buckets[dstBucket]
+	if !ok {
+		return nil, fmt.Errorf("destination bucket not found")
+	}
+
+	// Create copied object
+	copiedData := make([]byte, len(srcObj.Data))
+	copy(copiedData, srcObj.Data)
+
+	obj := &Object{
+		Key:           dstKey,
+		LastModified:  time.Now().UTC(),
+		ETag:          srcObj.ETag,
+		Size:          srcObj.Size,
+		ContentType:   srcObj.ContentType,
+		Data:          copiedData,
+		ChecksumCRC32: srcObj.ChecksumCRC32,
+	}
+
+	dstBkt.Objects[dstKey] = obj
+	return obj, nil
+}
+
 func (b *Backend) ListObjects(bucketName string, prefix string) ([]*Object, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
