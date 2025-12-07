@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -208,4 +210,111 @@ func (b *Backend) ListObjects(bucketName string, prefix string) ([]*Object, bool
 		}
 	}
 	return result, true
+}
+
+// ListObjectsV2Result holds the result of ListObjectsV2
+type ListObjectsV2Result struct {
+	Objects        []*Object
+	CommonPrefixes []string
+	IsTruncated    bool
+	KeyCount       int
+}
+
+// ListObjectsV2 lists objects in a bucket with support for prefix, delimiter, and max-keys
+func (b *Backend) ListObjectsV2(
+	bucketName, prefix, delimiter string,
+	maxKeys int,
+) (*ListObjectsV2Result, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return nil, fmt.Errorf("bucket not found")
+	}
+
+	// Collect all keys and sort them
+	keys := make([]string, 0, len(bucket.Objects))
+	for key := range bucket.Objects {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := &ListObjectsV2Result{}
+	commonPrefixSet := make(map[string]struct{})
+
+	for _, key := range keys {
+		obj := bucket.Objects[key]
+
+		// Check prefix match
+		if prefix != "" && !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		// Handle delimiter
+		if delimiter != "" {
+			// Find delimiter after prefix
+			afterPrefix := key[len(prefix):]
+			delimIdx := strings.Index(afterPrefix, delimiter)
+			if delimIdx >= 0 {
+				// This key has a delimiter after the prefix, add to CommonPrefixes
+				commonPrefix := prefix + afterPrefix[:delimIdx+len(delimiter)]
+				commonPrefixSet[commonPrefix] = struct{}{}
+				continue
+			}
+		}
+
+		// Add to Contents
+		result.Objects = append(result.Objects, obj)
+	}
+
+	// Convert CommonPrefixes set to sorted slice
+	commonPrefixes := make([]string, 0, len(commonPrefixSet))
+	for cp := range commonPrefixSet {
+		commonPrefixes = append(commonPrefixes, cp)
+	}
+	sort.Strings(commonPrefixes)
+
+	// Merge objects and common prefixes in lexicographical order, then apply max-keys
+	// This is required by S3 API: both objects and common prefixes count against MaxKeys
+	// and should be returned in lexicographical order
+	type listEntry struct {
+		key            string
+		isCommonPrefix bool
+		object         *Object
+	}
+
+	entries := make([]listEntry, 0, len(result.Objects)+len(commonPrefixes))
+	for _, obj := range result.Objects {
+		entries = append(entries, listEntry{key: obj.Key, isCommonPrefix: false, object: obj})
+	}
+	for _, cp := range commonPrefixes {
+		entries = append(entries, listEntry{key: cp, isCommonPrefix: true})
+	}
+
+	// Sort all entries lexicographically
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].key < entries[j].key
+	})
+
+	// Apply max-keys limit
+	totalCount := len(entries)
+	if maxKeys >= 0 && totalCount > maxKeys {
+		result.IsTruncated = true
+		entries = entries[:maxKeys]
+	}
+
+	// Separate back into objects and common prefixes
+	result.Objects = nil
+	result.CommonPrefixes = nil
+	for _, entry := range entries {
+		if entry.isCommonPrefix {
+			result.CommonPrefixes = append(result.CommonPrefixes, entry.key)
+		} else {
+			result.Objects = append(result.Objects, entry.object)
+		}
+	}
+
+	result.KeyCount = len(result.Objects) + len(result.CommonPrefixes)
+	return result, nil
 }

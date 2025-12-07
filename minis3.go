@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -136,7 +137,7 @@ func extractBucketAndKey(path string) (string, string) {
 }
 
 func (m *Minis3) handleService(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
+	if r.Method != http.MethodGet {
 		api.WriteError(
 			w,
 			http.StatusMethodNotAllowed,
@@ -165,7 +166,19 @@ func (m *Minis3) handleService(w http.ResponseWriter, r *http.Request) {
 
 func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName string) {
 	switch r.Method {
-	case "POST":
+	case http.MethodGet:
+		if r.URL.Query().Get("list-type") == "2" {
+			m.handleListObjectsV2(w, r, bucketName)
+			return
+		}
+		// Fallback for ListObjects (v1) - not implemented yet
+		api.WriteError(
+			w,
+			http.StatusNotImplemented,
+			"NotImplemented",
+			"ListObjects v1 is not implemented. Use list-type=2 for ListObjectsV2.",
+		)
+	case http.MethodPost:
 		if r.URL.Query().Has("delete") {
 			m.handleDeleteObjects(w, r, bucketName)
 			return
@@ -176,7 +189,7 @@ func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName
 			"MethodNotAllowed",
 			"The specified method is not allowed against this resource.",
 		)
-	case "PUT":
+	case http.MethodPut:
 		err := m.backend.CreateBucket(bucketName)
 		if err != nil {
 			api.WriteError(w, http.StatusConflict, "BucketAlreadyExists", err.Error())
@@ -184,7 +197,7 @@ func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName
 		}
 		w.Header().Set("Location", "/"+bucketName)
 		w.WriteHeader(http.StatusOK) // S3 CreateBucket returns 200 OK
-	case "DELETE":
+	case http.MethodDelete:
 		err := m.backend.DeleteBucket(bucketName)
 		if err != nil {
 			api.WriteError(w, http.StatusConflict, "BucketNotEmpty", err.Error())
@@ -193,7 +206,7 @@ func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-	case "HEAD":
+	case http.MethodHead:
 		_, ok := m.backend.GetBucket(bucketName)
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
@@ -212,7 +225,7 @@ func (m *Minis3) handleBucket(w http.ResponseWriter, r *http.Request, bucketName
 
 func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName, key string) {
 	switch r.Method {
-	case "PUT":
+	case http.MethodPut:
 		// Check for CopyObject (x-amz-copy-source header)
 		copySource := r.Header.Get("x-amz-copy-source")
 		if copySource != "" {
@@ -241,7 +254,7 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 		w.Header().Set("ETag", obj.ETag)
 		w.WriteHeader(http.StatusOK)
 
-	case "GET":
+	case http.MethodGet:
 		obj, ok := m.backend.GetObject(bucketName, key)
 		if !ok {
 			api.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
@@ -255,11 +268,11 @@ func (m *Minis3) handleObject(w http.ResponseWriter, r *http.Request, bucketName
 		// Ignore write error because we can't do anything about it if the connection is broken.
 		_, _ = w.Write(obj.Data)
 
-	case "DELETE":
+	case http.MethodDelete:
 		m.backend.DeleteObject(bucketName, key)
 		w.WriteHeader(http.StatusNoContent)
 
-	case "HEAD":
+	case http.MethodHead:
 		obj, ok := m.backend.GetObject(bucketName, key)
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
@@ -409,6 +422,68 @@ func (m *Minis3) handleCopyObject(
 	resp := api.CopyObjectResult{
 		ETag:         obj.ETag,
 		LastModified: obj.LastModified.Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+func (m *Minis3) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucketName string) {
+	query := r.URL.Query()
+	prefix := query.Get("prefix")
+	delimiter := query.Get("delimiter")
+
+	// Parse max-keys with default of 1000
+	maxKeys := 1000
+	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
+		if parsed, err := strconv.Atoi(maxKeysStr); err == nil && parsed >= 0 {
+			maxKeys = parsed
+		}
+	}
+
+	result, err := m.backend.ListObjectsV2(bucketName, prefix, delimiter, maxKeys)
+	if err != nil {
+		api.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+		return
+	}
+
+	resp := api.ListBucketResult{
+		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
+		Name:        bucketName,
+		Prefix:      prefix,
+		Delimiter:   delimiter,
+		MaxKeys:     maxKeys,
+		KeyCount:    result.KeyCount,
+		IsTruncated: result.IsTruncated,
+	}
+
+	// Add Contents
+	for _, obj := range result.Objects {
+		resp.Contents = append(resp.Contents, api.ObjectInfo{
+			Key:          obj.Key,
+			LastModified: obj.LastModified.Format(time.RFC3339),
+			ETag:         obj.ETag,
+			Size:         obj.Size,
+			StorageClass: "STANDARD",
+		})
+	}
+
+	// Add CommonPrefixes
+	for _, cp := range result.CommonPrefixes {
+		resp.CommonPrefixes = append(resp.CommonPrefixes, api.CommonPrefix{
+			Prefix: cp,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
