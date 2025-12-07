@@ -1,6 +1,13 @@
 name: Check
 on:
   push:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - ".golangci.yaml"
+      - "Taskfile.yaml"
+      - ".github/workflows/check.yaml"
 
 jobs:
   lint:
