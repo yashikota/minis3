@@ -31,7 +31,12 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, _ := xml.Marshal(resp)
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
 	_, _ = w.Write(output)
 }

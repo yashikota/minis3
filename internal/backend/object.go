@@ -45,28 +45,32 @@ func (b *Backend) PutObject(
 }
 
 // GetObject retrieves an object from a bucket.
-func (b *Backend) GetObject(bucketName, key string) (*Object, bool) {
+func (b *Backend) GetObject(bucketName, key string) (*Object, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	bucket, ok := b.buckets[bucketName]
 	if !ok {
-		return nil, false
+		return nil, ErrBucketNotFound
 	}
 	obj, ok := bucket.Objects[key]
-	return obj, ok
+	if !ok {
+		return nil, ErrObjectNotFound
+	}
+	return obj, nil
 }
 
 // DeleteObject removes an object from a bucket.
-func (b *Backend) DeleteObject(bucketName, key string) {
+func (b *Backend) DeleteObject(bucketName, key string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	bucket, ok := b.buckets[bucketName]
 	if !ok {
-		return
+		return ErrBucketNotFound
 	}
 	delete(bucket.Objects, key)
+	return nil
 }
 
 // CopyObject copies an object from source to destination.

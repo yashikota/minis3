@@ -2,11 +2,13 @@ package handler
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/yashikota/minis3/internal/api"
+	"github.com/yashikota/minis3/internal/backend"
 )
 
 // handleBucket handles bucket-level operations.
@@ -37,7 +39,11 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 	case http.MethodPut:
 		err := h.backend.CreateBucket(bucketName)
 		if err != nil {
-			api.WriteError(w, http.StatusConflict, "BucketAlreadyExists", err.Error())
+			if errors.Is(err, backend.ErrBucketAlreadyExists) {
+				api.WriteError(w, http.StatusConflict, "BucketAlreadyExists", err.Error())
+			} else {
+				api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			}
 			return
 		}
 		w.Header().Set("Location", "/"+bucketName)
@@ -45,7 +51,18 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 	case http.MethodDelete:
 		err := h.backend.DeleteBucket(bucketName)
 		if err != nil {
-			api.WriteError(w, http.StatusConflict, "BucketNotEmpty", err.Error())
+			if errors.Is(err, backend.ErrBucketNotEmpty) {
+				api.WriteError(w, http.StatusConflict, "BucketNotEmpty", err.Error())
+			} else if errors.Is(err, backend.ErrBucketNotFound) {
+				api.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchBucket",
+					"The specified bucket does not exist.",
+				)
+			} else {
+				api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			}
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

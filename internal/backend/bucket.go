@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -11,7 +10,7 @@ func (b *Backend) CreateBucket(name string) error {
 	defer b.mu.Unlock()
 
 	if _, exists := b.buckets[name]; exists {
-		return fmt.Errorf("bucket already exists")
+		return ErrBucketAlreadyExists
 	}
 
 	b.buckets[name] = &Bucket{
@@ -38,11 +37,11 @@ func (b *Backend) DeleteBucket(name string) error {
 
 	bucket, exists := b.buckets[name]
 	if !exists {
-		return fmt.Errorf("bucket not found")
+		return ErrBucketNotFound
 	}
 
 	if len(bucket.Objects) > 0 {
-		return fmt.Errorf("bucket not empty")
+		return ErrBucketNotEmpty
 	}
 
 	delete(b.buckets, name)

@@ -45,9 +45,23 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodGet:
-		obj, ok := h.backend.GetObject(bucketName, key)
-		if !ok {
-			api.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+		obj, err := h.backend.GetObject(bucketName, key)
+		if err != nil {
+			if errors.Is(err, backend.ErrBucketNotFound) {
+				api.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchBucket",
+					"The specified bucket does not exist.",
+				)
+			} else {
+				api.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchKey",
+					"The specified key does not exist.",
+				)
+			}
 			return
 		}
 		w.Header().Set("ETag", obj.ETag)
@@ -58,12 +72,23 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		_, _ = w.Write(obj.Data)
 
 	case http.MethodDelete:
-		h.backend.DeleteObject(bucketName, key)
+		err := h.backend.DeleteObject(bucketName, key)
+		if err != nil {
+			if errors.Is(err, backend.ErrBucketNotFound) {
+				api.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchBucket",
+					"The specified bucket does not exist.",
+				)
+				return
+			}
+		}
 		w.WriteHeader(http.StatusNoContent)
 
 	case http.MethodHead:
-		obj, ok := h.backend.GetObject(bucketName, key)
-		if !ok {
+		obj, err := h.backend.GetObject(bucketName, key)
+		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
