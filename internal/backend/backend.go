@@ -3,7 +3,6 @@ package backend
 import (
 	"crypto/md5"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -11,33 +10,10 @@ import (
 	"time"
 )
 
-// Sentinel errors for CopyObject
-var (
-	ErrSourceBucketNotFound      = errors.New("source bucket not found")
-	ErrDestinationBucketNotFound = errors.New("destination bucket not found")
-	ErrSourceObjectNotFound      = errors.New("source object not found")
-)
-
 // Backend holds the state of the S3 world.
 type Backend struct {
 	mu      sync.RWMutex
 	buckets map[string]*Bucket
-}
-
-type Bucket struct {
-	Name         string
-	CreationDate time.Time
-	Objects      map[string]*Object
-}
-
-type Object struct {
-	Key           string
-	LastModified  time.Time
-	ETag          string
-	Size          int64
-	ContentType   string
-	Data          []byte
-	ChecksumCRC32 string
 }
 
 func New() *Backend {
@@ -192,6 +168,28 @@ func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Obje
 
 	dstBkt.Objects[dstKey] = obj
 	return obj, nil
+}
+
+func (b *Backend) DeleteObjects(bucketName string, keys []string) ([]DeleteObjectResult, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return nil, fmt.Errorf("bucket not found")
+	}
+
+	results := make([]DeleteObjectResult, 0, len(keys))
+	for _, key := range keys {
+		// S3 treats deleting non-existent objects as success
+		delete(bucket.Objects, key)
+		results = append(results, DeleteObjectResult{
+			Key:     key,
+			Deleted: true,
+		})
+	}
+
+	return results, nil
 }
 
 func (b *Backend) ListObjects(bucketName string, prefix string) ([]*Object, bool) {
