@@ -2,7 +2,10 @@ package backend
 
 import (
 	"crypto/md5"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"sync"
 	"time"
 )
@@ -20,12 +23,13 @@ type Bucket struct {
 }
 
 type Object struct {
-	Key          string
-	LastModified time.Time
-	ETag         string
-	Size         int64
-	ContentType  string
-	Data         []byte
+	Key           string
+	LastModified  time.Time
+	ETag          string
+	Size          int64
+	ContentType   string
+	Data          []byte
+	ChecksumCRC32 string
 }
 
 func New() *Backend {
@@ -100,13 +104,18 @@ func (b *Backend) PutObject(
 		return nil, fmt.Errorf("bucket not found")
 	}
 
+	checksum := crc32.ChecksumIEEE(data)
+	checksumBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(checksumBytes, checksum)
+
 	obj := &Object{
-		Key:          key,
-		LastModified: time.Now().UTC(),
-		ETag:         fmt.Sprintf("\"%x\"", md5.Sum(data)),
-		Size:         int64(len(data)),
-		ContentType:  contentType,
-		Data:         data,
+		Key:           key,
+		LastModified:  time.Now().UTC(),
+		ETag:          fmt.Sprintf("\"%x\"", md5.Sum(data)),
+		Size:          int64(len(data)),
+		ContentType:   contentType,
+		Data:          data,
+		ChecksumCRC32: base64.StdEncoding.EncodeToString(checksumBytes),
 	}
 
 	bucket.Objects[key] = obj
