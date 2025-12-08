@@ -3,6 +3,7 @@ package backend
 import (
 	"encoding/xml"
 	"errors"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -55,7 +56,11 @@ func WriteError(w http.ResponseWriter, code int, s3Code, message string) {
 		Code:    s3Code,
 		Message: message,
 	}
-	output, _ := xml.Marshal(resp)
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		log.Fatalln("Failed to marshal XML error response:", err)
+		return
+	}
 	// Ignore write errors as we cannot recover from them here.
 	_, _ = w.Write([]byte(xml.Header))
 	_, _ = w.Write(output)
