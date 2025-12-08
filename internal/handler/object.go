@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/yashikota/minis3/internal/api"
 	"github.com/yashikota/minis3/internal/backend"
 )
 
@@ -25,7 +24,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		defer func() { _ = r.Body.Close() }()
@@ -33,7 +32,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		contentType := r.Header.Get("Content-Type")
 		obj, err := h.backend.PutObject(bucketName, key, data, contentType)
 		if err != nil {
-			api.WriteError(
+			backend.WriteError(
 				w,
 				http.StatusNotFound,
 				"NoSuchBucket",
@@ -48,14 +47,14 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		obj, err := h.backend.GetObject(bucketName, key)
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketNotFound) {
-				api.WriteError(
+				backend.WriteError(
 					w,
 					http.StatusNotFound,
 					"NoSuchBucket",
 					"The specified bucket does not exist.",
 				)
 			} else {
-				api.WriteError(
+				backend.WriteError(
 					w,
 					http.StatusNotFound,
 					"NoSuchKey",
@@ -75,7 +74,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		err := h.backend.DeleteObject(bucketName, key)
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketNotFound) {
-				api.WriteError(
+				backend.WriteError(
 					w,
 					http.StatusNotFound,
 					"NoSuchBucket",
@@ -100,7 +99,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		w.WriteHeader(http.StatusOK)
 
 	default:
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusMethodNotAllowed,
 			"MethodNotAllowed",
@@ -113,14 +112,19 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucketName string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		api.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Failed to read request body")
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body",
+		)
 		return
 	}
 	defer func() { _ = r.Body.Close() }()
 
-	var deleteReq api.DeleteRequest
+	var deleteReq backend.DeleteRequest
 	if err := xml.Unmarshal(body, &deleteReq); err != nil {
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusBadRequest,
 			"MalformedXML",
@@ -130,7 +134,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	if len(deleteReq.Objects) == 0 {
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusBadRequest,
 			"MalformedXML",
@@ -146,7 +150,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 
 	results, err := h.backend.DeleteObjects(bucketName, keys)
 	if err != nil {
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusNotFound,
 			"NoSuchBucket",
@@ -155,13 +159,13 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		return
 	}
 
-	resp := api.DeleteResult{
+	resp := backend.DeleteResult{
 		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
 	}
 
 	for _, result := range results {
 		if !deleteReq.Quiet {
-			resp.Deleted = append(resp.Deleted, api.DeletedObject{
+			resp.Deleted = append(resp.Deleted, backend.DeletedObject{
 				Key: result.Key,
 			})
 		}
@@ -171,7 +175,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(resp)
 	if err != nil {
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusInternalServerError,
 			"InternalError",
@@ -190,7 +194,7 @@ func (h *Handler) handleCopyObject(
 ) {
 	decodedCopySource, err := url.PathUnescape(copySource)
 	if err != nil {
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusBadRequest,
 			"InvalidArgument",
@@ -201,7 +205,7 @@ func (h *Handler) handleCopyObject(
 
 	srcBucket, srcKey := extractBucketAndKey(decodedCopySource)
 	if srcBucket == "" || srcKey == "" {
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusBadRequest,
 			"InvalidArgument",
@@ -214,21 +218,21 @@ func (h *Handler) handleCopyObject(
 	if err != nil {
 		if errors.Is(err, backend.ErrSourceBucketNotFound) ||
 			errors.Is(err, backend.ErrDestinationBucketNotFound) {
-			api.WriteError(
+			backend.WriteError(
 				w,
 				http.StatusNotFound,
 				"NoSuchBucket",
 				"The specified bucket does not exist.",
 			)
 		} else if errors.Is(err, backend.ErrSourceObjectNotFound) {
-			api.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+			backend.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
 		} else {
-			api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
 
-	resp := api.CopyObjectResult{
+	resp := backend.CopyObjectResult{
 		ETag:         obj.ETag,
 		LastModified: obj.LastModified.Format(time.RFC3339),
 	}
@@ -237,7 +241,7 @@ func (h *Handler) handleCopyObject(
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(resp)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	_, _ = w.Write(output)

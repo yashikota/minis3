@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// CreateBucket creates a new bucket.
+// CreateBucket creates a new bucket
 func (b *Backend) CreateBucket(name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -21,7 +21,7 @@ func (b *Backend) CreateBucket(name string) error {
 	return nil
 }
 
-// GetBucket retrieves a bucket by name.
+// GetBucket retrieves a bucket by name
 func (b *Backend) GetBucket(name string) (*Bucket, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -30,7 +30,7 @@ func (b *Backend) GetBucket(name string) (*Bucket, bool) {
 	return val, ok
 }
 
-// DeleteBucket deletes a bucket if it is empty.
+// DeleteBucket deletes a bucket if it is empty
 func (b *Backend) DeleteBucket(name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -1,7 +1,8 @@
 package minis3
 
 import (
-	"fmt"
+	"errors"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -43,7 +44,7 @@ func (m *Minis3) Start() error {
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
+		return errors.New("failed to listen: " + err.Error())
 	}
 	m.listener = l
 
@@ -53,7 +54,7 @@ func (m *Minis3) Start() error {
 
 	go func() {
 		if err := m.server.Serve(l); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("minis3 server error: %v\n", err)
+			log.Fatalln("minis3 server error:", err)
 		}
 	}()
 
