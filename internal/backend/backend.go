@@ -14,12 +14,14 @@ type Backend struct {
 	buckets map[string]*Bucket
 }
 
+// Bucket represents an S3 bucket containing objects and metadata
 type Bucket struct {
 	Name         string
 	CreationDate time.Time
 	Objects      map[string]*Object
 }
 
+// Object represents an S3 object with its metadata and content
 type Object struct {
 	Key           string
 	LastModified  time.Time
