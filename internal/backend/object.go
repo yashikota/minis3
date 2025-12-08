@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// PutObject stores an object in a bucket.
+// PutObject stores an object in a bucket
 func (b *Backend) PutObject(
 	bucketName, key string,
 	data []byte,
@@ -22,7 +22,7 @@ func (b *Backend) PutObject(
 
 	bucket, ok := b.buckets[bucketName]
 	if !ok {
-		return nil, fmt.Errorf("bucket not found")
+		return nil, ErrBucketNotFound
 	}
 
 	md5Hash := md5.New()
@@ -44,7 +44,7 @@ func (b *Backend) PutObject(
 	return obj, nil
 }
 
-// GetObject retrieves an object from a bucket.
+// GetObject retrieves an object from a bucket
 func (b *Backend) GetObject(bucketName, key string) (*Object, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -60,7 +60,7 @@ func (b *Backend) GetObject(bucketName, key string) (*Object, error) {
 	return obj, nil
 }
 
-// DeleteObject removes an object from a bucket.
+// DeleteObject removes an object from a bucket
 func (b *Backend) DeleteObject(bucketName, key string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -73,7 +73,7 @@ func (b *Backend) DeleteObject(bucketName, key string) error {
 	return nil
 }
 
-// CopyObject copies an object from source to destination.
+// CopyObject copies an object from source to destination
 func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Object, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -110,14 +110,14 @@ func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Obje
 	return obj, nil
 }
 
-// DeleteObjects deletes multiple objects from a bucket.
+// DeleteObjects deletes multiple objects from a bucket
 func (b *Backend) DeleteObjects(bucketName string, keys []string) ([]DeleteObjectResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	bucket, ok := b.buckets[bucketName]
 	if !ok {
-		return nil, fmt.Errorf("bucket not found")
+		return nil, ErrBucketNotFound
 	}
 
 	results := make([]DeleteObjectResult, 0, len(keys))
@@ -132,8 +132,8 @@ func (b *Backend) DeleteObjects(bucketName string, keys []string) ([]DeleteObjec
 	return results, nil
 }
 
-// ListObjects lists objects with an optional prefix (v1 style).
-func (b *Backend) ListObjects(bucketName string, prefix string) ([]*Object, bool) {
+// ListObjectsV1 lists objects with an optional prefix
+func (b *Backend) ListObjectsV1(bucketName string, prefix string) ([]*Object, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -161,7 +161,7 @@ func (b *Backend) ListObjectsV2(
 
 	bucket, ok := b.buckets[bucketName]
 	if !ok {
-		return nil, fmt.Errorf("bucket not found")
+		return nil, ErrBucketNotFound
 	}
 
 	keys := make([]string, 0, len(bucket.Objects))

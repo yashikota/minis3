@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yashikota/minis3/internal/api"
+	"github.com/yashikota/minis3/internal/backend"
 )
 
 // handleService handles service-level operations (ListBuckets).
 func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusMethodNotAllowed,
 			"MethodNotAllowed",
@@ -21,11 +21,11 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	list := h.backend.ListBuckets()
-	resp := api.ListAllMyBucketsResult{
-		Owner: &api.Owner{ID: "minis3", DisplayName: "minis3"},
+	resp := backend.ListAllMyBucketsResult{
+		Owner: &backend.Owner{ID: "minis3", DisplayName: "minis3"},
 	}
 	for _, b := range list {
-		resp.Buckets = append(resp.Buckets, api.BucketInfo{
+		resp.Buckets = append(resp.Buckets, backend.BucketInfo{
 			Name:         b.Name,
 			CreationDate: b.CreationDate.Format(time.RFC3339),
 		})
@@ -35,7 +35,7 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(resp)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	_, _ = w.Write(output)

@@ -1,11 +1,9 @@
-package api
+package backend
 
 import (
 	"encoding/xml"
-	"net/http"
 )
 
-// XML structs for S3 responses
 type ListAllMyBucketsResult struct {
 	XMLName xml.Name     `xml:"ListAllMyBucketsResult"`
 	Owner   *Owner       `xml:"Owner"`
@@ -22,27 +20,23 @@ type BucketInfo struct {
 	CreationDate string `xml:"CreationDate"`
 }
 
-// CopyObjectResult is the response for CopyObject
 type CopyObjectResult struct {
 	XMLName      xml.Name `xml:"CopyObjectResult"`
 	ETag         string   `xml:"ETag"`
 	LastModified string   `xml:"LastModified"`
 }
 
-// DeleteRequest is the request body for DeleteObjects
 type DeleteRequest struct {
 	XMLName xml.Name           `xml:"Delete"`
 	Objects []ObjectIdentifier `xml:"Object"`
 	Quiet   bool               `xml:"Quiet"`
 }
 
-// ObjectIdentifier identifies an object to delete
 type ObjectIdentifier struct {
 	Key       string `xml:"Key"`
 	VersionId string `xml:"VersionId,omitempty"`
 }
 
-// DeleteResult is the response for DeleteObjects
 type DeleteResult struct {
 	XMLName xml.Name        `xml:"DeleteResult"`
 	Xmlns   string          `xml:"xmlns,attr,omitempty"`
@@ -50,7 +44,6 @@ type DeleteResult struct {
 	Errors  []DeleteError   `xml:"Error,omitempty"`
 }
 
-// DeletedObject represents a successfully deleted object
 type DeletedObject struct {
 	Key                   string `xml:"Key"`
 	VersionId             string `xml:"VersionId,omitempty"`
@@ -58,7 +51,6 @@ type DeletedObject struct {
 	DeleteMarkerVersionId string `xml:"DeleteMarkerVersionId,omitempty"`
 }
 
-// DeleteError represents a failed delete operation
 type DeleteError struct {
 	Key       string `xml:"Key"`
 	VersionId string `xml:"VersionId,omitempty"`
@@ -66,7 +58,6 @@ type DeleteError struct {
 	Message   string `xml:"Message"`
 }
 
-// ErrorResponse is the standard S3 error response
 type ErrorResponse struct {
 	XMLName   xml.Name `xml:"Error"`
 	Code      string   `xml:"Code"`
@@ -76,8 +67,13 @@ type ErrorResponse struct {
 	HostId    string   `xml:"HostId"` // optional but common
 }
 
-// ListBucketResult is the response for ListObjectsV2
-type ListBucketResult struct {
+type DeleteObjectResult struct {
+	Key     string
+	Deleted bool
+	Error   error
+}
+
+type ListBucketV2Result struct {
 	XMLName        xml.Name       `xml:"ListBucketResult"`
 	Xmlns          string         `xml:"xmlns,attr,omitempty"`
 	Name           string         `xml:"Name"`
@@ -90,7 +86,13 @@ type ListBucketResult struct {
 	CommonPrefixes []CommonPrefix `xml:"CommonPrefixes,omitempty"`
 }
 
-// ObjectInfo represents an object in ListObjectsV2 response
+type ListObjectsV2Result struct {
+	Objects        []*Object
+	CommonPrefixes []string
+	IsTruncated    bool
+	KeyCount       int
+}
+
 type ObjectInfo struct {
 	Key          string `xml:"Key"`
 	LastModified string `xml:"LastModified"`
@@ -99,20 +101,6 @@ type ObjectInfo struct {
 	StorageClass string `xml:"StorageClass"`
 }
 
-// CommonPrefix represents a common prefix in ListObjectsV2 response
 type CommonPrefix struct {
 	Prefix string `xml:"Prefix"`
-}
-
-func WriteError(w http.ResponseWriter, code int, s3Code, message string) {
-	w.WriteHeader(code)
-	// S3 errors are XML
-	resp := ErrorResponse{
-		Code:    s3Code,
-		Message: message,
-	}
-	output, _ := xml.Marshal(resp)
-	// Ignore write errors as we cannot recover from them here.
-	_, _ = w.Write([]byte(xml.Header))
-	_, _ = w.Write(output)
 }

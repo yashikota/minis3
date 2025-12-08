@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/yashikota/minis3/internal/api"
 	"github.com/yashikota/minis3/internal/backend"
 )
 
@@ -19,7 +18,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleListObjectsV2(w, r, bucketName)
 			return
 		}
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusNotImplemented,
 			"NotImplemented",
@@ -30,7 +29,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleDeleteObjects(w, r, bucketName)
 			return
 		}
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusMethodNotAllowed,
 			"MethodNotAllowed",
@@ -40,9 +39,9 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		err := h.backend.CreateBucket(bucketName)
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketAlreadyExists) {
-				api.WriteError(w, http.StatusConflict, "BucketAlreadyExists", err.Error())
+				backend.WriteError(w, http.StatusConflict, "BucketAlreadyExists", err.Error())
 			} else {
-				api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			}
 			return
 		}
@@ -52,16 +51,16 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		err := h.backend.DeleteBucket(bucketName)
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketNotEmpty) {
-				api.WriteError(w, http.StatusConflict, "BucketNotEmpty", err.Error())
+				backend.WriteError(w, http.StatusConflict, "BucketNotEmpty", err.Error())
 			} else if errors.Is(err, backend.ErrBucketNotFound) {
-				api.WriteError(
+				backend.WriteError(
 					w,
 					http.StatusNotFound,
 					"NoSuchBucket",
 					"The specified bucket does not exist.",
 				)
 			} else {
-				api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			}
 			return
 		}
@@ -74,7 +73,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		w.WriteHeader(http.StatusOK)
 	default:
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusMethodNotAllowed,
 			"MethodNotAllowed",
@@ -98,7 +97,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 
 	result, err := h.backend.ListObjectsV2(bucketName, prefix, delimiter, maxKeys)
 	if err != nil {
-		api.WriteError(
+		backend.WriteError(
 			w,
 			http.StatusNotFound,
 			"NoSuchBucket",
@@ -107,7 +106,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		return
 	}
 
-	resp := api.ListBucketResult{
+	resp := backend.ListBucketV2Result{
 		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
 		Name:        bucketName,
 		Prefix:      prefix,
@@ -118,7 +117,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	for _, obj := range result.Objects {
-		resp.Contents = append(resp.Contents, api.ObjectInfo{
+		resp.Contents = append(resp.Contents, backend.ObjectInfo{
 			Key:          obj.Key,
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
@@ -128,7 +127,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	for _, cp := range result.CommonPrefixes {
-		resp.CommonPrefixes = append(resp.CommonPrefixes, api.CommonPrefix{
+		resp.CommonPrefixes = append(resp.CommonPrefixes, backend.CommonPrefix{
 			Prefix: cp,
 		})
 	}
@@ -137,7 +136,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(resp)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	_, _ = w.Write(output)
