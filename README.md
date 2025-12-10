@@ -34,7 +34,7 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | DeleteObjects | ⚠️ | VersionId (per object), MFA, BypassGovernanceRetention, ExpectedBucketOwner, ChecksumAlgorithm |
 | CopyObject | ⚠️ | ACL, CacheControl, ChecksumAlgorithm, ContentDisposition, ContentEncoding, ContentLanguage, ContentType, CopySourceIfMatch, CopySourceIfModifiedSince, CopySourceIfNoneMatch, CopySourceIfUnmodifiedSince, Expires, GrantFullControl, GrantRead, GrantReadACP, GrantWriteACP, Metadata, MetadataDirective, TaggingDirective, ServerSideEncryption, StorageClass, WebsiteRedirectLocation, SSECustomerAlgorithm, SSECustomerKey, SSEKMSKeyId, CopySourceSSECustomerAlgorithm, CopySourceSSECustomerKey, Tagging, ObjectLockMode, ObjectLockRetainUntilDate, ObjectLockLegalHoldStatus |
 | HeadObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, VersionId, SSECustomerAlgorithm, SSECustomerKey, PartNumber, ChecksumMode |
-| ListObjects | ⌛ | |
+| ListObjects | ⚠️ | RequestPayer, ExpectedBucketOwner, OptionalObjectAttributes |
 | ListObjectsV2 | ⚠️ | ContinuationToken, StartAfter, FetchOwner, EncodingType, ExpectedBucketOwner, OptionalObjectAttributes |
 | ListObjectVersions | ⌛ | |
 | GetObjectAttributes | ⌛ | |
