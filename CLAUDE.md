@@ -44,4 +44,4 @@ Must use `UsePathStyle = true` in AWS SDK client options (virtual-hosted style n
 
 ## Supported S3 Operations
 
-ListBuckets, CreateBucket, DeleteBucket, HeadBucket, PutObject, GetObject, DeleteObject, HeadObject. CopyObject and ListObjectsV2 are in progress.
+ListBuckets, CreateBucket, DeleteBucket, HeadBucket, PutObject, GetObject, DeleteObject, HeadObject, CopyObject, DeleteObjects, ListObjects, ListObjectsV2.

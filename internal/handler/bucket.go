@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -18,12 +19,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleListObjectsV2(w, r, bucketName)
 			return
 		}
-		backend.WriteError(
-			w,
-			http.StatusNotImplemented,
-			"NotImplemented",
-			"ListObjects v1 is not implemented. Use list-type=2 for ListObjectsV2.",
-		)
+		h.handleListObjectsV1(w, r, bucketName)
 	case http.MethodPost:
 		if r.URL.Query().Has("delete") {
 			h.handleDeleteObjects(w, r, bucketName)
@@ -129,6 +125,81 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	for _, cp := range result.CommonPrefixes {
 		resp.CommonPrefixes = append(resp.CommonPrefixes, backend.CommonPrefix{
 			Prefix: cp,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handleListObjectsV1 handles ListObjects (v1) requests.
+func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bucketName string) {
+	query := r.URL.Query()
+	prefix := query.Get("prefix")
+	delimiter := query.Get("delimiter")
+	marker := query.Get("marker")
+	encodingType := query.Get("encoding-type")
+
+	maxKeys := 1000
+	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
+		if parsed, err := strconv.Atoi(maxKeysStr); err == nil && parsed >= 0 {
+			maxKeys = parsed
+		}
+	}
+
+	result, err := h.backend.ListObjectsV1(bucketName, prefix, delimiter, marker, maxKeys)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+		return
+	}
+
+	resp := backend.ListBucketV1Result{
+		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
+		Name:        bucketName,
+		Prefix:      prefix,
+		Marker:      marker,
+		Delimiter:   delimiter,
+		MaxKeys:     maxKeys,
+		IsTruncated: result.IsTruncated,
+		NextMarker:  result.NextMarker,
+	}
+
+	if encodingType == "url" {
+		resp.EncodingType = "url"
+	}
+
+	for _, obj := range result.Objects {
+		key := obj.Key
+		if encodingType == "url" {
+			key = url.PathEscape(obj.Key)
+		}
+		resp.Contents = append(resp.Contents, backend.ObjectInfo{
+			Key:          key,
+			LastModified: obj.LastModified.Format(time.RFC3339),
+			ETag:         obj.ETag,
+			Size:         obj.Size,
+			StorageClass: "STANDARD",
+		})
+	}
+
+	for _, cp := range result.CommonPrefixes {
+		cpValue := cp
+		if encodingType == "url" {
+			cpValue = url.PathEscape(cp)
+		}
+		resp.CommonPrefixes = append(resp.CommonPrefixes, backend.CommonPrefix{
+			Prefix: cpValue,
 		})
 	}
 

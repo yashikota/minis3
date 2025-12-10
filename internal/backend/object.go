@@ -132,23 +132,99 @@ func (b *Backend) DeleteObjects(bucketName string, keys []string) ([]DeleteObjec
 	return results, nil
 }
 
-// ListObjectsV1 lists objects with an optional prefix
-func (b *Backend) ListObjectsV1(bucketName string, prefix string) ([]*Object, bool) {
+// ListObjectsV1 lists objects with support for prefix, delimiter, marker, and max-keys.
+func (b *Backend) ListObjectsV1(
+	bucketName, prefix, delimiter, marker string,
+	maxKeys int,
+) (*ListObjectsV1Result, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	bucket, ok := b.buckets[bucketName]
 	if !ok {
-		return nil, false
+		return nil, ErrBucketNotFound
 	}
 
-	var result []*Object
-	for _, obj := range bucket.Objects {
-		if prefix == "" || len(obj.Key) >= len(prefix) && obj.Key[0:len(prefix)] == prefix {
-			result = append(result, obj)
+	keys := make([]string, 0, len(bucket.Objects))
+	for key := range bucket.Objects {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := &ListObjectsV1Result{}
+	commonPrefixSet := make(map[string]struct{})
+
+	for _, key := range keys {
+		obj := bucket.Objects[key]
+
+		// Skip keys that are <= marker (marker is exclusive)
+		if marker != "" && key <= marker {
+			continue
+		}
+
+		if prefix != "" && !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		if delimiter != "" {
+			afterPrefix := key[len(prefix):]
+			delimIdx := strings.Index(afterPrefix, delimiter)
+			if delimIdx >= 0 {
+				commonPrefix := prefix + afterPrefix[:delimIdx+len(delimiter)]
+				commonPrefixSet[commonPrefix] = struct{}{}
+				continue
+			}
+		}
+
+		result.Objects = append(result.Objects, obj)
+	}
+
+	commonPrefixes := make([]string, 0, len(commonPrefixSet))
+	for cp := range commonPrefixSet {
+		commonPrefixes = append(commonPrefixes, cp)
+	}
+	sort.Strings(commonPrefixes)
+
+	type listEntry struct {
+		key            string
+		isCommonPrefix bool
+		object         *Object
+	}
+
+	entries := make([]listEntry, 0, len(result.Objects)+len(commonPrefixes))
+	for _, obj := range result.Objects {
+		entries = append(entries, listEntry{key: obj.Key, isCommonPrefix: false, object: obj})
+	}
+	for _, cp := range commonPrefixes {
+		entries = append(entries, listEntry{key: cp, isCommonPrefix: true})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].key < entries[j].key
+	})
+
+	totalCount := len(entries)
+	if maxKeys >= 0 && totalCount > maxKeys {
+		result.IsTruncated = true
+		entries = entries[:maxKeys]
+		// Set NextMarker when delimiter is specified and response is truncated
+		if delimiter != "" && len(entries) > 0 {
+			lastEntry := entries[len(entries)-1]
+			result.NextMarker = lastEntry.key
 		}
 	}
-	return result, true
+
+	result.Objects = nil
+	result.CommonPrefixes = nil
+	for _, entry := range entries {
+		if entry.isCommonPrefix {
+			result.CommonPrefixes = append(result.CommonPrefixes, entry.key)
+		} else {
+			result.Objects = append(result.Objects, entry.object)
+		}
+	}
+
+	return result, nil
 }
 
 // ListObjectsV2 lists objects with support for prefix, delimiter, and max-keys.

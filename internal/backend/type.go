@@ -104,3 +104,25 @@ type ObjectInfo struct {
 type CommonPrefix struct {
 	Prefix string `xml:"Prefix"`
 }
+
+type ListBucketV1Result struct {
+	XMLName        xml.Name       `xml:"ListBucketResult"`
+	Xmlns          string         `xml:"xmlns,attr,omitempty"`
+	Name           string         `xml:"Name"`
+	Prefix         string         `xml:"Prefix"`
+	Marker         string         `xml:"Marker"`
+	Delimiter      string         `xml:"Delimiter,omitempty"`
+	MaxKeys        int            `xml:"MaxKeys"`
+	IsTruncated    bool           `xml:"IsTruncated"`
+	NextMarker     string         `xml:"NextMarker,omitempty"`
+	Contents       []ObjectInfo   `xml:"Contents,omitempty"`
+	CommonPrefixes []CommonPrefix `xml:"CommonPrefixes,omitempty"`
+	EncodingType   string         `xml:"EncodingType,omitempty"`
+}
+
+type ListObjectsV1Result struct {
+	Objects        []*Object
+	CommonPrefixes []string
+	IsTruncated    bool
+	NextMarker     string
+}
