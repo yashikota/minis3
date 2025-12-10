@@ -544,17 +544,19 @@ func TestListObjectsV1(t *testing.T) {
 
 	bucketName := "list-objects-v1-test"
 
+	// Define test objects first to derive cleanup keys from the map
+	testObjects := map[string]string{
+		"file1.txt":             "content1",
+		"file2.txt":             "content2",
+		"photos/2024/jan/a.jpg": "photo-a",
+		"photos/2024/jan/b.jpg": "photo-b",
+		"photos/2024/feb/c.jpg": "photo-c",
+		"docs/readme.md":        "readme",
+	}
+
 	// Cleanup
 	t.Cleanup(func() {
-		keys := []string{
-			"file1.txt",
-			"file2.txt",
-			"photos/2024/jan/a.jpg",
-			"photos/2024/jan/b.jpg",
-			"photos/2024/feb/c.jpg",
-			"docs/readme.md",
-		}
-		for _, key := range keys {
+		for key := range testObjects {
 			client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 				Bucket: aws.String(bucketName),
 				Key:    aws.String(key),
@@ -574,14 +576,6 @@ func TestListObjectsV1(t *testing.T) {
 	}
 
 	// 2. Put test objects
-	testObjects := map[string]string{
-		"file1.txt":             "content1",
-		"file2.txt":             "content2",
-		"photos/2024/jan/a.jpg": "photo-a",
-		"photos/2024/jan/b.jpg": "photo-b",
-		"photos/2024/feb/c.jpg": "photo-c",
-		"docs/readme.md":        "readme",
-	}
 
 	for key, content := range testObjects {
 		_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{

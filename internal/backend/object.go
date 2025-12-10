@@ -145,45 +145,11 @@ func (b *Backend) ListObjectsV1(
 		return nil, ErrBucketNotFound
 	}
 
-	keys := make([]string, 0, len(bucket.Objects))
+	allKeys := make([]string, 0, len(bucket.Objects))
 	for key := range bucket.Objects {
-		keys = append(keys, key)
+		allKeys = append(allKeys, key)
 	}
-	sort.Strings(keys)
-
-	result := &ListObjectsV1Result{}
-	commonPrefixSet := make(map[string]struct{})
-
-	for _, key := range keys {
-		obj := bucket.Objects[key]
-
-		// Skip keys that are <= marker (marker is exclusive)
-		if marker != "" && key <= marker {
-			continue
-		}
-
-		if prefix != "" && !strings.HasPrefix(key, prefix) {
-			continue
-		}
-
-		if delimiter != "" {
-			afterPrefix := key[len(prefix):]
-			delimIdx := strings.Index(afterPrefix, delimiter)
-			if delimIdx >= 0 {
-				commonPrefix := prefix + afterPrefix[:delimIdx+len(delimiter)]
-				commonPrefixSet[commonPrefix] = struct{}{}
-				continue
-			}
-		}
-
-		result.Objects = append(result.Objects, obj)
-	}
-
-	commonPrefixes := make([]string, 0, len(commonPrefixSet))
-	for cp := range commonPrefixSet {
-		commonPrefixes = append(commonPrefixes, cp)
-	}
-	sort.Strings(commonPrefixes)
+	sort.Strings(allKeys)
 
 	type listEntry struct {
 		key            string
@@ -191,11 +157,29 @@ func (b *Backend) ListObjectsV1(
 		object         *Object
 	}
 
-	entries := make([]listEntry, 0, len(result.Objects)+len(commonPrefixes))
-	for _, obj := range result.Objects {
-		entries = append(entries, listEntry{key: obj.Key, isCommonPrefix: false, object: obj})
+	var entries []listEntry
+	commonPrefixSet := make(map[string]struct{})
+
+	for _, key := range allKeys {
+		if marker != "" && key <= marker {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		if delimiter != "" {
+			subKey := key[len(prefix):]
+			if idx := strings.Index(subKey, delimiter); idx != -1 {
+				commonPrefix := prefix + subKey[:idx+len(delimiter)]
+				commonPrefixSet[commonPrefix] = struct{}{}
+				continue
+			}
+		}
+		entries = append(entries, listEntry{key: key, object: bucket.Objects[key]})
 	}
-	for _, cp := range commonPrefixes {
+
+	for cp := range commonPrefixSet {
 		entries = append(entries, listEntry{key: cp, isCommonPrefix: true})
 	}
 
@@ -203,19 +187,15 @@ func (b *Backend) ListObjectsV1(
 		return entries[i].key < entries[j].key
 	})
 
-	totalCount := len(entries)
-	if maxKeys >= 0 && totalCount > maxKeys {
+	result := &ListObjectsV1Result{}
+	if maxKeys >= 0 && len(entries) > maxKeys {
 		result.IsTruncated = true
-		entries = entries[:maxKeys]
-		// Set NextMarker when delimiter is specified and response is truncated
-		if delimiter != "" && len(entries) > 0 {
-			lastEntry := entries[len(entries)-1]
-			result.NextMarker = lastEntry.key
+		if delimiter != "" && maxKeys > 0 {
+			result.NextMarker = entries[maxKeys-1].key
 		}
+		entries = entries[:maxKeys]
 	}
 
-	result.Objects = nil
-	result.CommonPrefixes = nil
 	for _, entry := range entries {
 		if entry.isCommonPrefix {
 			result.CommonPrefixes = append(result.CommonPrefixes, entry.key)

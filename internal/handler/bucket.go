@@ -86,9 +86,17 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 
 	maxKeys := 1000
 	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
-		if parsed, err := strconv.Atoi(maxKeysStr); err == nil && parsed >= 0 {
-			maxKeys = parsed
+		parsed, err := strconv.Atoi(maxKeysStr)
+		if err != nil || parsed < 0 {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"max-keys must be a non-negative integer.",
+			)
+			return
 		}
+		maxKeys = parsed
 	}
 
 	result, err := h.backend.ListObjectsV2(bucketName, prefix, delimiter, maxKeys)
@@ -148,9 +156,17 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 
 	maxKeys := 1000
 	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
-		if parsed, err := strconv.Atoi(maxKeysStr); err == nil && parsed >= 0 {
-			maxKeys = parsed
+		parsed, err := strconv.Atoi(maxKeysStr)
+		if err != nil || parsed < 0 {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"max-keys must be a non-negative integer.",
+			)
+			return
 		}
+		maxKeys = parsed
 	}
 
 	result, err := h.backend.ListObjectsV1(bucketName, prefix, delimiter, marker, maxKeys)
