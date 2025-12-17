@@ -49,9 +49,14 @@ func TestValidateBucketName(t *testing.T) {
 		{"ip address", "192.168.1.1", true},
 		{"ip like", "10.0.0.1", true},
 
+		// Invalid: period adjacent to hyphen
+		{"period before hyphen", "my.-bucket", true},
+		{"hyphen before period", "my-.bucket", true},
+
 		// Invalid: prohibited prefixes
 		{"xn-- prefix", "xn--mybucket", true},
 		{"sthree- prefix", "sthree-mybucket", true},
+		{"sthree-accesspoint- prefix", "sthree-accesspoint-mybucket", true},
 		{"amzn-s3-demo- prefix", "amzn-s3-demo-bucket", true},
 
 		// Invalid: prohibited suffixes

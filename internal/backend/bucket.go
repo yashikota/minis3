@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -14,7 +15,7 @@ var (
 	// IP address pattern to reject
 	ipAddressRegex = regexp.MustCompile(`^(\d{1,3}\.){3}\d{1,3}$`)
 	// Prohibited prefixes
-	prohibitedPrefixes = []string{"xn--", "sthree-", "amzn-s3-demo-"}
+	prohibitedPrefixes = []string{"xn--", "sthree-", "sthree-accesspoint-", "amzn-s3-demo-"}
 	// Prohibited suffixes
 	prohibitedSuffixes = []string{"-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3"}
 )
@@ -23,35 +24,63 @@ var (
 func ValidateBucketName(name string) error {
 	// Length: 3-63 characters
 	if len(name) < 3 || len(name) > 63 {
-		return ErrInvalidBucketName
+		return fmt.Errorf(
+			"%w: bucket name must be between 3 and 63 characters long",
+			ErrInvalidBucketName,
+		)
 	}
 
 	// Must match pattern (lowercase, numbers, hyphens, periods)
 	if !bucketNameRegex.MatchString(name) {
-		return ErrInvalidBucketName
+		return fmt.Errorf(
+			"%w: bucket name can only contain lowercase letters, numbers, hyphens, and periods",
+			ErrInvalidBucketName,
+		)
 	}
 
 	// Must not contain consecutive periods
 	if strings.Contains(name, "..") {
-		return ErrInvalidBucketName
+		return fmt.Errorf(
+			"%w: bucket name must not contain consecutive periods",
+			ErrInvalidBucketName,
+		)
+	}
+
+	// Must not contain period adjacent to hyphen
+	if strings.Contains(name, ".-") || strings.Contains(name, "-.") {
+		return fmt.Errorf(
+			"%w: bucket name must not contain period adjacent to hyphen",
+			ErrInvalidBucketName,
+		)
 	}
 
 	// Must not be formatted as IP address
 	if ipAddressRegex.MatchString(name) {
-		return ErrInvalidBucketName
+		return fmt.Errorf(
+			"%w: bucket name must not be formatted as an IP address",
+			ErrInvalidBucketName,
+		)
 	}
 
 	// Check prohibited prefixes
 	for _, prefix := range prohibitedPrefixes {
 		if strings.HasPrefix(name, prefix) {
-			return ErrInvalidBucketName
+			return fmt.Errorf(
+				"%w: bucket name must not start with prohibited prefix '%s'",
+				ErrInvalidBucketName,
+				prefix,
+			)
 		}
 	}
 
 	// Check prohibited suffixes
 	for _, suffix := range prohibitedSuffixes {
 		if strings.HasSuffix(name, suffix) {
-			return ErrInvalidBucketName
+			return fmt.Errorf(
+				"%w: bucket name must not end with prohibited suffix '%s'",
+				ErrInvalidBucketName,
+				suffix,
+			)
 		}
 	}
 
