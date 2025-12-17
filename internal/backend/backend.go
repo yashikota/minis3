@@ -37,6 +37,7 @@ var (
 	ErrBucketNotFound            = errors.New("bucket not found")
 	ErrBucketNotEmpty            = errors.New("bucket not empty")
 	ErrBucketAlreadyExists       = errors.New("bucket already exists")
+	ErrInvalidBucketName         = errors.New("invalid bucket name")
 	ErrObjectNotFound            = errors.New("object not found")
 	ErrSourceBucketNotFound      = errors.New("source bucket not found")
 	ErrDestinationBucketNotFound = errors.New("destination bucket not found")
