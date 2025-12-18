@@ -36,6 +36,8 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketAlreadyExists) {
 				backend.WriteError(w, http.StatusConflict, "BucketAlreadyExists", err.Error())
+			} else if errors.Is(err, backend.ErrInvalidBucketName) {
+				backend.WriteError(w, http.StatusBadRequest, "InvalidBucketName", err.Error())
 			} else {
 				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			}
