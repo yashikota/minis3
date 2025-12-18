@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/yashikota/minis3"
 )
 
@@ -535,6 +537,301 @@ func TestListObjectsV2(t *testing.T) {
 		}
 		if resp.IsTruncated == nil || !*resp.IsTruncated {
 			t.Error("Expected IsTruncated to be true with max-keys=0")
+		}
+	})
+}
+
+func TestBucketOperations(t *testing.T) {
+	client := setupTestClient(t)
+
+	// 1. Test: Create bucket
+	t.Run("CreateBucket", func(t *testing.T) {
+		bucketName := "test-create-bucket"
+		t.Cleanup(func() {
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+	})
+
+	// 2. Test: Create duplicate bucket returns BucketAlreadyOwnedByYou
+	t.Run("CreateDuplicateBucket", func(t *testing.T) {
+		bucketName := "test-duplicate-bucket"
+		t.Cleanup(func() {
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		// Create first time
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("First CreateBucket failed: %v", err)
+		}
+
+		// Create second time - should get BucketAlreadyOwnedByYou error
+		_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err == nil {
+			t.Fatal("Expected error when creating duplicate bucket")
+		}
+		// Check error type using SDK typed error
+		var baoby *types.BucketAlreadyOwnedByYou
+		if !errors.As(err, &baoby) {
+			t.Errorf("Expected BucketAlreadyOwnedByYou error, got: %v", err)
+		}
+	})
+
+	// 3. Test: HeadBucket returns correct headers
+	t.Run("HeadBucket", func(t *testing.T) {
+		bucketName := "test-head-bucket"
+		t.Cleanup(func() {
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+
+		resp, err := client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("HeadBucket failed: %v", err)
+		}
+
+		// Check BucketRegion is returned
+		if resp.BucketRegion == nil || *resp.BucketRegion != "us-east-1" {
+			t.Errorf("Expected BucketRegion us-east-1, got %v", resp.BucketRegion)
+		}
+
+		// AccessPointAlias should be false for regular buckets
+		if resp.AccessPointAlias == nil || *resp.AccessPointAlias {
+			t.Errorf("Expected AccessPointAlias false, got %v", resp.AccessPointAlias)
+		}
+	})
+
+	// 4. Test: HeadBucket for non-existent bucket
+	t.Run("HeadNonExistentBucket", func(t *testing.T) {
+		_, err := client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
+			Bucket: aws.String("non-existent-bucket"),
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-existent bucket")
+		}
+	})
+
+	// 5. Test: DeleteBucket non-empty
+	t.Run("DeleteNonEmptyBucket", func(t *testing.T) {
+		bucketName := "test-delete-nonempty"
+		objectKey := "test.txt"
+		t.Cleanup(func() {
+			client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(objectKey),
+			})
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+
+		_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(objectKey),
+			Body:   strings.NewReader("content"),
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+
+		// Try to delete non-empty bucket
+		_, err = client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err == nil {
+			t.Fatal("Expected error when deleting non-empty bucket")
+		}
+		// Check error type using smithy.APIError
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "BucketNotEmpty" {
+			t.Errorf("Expected BucketNotEmpty error, got: %v", err)
+		}
+	})
+
+	// 6. Test: ListBuckets with pagination
+	t.Run("ListBucketsWithPagination", func(t *testing.T) {
+		buckets := []string{"page-aa", "page-ab", "page-ba", "page-bb", "page-ca"}
+		t.Cleanup(func() {
+			for _, name := range buckets {
+				client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+					Bucket: aws.String(name),
+				})
+			}
+		})
+
+		for _, name := range buckets {
+			_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+				Bucket: aws.String(name),
+			})
+			if err != nil {
+				t.Fatalf("CreateBucket failed for %s: %v", name, err)
+			}
+		}
+
+		// First page: get first 2 buckets with prefix "page-"
+		resp1, err := client.ListBuckets(context.TODO(), &s3.ListBucketsInput{
+			Prefix:     aws.String("page-"),
+			MaxBuckets: aws.Int32(2),
+		})
+		if err != nil {
+			t.Fatalf("ListBuckets (page 1) failed: %v", err)
+		}
+
+		if len(resp1.Buckets) != 2 {
+			t.Errorf("Expected 2 buckets in first page, got %d", len(resp1.Buckets))
+		}
+
+		// Verify first page is truncated
+		if resp1.ContinuationToken == nil || *resp1.ContinuationToken == "" {
+			t.Error("Expected ContinuationToken for truncated response")
+		}
+
+		// Second page: use continuation token
+		resp2, err := client.ListBuckets(context.TODO(), &s3.ListBucketsInput{
+			Prefix:            aws.String("page-"),
+			MaxBuckets:        aws.Int32(2),
+			ContinuationToken: resp1.ContinuationToken,
+		})
+		if err != nil {
+			t.Fatalf("ListBuckets (page 2) failed: %v", err)
+		}
+
+		if len(resp2.Buckets) != 2 {
+			t.Errorf("Expected 2 buckets in second page, got %d", len(resp2.Buckets))
+		}
+
+		// Verify no overlap between pages
+		if len(resp1.Buckets) > 0 && len(resp2.Buckets) > 0 {
+			if *resp1.Buckets[len(resp1.Buckets)-1].Name >= *resp2.Buckets[0].Name {
+				t.Error("Expected second page buckets to come after first page")
+			}
+		}
+
+		// Third page: get remaining bucket
+		resp3, err := client.ListBuckets(context.TODO(), &s3.ListBucketsInput{
+			Prefix:            aws.String("page-"),
+			MaxBuckets:        aws.Int32(2),
+			ContinuationToken: resp2.ContinuationToken,
+		})
+		if err != nil {
+			t.Fatalf("ListBuckets (page 3) failed: %v", err)
+		}
+
+		if len(resp3.Buckets) != 1 {
+			t.Errorf("Expected 1 bucket in third page, got %d", len(resp3.Buckets))
+		}
+
+		// Total should be 5
+		total := len(resp1.Buckets) + len(resp2.Buckets) + len(resp3.Buckets)
+		if total != 5 {
+			t.Errorf("Expected 5 total buckets across all pages, got %d", total)
+		}
+
+		// Verify owner is set
+		if resp1.Owner == nil || resp1.Owner.ID == nil {
+			t.Error("Expected Owner with ID")
+		}
+	})
+
+	// 7. Test: CreateBucket with LocationConstraint
+	t.Run("CreateBucketWithLocationConstraint", func(t *testing.T) {
+		bucketName := "test-location-constraint"
+		t.Cleanup(func() {
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		// Create bucket with LocationConstraint (should be accepted but ignored in mock)
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+			CreateBucketConfiguration: &types.CreateBucketConfiguration{
+				LocationConstraint: types.BucketLocationConstraintApNortheast1,
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket with LocationConstraint failed: %v", err)
+		}
+
+		// Verify bucket was created
+		_, err = client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("HeadBucket failed: %v", err)
+		}
+	})
+
+	// 8. Test: ListBuckets with prefix filter
+	t.Run("ListBucketsWithPrefix", func(t *testing.T) {
+		buckets := []string{"prefix-test-a", "prefix-test-b", "other-bucket"}
+		t.Cleanup(func() {
+			for _, name := range buckets {
+				client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+					Bucket: aws.String(name),
+				})
+			}
+		})
+
+		for _, name := range buckets {
+			_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+				Bucket: aws.String(name),
+			})
+			if err != nil {
+				t.Fatalf("CreateBucket failed for %s: %v", name, err)
+			}
+		}
+
+		// List with prefix filter using Prefix field
+		resp, err := client.ListBuckets(context.TODO(), &s3.ListBucketsInput{
+			Prefix: aws.String("prefix-test"),
+		})
+		if err != nil {
+			t.Fatalf("ListBuckets with prefix failed: %v", err)
+		}
+
+		// Should have exactly 2 buckets with prefix "prefix-test"
+		if len(resp.Buckets) != 2 {
+			t.Errorf("Expected 2 buckets with prefix 'prefix-test', got %d", len(resp.Buckets))
+		}
+
+		// Verify all returned buckets have the correct prefix
+		for _, b := range resp.Buckets {
+			if !strings.HasPrefix(*b.Name, "prefix-test") {
+				t.Errorf("Expected bucket name to start with 'prefix-test', got %s", *b.Name)
+			}
 		}
 	})
 }

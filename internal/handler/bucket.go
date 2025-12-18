@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/xml"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -32,9 +33,46 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			"The specified method is not allowed against this resource.",
 		)
 	case http.MethodPut:
+		// Parse CreateBucketConfiguration from request body if present
+		if r.Body != nil && r.ContentLength > 0 {
+			defer func() { _ = r.Body.Close() }()
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidRequest",
+					"Failed to read request body.",
+				)
+				return
+			}
+
+			if len(body) > 0 {
+				var config backend.CreateBucketConfiguration
+				if err := xml.Unmarshal(body, &config); err != nil {
+					backend.WriteError(
+						w,
+						http.StatusBadRequest,
+						"MalformedXML",
+						"The XML you provided was not well-formed or did not validate against our published schema.",
+					)
+					return
+				}
+				// LocationConstraint is accepted but ignored (single-region mock)
+			}
+		}
+
 		err := h.backend.CreateBucket(bucketName)
 		if err != nil {
-			if errors.Is(err, backend.ErrBucketAlreadyExists) {
+			if errors.Is(err, backend.ErrBucketAlreadyOwnedByYou) {
+				// S3 returns 409 BucketAlreadyOwnedByYou when the bucket exists and is owned by you
+				backend.WriteError(
+					w,
+					http.StatusConflict,
+					"BucketAlreadyOwnedByYou",
+					"Your previous request to create the named bucket succeeded and you already own it.",
+				)
+			} else if errors.Is(err, backend.ErrBucketAlreadyExists) {
 				backend.WriteError(w, http.StatusConflict, "BucketAlreadyExists", err.Error())
 			} else if errors.Is(err, backend.ErrInvalidBucketName) {
 				backend.WriteError(w, http.StatusBadRequest, "InvalidBucketName", err.Error())
@@ -66,9 +104,14 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 	case http.MethodHead:
 		_, ok := h.backend.GetBucket(bucketName)
 		if !ok {
+			// S3 returns x-amz-bucket-region header even on 404
+			w.Header().Set("x-amz-bucket-region", "us-east-1")
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		// HeadBucket response headers per S3 API spec
+		w.Header().Set("x-amz-bucket-region", "us-east-1")
+		w.Header().Set("x-amz-access-point-alias", "false")
 		w.WriteHeader(http.StatusOK)
 	default:
 		backend.WriteError(
