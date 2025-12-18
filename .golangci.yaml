@@ -1,6 +1,9 @@
 version: "2"
 linters:
   default: standard
+  exclusions:
+    paths:
+      - integration/s3-test/s3-tests
 formatters:
   enable:
     - gci
@@ -9,3 +12,6 @@ formatters:
     - goimports
     - golines
     - swaggo
+  exclusions:
+    paths:
+      - integration/s3-test/s3-tests
