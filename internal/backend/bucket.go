@@ -3,6 +3,7 @@ package backend
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -167,19 +168,12 @@ func (b *Backend) ListBucketsWithOptions(opts ListBucketsOptions) *ListBucketsRe
 	// Sort by name for consistent ordering
 	sortBucketsByName(allBuckets)
 
-	// Apply continuation token (find start position)
+	// Apply continuation token (find start position using binary search)
 	startIdx := 0
 	if opts.ContinuationToken != "" {
-		for i, bkt := range allBuckets {
-			if bkt.Name > opts.ContinuationToken {
-				startIdx = i
-				break
-			}
-		}
-		// If token is beyond all buckets, return empty
-		if startIdx == 0 && len(allBuckets) > 0 && allBuckets[0].Name <= opts.ContinuationToken {
-			startIdx = len(allBuckets)
-		}
+		startIdx = sort.Search(len(allBuckets), func(i int) bool {
+			return allBuckets[i].Name > opts.ContinuationToken
+		})
 	}
 
 	// Apply max-buckets limit (default 10000 per S3 spec)
@@ -208,11 +202,7 @@ func (b *Backend) ListBucketsWithOptions(opts ListBucketsOptions) *ListBucketsRe
 
 // sortBucketsByName sorts buckets by name in ascending order
 func sortBucketsByName(buckets []*Bucket) {
-	for i := 0; i < len(buckets)-1; i++ {
-		for j := i + 1; j < len(buckets); j++ {
-			if buckets[i].Name > buckets[j].Name {
-				buckets[i], buckets[j] = buckets[j], buckets[i]
-			}
-		}
-	}
+	sort.Slice(buckets, func(i, j int) bool {
+		return buckets[i].Name < buckets[j].Name
+	})
 }
