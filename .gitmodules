@@ -1,0 +1,3 @@
+[submodule "integration/s3-test/s3-tests"]
+	path = integration/s3-test/s3-tests
+	url = https://github.com/ceph/s3-tests.git

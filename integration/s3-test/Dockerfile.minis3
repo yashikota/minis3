@@ -1,0 +1,12 @@
+FROM golang:1.25-alpine AS builder
+ENV GOTOOLCHAIN=auto
+WORKDIR /app
+COPY go.mod ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o minis3 ./integration/s3-test
+
+FROM gcr.io/distroless/static-debian13:nonroot
+COPY --from=builder /app/minis3 /usr/local/bin/
+EXPOSE 9000
+CMD ["minis3", "-addr", "0.0.0.0:9000"]
