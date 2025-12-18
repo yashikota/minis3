@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
 	"github.com/yashikota/minis3/internal/handler"
@@ -31,7 +33,14 @@ func main() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
-		_ = server.Close()
+
+		log.Println("Shutting down server gracefully...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Fatalf("Server shutdown failed: %v", err)
+		}
 	}()
 
 	log.Printf("minis3 listening on %s", *addr)

@@ -3,7 +3,8 @@ ENV GOTOOLCHAIN=auto
 WORKDIR /app
 COPY go.mod ./
 RUN go mod download
-COPY . .
+COPY internal ./internal
+COPY integration/s3-test/main.go ./integration/s3-test/
 RUN CGO_ENABLED=0 go build -o minis3 ./integration/s3-test
 
 FROM alpine:3.21
