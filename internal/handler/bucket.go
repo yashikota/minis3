@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/xml"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -32,6 +33,35 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			"The specified method is not allowed against this resource.",
 		)
 	case http.MethodPut:
+		// Parse CreateBucketConfiguration from request body if present
+		if r.Body != nil && r.ContentLength > 0 {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidRequest",
+					"Failed to read request body.",
+				)
+				return
+			}
+			defer func() { _ = r.Body.Close() }()
+
+			if len(body) > 0 {
+				var config backend.CreateBucketConfiguration
+				if err := xml.Unmarshal(body, &config); err != nil {
+					backend.WriteError(
+						w,
+						http.StatusBadRequest,
+						"MalformedXML",
+						"The XML you provided was not well-formed or did not validate against our published schema.",
+					)
+					return
+				}
+				// LocationConstraint is accepted but ignored (single-region mock)
+			}
+		}
+
 		err := h.backend.CreateBucket(bucketName)
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketAlreadyOwnedByYou) {

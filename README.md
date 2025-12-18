@@ -14,7 +14,7 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | Operation | Status | Unsupported Features |
 | --------- | ------ | -------------------- |
 | ListBuckets | ✅ | |
-| CreateBucket | ⚠️ | LocationConstraint, ACL, ObjectLockConfiguration, GrantFullControl, GrantRead, GrantReadACP, GrantWrite, GrantWriteACP, ObjectOwnership |
+| CreateBucket | ✅ | |
 | DeleteBucket | ✅ | |
 | HeadBucket | ✅ | |
 | GetBucketLocation | ⌛ | |

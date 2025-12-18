@@ -143,3 +143,9 @@ type ListObjectsV1Result struct {
 	IsTruncated    bool
 	NextMarker     string
 }
+
+// CreateBucketConfiguration represents the XML body for CreateBucket request.
+type CreateBucketConfiguration struct {
+	XMLName            xml.Name `xml:"CreateBucketConfiguration"`
+	LocationConstraint string   `xml:"LocationConstraint"`
+}

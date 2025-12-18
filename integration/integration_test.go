@@ -714,7 +714,36 @@ func TestBucketOperations(t *testing.T) {
 		}
 	})
 
-	// 7. Test: ListBuckets with prefix filter
+	// 7. Test: CreateBucket with LocationConstraint
+	t.Run("CreateBucketWithLocationConstraint", func(t *testing.T) {
+		bucketName := "test-location-constraint"
+		t.Cleanup(func() {
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		// Create bucket with LocationConstraint (should be accepted but ignored in mock)
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+			CreateBucketConfiguration: &types.CreateBucketConfiguration{
+				LocationConstraint: types.BucketLocationConstraintApNortheast1,
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket with LocationConstraint failed: %v", err)
+		}
+
+		// Verify bucket was created
+		_, err = client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("HeadBucket failed: %v", err)
+		}
+	})
+
+	// 8. Test: ListBuckets with prefix filter
 	t.Run("ListBucketsWithPrefix", func(t *testing.T) {
 		buckets := []string{"prefix-test-a", "prefix-test-b", "other-bucket"}
 		t.Cleanup(func() {
