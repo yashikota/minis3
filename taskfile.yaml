@@ -16,10 +16,16 @@ tasks:
     desc: "Test"
     cmds:
       - richgo test -v -shuffle=on -race ./...
-      - task: integration
+      - task: sdk
 
-  integration:
-    desc: "Integration test"
-    dir: integration
+  sdk:
+    desc: "Integration test (AWS SDK)"
+    dir: integration/sdk
     cmds:
       - richgo test -v -shuffle=on -race ./...
+
+  s3test:
+    desc: "Integration test (s3-tests)"
+    dir: integration/s3-test
+    cmds:
+      - docker compose up --build --abort-on-container-exit
