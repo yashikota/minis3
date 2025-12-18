@@ -29,15 +29,15 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 		ContinuationToken: query.Get("continuation-token"),
 	}
 
-	// Parse max-buckets (valid range: 1-10000)
+	// Parse max-buckets (valid range: 0-10000, 0 returns empty result with truncation)
 	if maxBucketsStr := query.Get("max-buckets"); maxBucketsStr != "" {
 		maxBuckets, err := strconv.Atoi(maxBucketsStr)
-		if err != nil || maxBuckets < 1 || maxBuckets > 10000 {
+		if err != nil || maxBuckets < 0 || maxBuckets > 10000 {
 			backend.WriteError(
 				w,
 				http.StatusBadRequest,
 				"InvalidArgument",
-				"max-buckets must be an integer between 1 and 10000.",
+				"max-buckets must be an integer between 0 and 10000.",
 			)
 			return
 		}
@@ -54,7 +54,6 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 		resp.Buckets = append(resp.Buckets, backend.BucketInfo{
 			Name:         b.Name,
 			CreationDate: b.CreationDate.Format(time.RFC3339),
-			BucketRegion: "us-east-1",
 		})
 	}
 

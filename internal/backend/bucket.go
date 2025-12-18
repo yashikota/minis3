@@ -176,10 +176,10 @@ func (b *Backend) ListBucketsWithOptions(opts ListBucketsOptions) *ListBucketsRe
 		})
 	}
 
-	// Apply max-buckets limit (default 10000 per S3 spec)
+	// Apply max-buckets limit (default 1000, consistent with S3 ListObjects)
 	maxBuckets := opts.MaxBuckets
 	if maxBuckets <= 0 {
-		maxBuckets = 10000
+		maxBuckets = 1000
 	}
 
 	result := &ListBucketsResult{}

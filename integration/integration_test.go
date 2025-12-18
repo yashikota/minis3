@@ -585,9 +585,9 @@ func TestBucketOperations(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error when creating duplicate bucket")
 		}
-		// Check error type using smithy.APIError
-		var apiErr smithy.APIError
-		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "BucketAlreadyOwnedByYou" {
+		// Check error type using SDK typed error
+		var baoby *types.BucketAlreadyOwnedByYou
+		if !errors.As(err, &baoby) {
 			t.Errorf("Expected BucketAlreadyOwnedByYou error, got: %v", err)
 		}
 	})

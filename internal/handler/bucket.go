@@ -35,6 +35,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 	case http.MethodPut:
 		// Parse CreateBucketConfiguration from request body if present
 		if r.Body != nil && r.ContentLength > 0 {
+			defer func() { _ = r.Body.Close() }()
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				backend.WriteError(
@@ -45,7 +46,6 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 				)
 				return
 			}
-			defer func() { _ = r.Body.Close() }()
 
 			if len(body) > 0 {
 				var config backend.CreateBucketConfiguration

@@ -20,7 +20,6 @@ type Owner struct {
 type BucketInfo struct {
 	Name         string `xml:"Name"`
 	CreationDate string `xml:"CreationDate"`
-	BucketRegion string `xml:"BucketRegion,omitempty"`
 }
 
 // ListBucketsOptions contains options for listing buckets.
