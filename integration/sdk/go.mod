@@ -1,8 +1,8 @@
-module github.com/yashikota/minis3/integration
+module github.com/yashikota/minis3/integration/sdk
 
 go 1.25.3
 
-replace github.com/yashikota/minis3 => ../
+replace github.com/yashikota/minis3 => ../..
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.40.1
