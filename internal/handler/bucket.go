@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
@@ -16,6 +17,10 @@ import (
 func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketName string) {
 	switch r.Method {
 	case http.MethodGet:
+		if r.URL.Query().Has("versioning") {
+			h.handleGetBucketVersioning(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Has("versions") {
 			h.handleListObjectVersions(w, r, bucketName)
 			return
@@ -37,6 +42,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			"The specified method is not allowed against this resource.",
 		)
 	case http.MethodPut:
+		if r.URL.Query().Has("versioning") {
+			h.handlePutBucketVersioning(w, r, bucketName)
+			return
+		}
 		// Parse CreateBucketConfiguration from request body if present
 		if r.Body != nil && r.ContentLength > 0 {
 			defer func() { _ = r.Body.Close() }()
@@ -279,9 +288,11 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 }
 
 // handleListObjectVersions handles ListObjectVersions requests.
-// Since minis3 doesn't support versioning, it returns all objects as the latest version
-// with a "null" version ID.
-func (h *Handler) handleListObjectVersions(w http.ResponseWriter, r *http.Request, bucketName string) {
+func (h *Handler) handleListObjectVersions(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
 	query := r.URL.Query()
 	prefix := query.Get("prefix")
 	delimiter := query.Get("delimiter")
@@ -304,8 +315,14 @@ func (h *Handler) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 		maxKeys = parsed
 	}
 
-	// Reuse ListObjectsV1 logic for now
-	result, err := h.backend.ListObjectsV1(bucketName, prefix, delimiter, keyMarker, maxKeys)
+	result, err := h.backend.ListObjectVersions(
+		bucketName,
+		prefix,
+		delimiter,
+		keyMarker,
+		versionIdMarker,
+		maxKeys,
+	)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -317,37 +334,48 @@ func (h *Handler) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 	}
 
 	resp := backend.ListVersionsResult{
-		Xmlns:           "http://s3.amazonaws.com/doc/2006-03-01/",
-		IsTruncated:     result.IsTruncated,
-		KeyMarker:       keyMarker,
-		VersionIdMarker: versionIdMarker,
-		Name:            bucketName,
-		Prefix:          prefix,
-		Delimiter:       delimiter,
-		MaxKeys:         maxKeys,
+		Xmlns:               "http://s3.amazonaws.com/doc/2006-03-01/",
+		IsTruncated:         result.IsTruncated,
+		KeyMarker:           keyMarker,
+		VersionIdMarker:     versionIdMarker,
+		NextKeyMarker:       result.NextKeyMarker,
+		NextVersionIdMarker: result.NextVersionIdMarker,
+		Name:                bucketName,
+		Prefix:              prefix,
+		Delimiter:           delimiter,
+		MaxKeys:             maxKeys,
 	}
 
 	if encodingType == "url" {
 		resp.EncodingType = "url"
 	}
 
-	if result.IsTruncated && result.NextMarker != "" {
-		resp.NextKeyMarker = result.NextMarker
-	}
-
-	for _, obj := range result.Objects {
+	for _, obj := range result.Versions {
 		key := obj.Key
 		if encodingType == "url" {
 			key = url.PathEscape(obj.Key)
 		}
 		resp.Versions = append(resp.Versions, backend.VersionInfo{
 			Key:          key,
-			VersionId:    "null",
-			IsLatest:     true,
+			VersionId:    obj.VersionId,
+			IsLatest:     obj.IsLatest,
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
 			StorageClass: "STANDARD",
+		})
+	}
+
+	for _, obj := range result.DeleteMarkers {
+		key := obj.Key
+		if encodingType == "url" {
+			key = url.PathEscape(obj.Key)
+		}
+		resp.DeleteMarkers = append(resp.DeleteMarkers, backend.DeleteMarker{
+			Key:          key,
+			VersionId:    obj.VersionId,
+			IsLatest:     obj.IsLatest,
+			LastModified: obj.LastModified.Format(time.RFC3339),
 		})
 	}
 
@@ -369,4 +397,168 @@ func (h *Handler) handleListObjectVersions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	_, _ = w.Write(output)
+}
+
+// handleGetBucketVersioning handles GetBucketVersioning requests.
+func (h *Handler) handleGetBucketVersioning(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	status, mfaDelete, err := h.backend.GetBucketVersioning(bucketName)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+		return
+	}
+
+	resp := backend.VersioningConfiguration{
+		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+	}
+
+	// Only include Status if versioning has been configured
+	if status != backend.VersioningUnset {
+		resp.Status = status.String()
+	}
+
+	// Only include MfaDelete if it's enabled
+	if mfaDelete == backend.MFADeleteEnabled {
+		resp.MFADelete = mfaDelete.String()
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutBucketVersioning handles PutBucketVersioning requests.
+func (h *Handler) handlePutBucketVersioning(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+
+	var config backend.VersioningConfiguration
+	if err := xml.Unmarshal(body, &config); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	// Validate Status field
+	if config.Status != "" && config.Status != "Enabled" && config.Status != "Suspended" {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	status := backend.ParseVersioningStatus(config.Status)
+	mfaDelete := backend.ParseMFADeleteStatus(config.MFADelete)
+
+	// Check x-amz-mfa header if MFA Delete is being enabled
+	if mfaDelete == backend.MFADeleteEnabled {
+		mfaHeader := r.Header.Get("x-amz-mfa")
+		if err := validateMFAHeader(mfaHeader); err != nil {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				err.Error(),
+			)
+			return
+		}
+	}
+
+	err = h.backend.SetBucketVersioning(bucketName, status, mfaDelete)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// validateMFAHeader validates the x-amz-mfa header format.
+// Format: "{SerialNumber} {TokenCode}" where:
+// - SerialNumber is either an ARN (arn:aws:iam::...:mfa/...) or a hardware device serial number
+// - TokenCode is a 6-digit number from the MFA device
+// Example: "arn:aws:iam::123456789012:mfa/user 123456" or "20899872 301749"
+func validateMFAHeader(header string) error {
+	if header == "" {
+		return errors.New("x-amz-mfa header is required for MFA Delete operations")
+	}
+
+	// Split by space - format is "SerialNumber TokenCode"
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 {
+		return errors.New("x-amz-mfa header must be in format 'SerialNumber TokenCode'")
+	}
+
+	serialNumber := strings.TrimSpace(parts[0])
+	tokenCode := strings.TrimSpace(parts[1])
+
+	// Validate SerialNumber is not empty
+	if serialNumber == "" {
+		return errors.New("MFA serial number cannot be empty")
+	}
+
+	// Validate SerialNumber format:
+	// - Virtual MFA: arn:aws:iam::ACCOUNT_ID:mfa/DEVICE_NAME
+	// - Hardware MFA: numeric serial number
+	if strings.HasPrefix(serialNumber, "arn:") {
+		// Validate ARN format
+		if !strings.Contains(serialNumber, ":mfa/") {
+			return errors.New("MFA serial number ARN must contain ':mfa/'")
+		}
+	}
+	// Hardware serial numbers are just numeric strings - no specific validation needed
+
+	// Validate TokenCode is exactly 6 digits
+	if len(tokenCode) != 6 {
+		return errors.New("MFA token code must be exactly 6 digits")
+	}
+	for _, c := range tokenCode {
+		if c < '0' || c > '9' {
+			return errors.New("MFA token code must contain only digits")
+		}
+	}
+
+	return nil
 }

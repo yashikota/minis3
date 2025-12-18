@@ -152,21 +152,21 @@ type CreateBucketConfiguration struct {
 // ListVersionsResult is the XML response for ListObjectVersions.
 // Field order matches AWS S3 API response structure.
 type ListVersionsResult struct {
-	XMLName             xml.Name        `xml:"ListVersionsResult"`
-	Xmlns               string          `xml:"xmlns,attr,omitempty"`
-	IsTruncated         bool            `xml:"IsTruncated"`
-	KeyMarker           string          `xml:"KeyMarker"`
-	VersionIdMarker     string          `xml:"VersionIdMarker"`
-	NextKeyMarker       string          `xml:"NextKeyMarker,omitempty"`
-	NextVersionIdMarker string          `xml:"NextVersionIdMarker,omitempty"`
-	Versions            []VersionInfo   `xml:"Version,omitempty"`
-	DeleteMarkers       []DeleteMarker  `xml:"DeleteMarker,omitempty"`
-	Name                string          `xml:"Name"`
-	Prefix              string          `xml:"Prefix"`
-	Delimiter           string          `xml:"Delimiter,omitempty"`
-	MaxKeys             int             `xml:"MaxKeys"`
-	CommonPrefixes      []CommonPrefix  `xml:"CommonPrefixes,omitempty"`
-	EncodingType        string          `xml:"EncodingType,omitempty"`
+	XMLName             xml.Name       `xml:"ListVersionsResult"`
+	Xmlns               string         `xml:"xmlns,attr,omitempty"`
+	IsTruncated         bool           `xml:"IsTruncated"`
+	KeyMarker           string         `xml:"KeyMarker"`
+	VersionIdMarker     string         `xml:"VersionIdMarker"`
+	NextKeyMarker       string         `xml:"NextKeyMarker,omitempty"`
+	NextVersionIdMarker string         `xml:"NextVersionIdMarker,omitempty"`
+	Versions            []VersionInfo  `xml:"Version,omitempty"`
+	DeleteMarkers       []DeleteMarker `xml:"DeleteMarker,omitempty"`
+	Name                string         `xml:"Name"`
+	Prefix              string         `xml:"Prefix"`
+	Delimiter           string         `xml:"Delimiter,omitempty"`
+	MaxKeys             int            `xml:"MaxKeys"`
+	CommonPrefixes      []CommonPrefix `xml:"CommonPrefixes,omitempty"`
+	EncodingType        string         `xml:"EncodingType,omitempty"`
 }
 
 // VersionInfo represents a single version in ListObjectVersions.
@@ -188,4 +188,23 @@ type DeleteMarker struct {
 	IsLatest     bool   `xml:"IsLatest"`
 	LastModified string `xml:"LastModified"`
 	Owner        *Owner `xml:"Owner,omitempty"`
+}
+
+// VersioningConfiguration represents the XML body for PutBucketVersioning
+// and the XML response for GetBucketVersioning.
+type VersioningConfiguration struct {
+	XMLName   xml.Name `xml:"VersioningConfiguration"`
+	Xmlns     string   `xml:"xmlns,attr,omitempty"`
+	Status    string   `xml:"Status,omitempty"`
+	MFADelete string   `xml:"MfaDelete,omitempty"`
+}
+
+// ListObjectVersionsResult is the internal result for ListObjectVersions.
+type ListObjectVersionsResult struct {
+	Versions            []*Object
+	DeleteMarkers       []*Object
+	CommonPrefixes      []string
+	IsTruncated         bool
+	NextKeyMarker       string
+	NextVersionIdMarker string
 }

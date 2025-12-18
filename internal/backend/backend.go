@@ -17,20 +17,30 @@ type Backend struct {
 
 // Bucket represents an S3 bucket containing objects and metadata
 type Bucket struct {
-	Name         string
-	CreationDate time.Time
-	Objects      map[string]*Object
+	Name             string
+	CreationDate     time.Time
+	VersioningStatus VersioningStatus // Versioning state (Unset, Enabled, Suspended)
+	MFADelete        MFADeleteStatus  // MFA Delete configuration
+	Objects          map[string]*ObjectVersions
+}
+
+// ObjectVersions holds all versions of an object.
+type ObjectVersions struct {
+	Versions []*Object // Most recent first (descending order by time)
 }
 
 // Object represents an S3 object with its metadata and content
 type Object struct {
-	Key           string
-	LastModified  time.Time
-	ETag          string
-	Size          int64
-	ContentType   string
-	Data          []byte
-	ChecksumCRC32 string
+	Key            string
+	VersionId      string // "null" for unversioned, generated ID for versioned
+	IsLatest       bool
+	IsDeleteMarker bool
+	LastModified   time.Time
+	ETag           string
+	Size           int64
+	ContentType    string
+	Data           []byte // nil for DeleteMarker
+	ChecksumCRC32  string
 }
 
 var (
@@ -43,6 +53,9 @@ var (
 	ErrSourceBucketNotFound      = errors.New("source bucket not found")
 	ErrDestinationBucketNotFound = errors.New("destination bucket not found")
 	ErrSourceObjectNotFound      = errors.New("source object not found")
+	ErrVersionNotFound           = errors.New("version not found")
+	ErrMethodNotAllowed          = errors.New("method not allowed")
+	ErrMFADeleteRequired         = errors.New("MFA delete required")
 )
 
 func New() *Backend {
