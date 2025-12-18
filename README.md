@@ -39,7 +39,7 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | HeadObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, VersionId, PartNumber, ChecksumMode |
 | ListObjects | ⚠️ | RequestPayer, OptionalObjectAttributes |
 | ListObjectsV2 | ⚠️ | ContinuationToken, StartAfter, FetchOwner, EncodingType, OptionalObjectAttributes |
-| ListObjectVersions | ⌛ | |
+| ListObjectVersions | ⚠️ | VersionIdMarker (ignored, no versioning support) |
 | GetObjectAttributes | ⌛ | |
 | GetObjectTagging | ⌛ | |
 | PutObjectTagging | ⌛ | |

@@ -16,6 +16,10 @@ import (
 func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketName string) {
 	switch r.Method {
 	case http.MethodGet:
+		if r.URL.Query().Has("versions") {
+			h.handleListObjectVersions(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Get("list-type") == "2" {
 			h.handleListObjectsV2(w, r, bucketName)
 			return
@@ -247,6 +251,99 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 		}
 		resp.Contents = append(resp.Contents, backend.ObjectInfo{
 			Key:          key,
+			LastModified: obj.LastModified.Format(time.RFC3339),
+			ETag:         obj.ETag,
+			Size:         obj.Size,
+			StorageClass: "STANDARD",
+		})
+	}
+
+	for _, cp := range result.CommonPrefixes {
+		cpValue := cp
+		if encodingType == "url" {
+			cpValue = url.PathEscape(cp)
+		}
+		resp.CommonPrefixes = append(resp.CommonPrefixes, backend.CommonPrefix{
+			Prefix: cpValue,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handleListObjectVersions handles ListObjectVersions requests.
+// Since minis3 doesn't support versioning, it returns all objects as the latest version
+// with a "null" version ID.
+func (h *Handler) handleListObjectVersions(w http.ResponseWriter, r *http.Request, bucketName string) {
+	query := r.URL.Query()
+	prefix := query.Get("prefix")
+	delimiter := query.Get("delimiter")
+	keyMarker := query.Get("key-marker")
+	versionIdMarker := query.Get("version-id-marker")
+	encodingType := query.Get("encoding-type")
+
+	maxKeys := 1000
+	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
+		parsed, err := strconv.Atoi(maxKeysStr)
+		if err != nil || parsed < 0 {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"max-keys must be a non-negative integer.",
+			)
+			return
+		}
+		maxKeys = parsed
+	}
+
+	// Reuse ListObjectsV1 logic for now
+	result, err := h.backend.ListObjectsV1(bucketName, prefix, delimiter, keyMarker, maxKeys)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+		return
+	}
+
+	resp := backend.ListVersionsResult{
+		Xmlns:           "http://s3.amazonaws.com/doc/2006-03-01/",
+		IsTruncated:     result.IsTruncated,
+		KeyMarker:       keyMarker,
+		VersionIdMarker: versionIdMarker,
+		Name:            bucketName,
+		Prefix:          prefix,
+		Delimiter:       delimiter,
+		MaxKeys:         maxKeys,
+	}
+
+	if encodingType == "url" {
+		resp.EncodingType = "url"
+	}
+
+	if result.IsTruncated && result.NextMarker != "" {
+		resp.NextKeyMarker = result.NextMarker
+	}
+
+	for _, obj := range result.Objects {
+		key := obj.Key
+		if encodingType == "url" {
+			key = url.PathEscape(obj.Key)
+		}
+		resp.Versions = append(resp.Versions, backend.VersionInfo{
+			Key:          key,
+			VersionId:    "null",
+			IsLatest:     true,
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
