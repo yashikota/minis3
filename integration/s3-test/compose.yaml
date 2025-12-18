@@ -6,7 +6,7 @@ services:
     ports:
       - "9000:9000"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9000/"]
       interval: 2s
       timeout: 5s
       retries: 5

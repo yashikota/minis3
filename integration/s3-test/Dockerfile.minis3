@@ -6,7 +6,8 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o minis3 ./integration/s3-test
 
-FROM gcr.io/distroless/static-debian13:nonroot
+FROM alpine:3.21
+RUN apk add --no-cache wget
 COPY --from=builder /app/minis3 /usr/local/bin/
 EXPOSE 9000
 CMD ["minis3", "-addr", "0.0.0.0:9000"]
