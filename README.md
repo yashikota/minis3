@@ -6,14 +6,17 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 
 **Legend:** ✅ = Full support | ⚠️ = Partial support (basic features only) | ⌛ = Not implemented
 
+> [!Note]
+> Minis3 is a single-region, single-owner in-memory mock server. Features like `ExpectedBucketOwner`, `BucketRegion` filter, ACLs, and multi-region support are intentionally not implemented as they are not meaningful in a mock environment.
+
 ### 🪣 Bucket Operations
 
 | Operation | Status | Unsupported Features |
 | --------- | ------ | -------------------- |
-| ListBuckets | ⚠️ | ContinuationToken, Prefix, MaxBuckets |
+| ListBuckets | ✅ | |
 | CreateBucket | ⚠️ | LocationConstraint, ACL, ObjectLockConfiguration, GrantFullControl, GrantRead, GrantReadACP, GrantWrite, GrantWriteACP, ObjectOwnership |
-| DeleteBucket | ⚠️ | ExpectedBucketOwner |
-| HeadBucket | ⚠️ | ExpectedBucketOwner |
+| DeleteBucket | ✅ | |
+| HeadBucket | ✅ | |
 | GetBucketLocation | ⌛ | |
 | GetBucketVersioning | ⌛ | |
 | PutBucketVersioning | ⌛ | |
@@ -28,14 +31,14 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 
 | Operation | Status | Unsupported Features |
 | --------- | ------ | -------------------- |
-| PutObject | ⚠️ | ACL, CacheControl, ContentDisposition, ContentEncoding, ContentLanguage, Expires, GrantFullControl, GrantRead, GrantReadACP, GrantWriteACP, Metadata, ServerSideEncryption, StorageClass, WebsiteRedirectLocation, SSECustomerAlgorithm, SSECustomerKey, SSEKMSKeyId, Tagging, ObjectLockMode, ObjectLockRetainUntilDate, ObjectLockLegalHoldStatus, ChecksumAlgorithm |
-| GetObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, ResponseCacheControl, ResponseContentDisposition, ResponseContentEncoding, ResponseContentLanguage, ResponseContentType, ResponseExpires, VersionId, SSECustomerAlgorithm, SSECustomerKey, PartNumber, ChecksumMode |
-| DeleteObject | ⚠️ | VersionId, MFA, BypassGovernanceRetention, ExpectedBucketOwner |
-| DeleteObjects | ⚠️ | VersionId (per object), MFA, BypassGovernanceRetention, ExpectedBucketOwner, ChecksumAlgorithm |
-| CopyObject | ⚠️ | ACL, CacheControl, ChecksumAlgorithm, ContentDisposition, ContentEncoding, ContentLanguage, ContentType, CopySourceIfMatch, CopySourceIfModifiedSince, CopySourceIfNoneMatch, CopySourceIfUnmodifiedSince, Expires, GrantFullControl, GrantRead, GrantReadACP, GrantWriteACP, Metadata, MetadataDirective, TaggingDirective, ServerSideEncryption, StorageClass, WebsiteRedirectLocation, SSECustomerAlgorithm, SSECustomerKey, SSEKMSKeyId, CopySourceSSECustomerAlgorithm, CopySourceSSECustomerKey, Tagging, ObjectLockMode, ObjectLockRetainUntilDate, ObjectLockLegalHoldStatus |
-| HeadObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, VersionId, SSECustomerAlgorithm, SSECustomerKey, PartNumber, ChecksumMode |
-| ListObjects | ⚠️ | RequestPayer, ExpectedBucketOwner, OptionalObjectAttributes |
-| ListObjectsV2 | ⚠️ | ContinuationToken, StartAfter, FetchOwner, EncodingType, ExpectedBucketOwner, OptionalObjectAttributes |
+| PutObject | ⚠️ | CacheControl, ContentDisposition, ContentEncoding, ContentLanguage, Expires, Metadata, StorageClass, WebsiteRedirectLocation, Tagging, ChecksumAlgorithm |
+| GetObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, ResponseCacheControl, ResponseContentDisposition, ResponseContentEncoding, ResponseContentLanguage, ResponseContentType, ResponseExpires, VersionId, PartNumber, ChecksumMode |
+| DeleteObject | ⚠️ | VersionId |
+| DeleteObjects | ⚠️ | VersionId (per object), ChecksumAlgorithm |
+| CopyObject | ⚠️ | CacheControl, ChecksumAlgorithm, ContentDisposition, ContentEncoding, ContentLanguage, ContentType, CopySourceIfMatch, CopySourceIfModifiedSince, CopySourceIfNoneMatch, CopySourceIfUnmodifiedSince, Expires, Metadata, MetadataDirective, TaggingDirective, StorageClass, WebsiteRedirectLocation, Tagging |
+| HeadObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, VersionId, PartNumber, ChecksumMode |
+| ListObjects | ⚠️ | RequestPayer, OptionalObjectAttributes |
+| ListObjectsV2 | ⚠️ | ContinuationToken, StartAfter, FetchOwner, EncodingType, OptionalObjectAttributes |
 | ListObjectVersions | ⌛ | |
 | GetObjectAttributes | ⌛ | |
 | GetObjectTagging | ⌛ | |

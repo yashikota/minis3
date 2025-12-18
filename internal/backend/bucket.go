@@ -87,7 +87,8 @@ func ValidateBucketName(name string) error {
 	return nil
 }
 
-// CreateBucket creates a new bucket
+// CreateBucket creates a new bucket.
+// Returns ErrBucketAlreadyOwnedByYou if the bucket already exists (per S3 behavior for single-owner mock).
 func (b *Backend) CreateBucket(name string) error {
 	if err := ValidateBucketName(name); err != nil {
 		return err
@@ -97,7 +98,8 @@ func (b *Backend) CreateBucket(name string) error {
 	defer b.mu.Unlock()
 
 	if _, exists := b.buckets[name]; exists {
-		return ErrBucketAlreadyExists
+		// In minis3 (single-user mock), existing bucket means "already owned by you"
+		return ErrBucketAlreadyOwnedByYou
 	}
 
 	b.buckets[name] = &Bucket{
@@ -145,4 +147,72 @@ func (b *Backend) ListBuckets() []*Bucket {
 		res = append(res, bkt)
 	}
 	return res
+}
+
+// ListBucketsWithOptions returns buckets with pagination and filtering support.
+func (b *Backend) ListBucketsWithOptions(opts ListBucketsOptions) *ListBucketsResult {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	// Collect all matching buckets
+	var allBuckets []*Bucket
+	for _, bkt := range b.buckets {
+		// Apply prefix filter
+		if opts.Prefix != "" && !strings.HasPrefix(bkt.Name, opts.Prefix) {
+			continue
+		}
+		allBuckets = append(allBuckets, bkt)
+	}
+
+	// Sort by name for consistent ordering
+	sortBucketsByName(allBuckets)
+
+	// Apply continuation token (find start position)
+	startIdx := 0
+	if opts.ContinuationToken != "" {
+		for i, bkt := range allBuckets {
+			if bkt.Name > opts.ContinuationToken {
+				startIdx = i
+				break
+			}
+		}
+		// If token is beyond all buckets, return empty
+		if startIdx == 0 && len(allBuckets) > 0 && allBuckets[0].Name <= opts.ContinuationToken {
+			startIdx = len(allBuckets)
+		}
+	}
+
+	// Apply max-buckets limit (default 10000 per S3 spec)
+	maxBuckets := opts.MaxBuckets
+	if maxBuckets <= 0 {
+		maxBuckets = 10000
+	}
+
+	result := &ListBucketsResult{}
+	endIdx := startIdx + maxBuckets
+	if endIdx > len(allBuckets) {
+		endIdx = len(allBuckets)
+	} else {
+		result.IsTruncated = true
+	}
+
+	result.Buckets = allBuckets[startIdx:endIdx]
+
+	// Set continuation token if truncated
+	if result.IsTruncated && len(result.Buckets) > 0 {
+		result.ContinuationToken = result.Buckets[len(result.Buckets)-1].Name
+	}
+
+	return result
+}
+
+// sortBucketsByName sorts buckets by name in ascending order
+func sortBucketsByName(buckets []*Bucket) {
+	for i := 0; i < len(buckets)-1; i++ {
+		for j := i + 1; j < len(buckets); j++ {
+			if buckets[i].Name > buckets[j].Name {
+				buckets[i], buckets[j] = buckets[j], buckets[i]
+			}
+		}
+	}
 }

@@ -539,6 +539,222 @@ func TestListObjectsV2(t *testing.T) {
 	})
 }
 
+func TestBucketOperations(t *testing.T) {
+	client := setupTestClient(t)
+
+	// 1. Test: Create bucket
+	t.Run("CreateBucket", func(t *testing.T) {
+		bucketName := "test-create-bucket"
+		t.Cleanup(func() {
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+	})
+
+	// 2. Test: Create duplicate bucket returns BucketAlreadyOwnedByYou
+	t.Run("CreateDuplicateBucket", func(t *testing.T) {
+		bucketName := "test-duplicate-bucket"
+		t.Cleanup(func() {
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		// Create first time
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("First CreateBucket failed: %v", err)
+		}
+
+		// Create second time - should get BucketAlreadyOwnedByYou error
+		_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err == nil {
+			t.Fatal("Expected error when creating duplicate bucket")
+		}
+		// The error should be about bucket already existing/owned
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, "BucketAlreadyOwnedByYou") &&
+			!strings.Contains(errMsg, "already own") {
+			t.Errorf("Expected BucketAlreadyOwnedByYou error, got: %v", err)
+		}
+	})
+
+	// 3. Test: HeadBucket returns correct headers
+	t.Run("HeadBucket", func(t *testing.T) {
+		bucketName := "test-head-bucket"
+		t.Cleanup(func() {
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+
+		resp, err := client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("HeadBucket failed: %v", err)
+		}
+
+		// Check BucketRegion is returned
+		if resp.BucketRegion == nil || *resp.BucketRegion != "us-east-1" {
+			t.Errorf("Expected BucketRegion us-east-1, got %v", resp.BucketRegion)
+		}
+
+		// AccessPointAlias should be false for regular buckets
+		if resp.AccessPointAlias == nil || *resp.AccessPointAlias {
+			t.Errorf("Expected AccessPointAlias false, got %v", resp.AccessPointAlias)
+		}
+	})
+
+	// 4. Test: HeadBucket for non-existent bucket
+	t.Run("HeadNonExistentBucket", func(t *testing.T) {
+		_, err := client.HeadBucket(context.TODO(), &s3.HeadBucketInput{
+			Bucket: aws.String("non-existent-bucket"),
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-existent bucket")
+		}
+	})
+
+	// 5. Test: DeleteBucket non-empty
+	t.Run("DeleteNonEmptyBucket", func(t *testing.T) {
+		bucketName := "test-delete-nonempty"
+		objectKey := "test.txt"
+		t.Cleanup(func() {
+			client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(objectKey),
+			})
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+
+		_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(objectKey),
+			Body:   strings.NewReader("content"),
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+
+		// Try to delete non-empty bucket
+		_, err = client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err == nil {
+			t.Fatal("Expected error when deleting non-empty bucket")
+		}
+		if !strings.Contains(err.Error(), "BucketNotEmpty") {
+			t.Errorf("Expected BucketNotEmpty error, got: %v", err)
+		}
+	})
+
+	// 6. Test: ListBuckets with pagination
+	t.Run("ListBucketsWithPagination", func(t *testing.T) {
+		buckets := []string{"aa-bucket", "ab-bucket", "ba-bucket", "bb-bucket", "ca-bucket"}
+		t.Cleanup(func() {
+			for _, name := range buckets {
+				client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+					Bucket: aws.String(name),
+				})
+			}
+		})
+
+		for _, name := range buckets {
+			_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+				Bucket: aws.String(name),
+			})
+			if err != nil {
+				t.Fatalf("CreateBucket failed for %s: %v", name, err)
+			}
+		}
+
+		// List all buckets
+		resp, err := client.ListBuckets(context.TODO(), &s3.ListBucketsInput{})
+		if err != nil {
+			t.Fatalf("ListBuckets failed: %v", err)
+		}
+
+		// Should have at least the 5 buckets we created
+		if len(resp.Buckets) < 5 {
+			t.Errorf("Expected at least 5 buckets, got %d", len(resp.Buckets))
+		}
+
+		// Verify owner is set
+		if resp.Owner == nil || resp.Owner.ID == nil {
+			t.Error("Expected Owner with ID")
+		}
+	})
+
+	// 7. Test: ListBuckets with prefix filter
+	t.Run("ListBucketsWithPrefix", func(t *testing.T) {
+		buckets := []string{"prefix-test-a", "prefix-test-b", "other-bucket"}
+		t.Cleanup(func() {
+			for _, name := range buckets {
+				client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+					Bucket: aws.String(name),
+				})
+			}
+		})
+
+		for _, name := range buckets {
+			_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+				Bucket: aws.String(name),
+			})
+			if err != nil {
+				t.Fatalf("CreateBucket failed for %s: %v", name, err)
+			}
+		}
+
+		// List with prefix filter using Prefix field
+		resp, err := client.ListBuckets(context.TODO(), &s3.ListBucketsInput{
+			Prefix: aws.String("prefix-test"),
+		})
+		if err != nil {
+			t.Fatalf("ListBuckets with prefix failed: %v", err)
+		}
+
+		// Should have 2 buckets with prefix "prefix-test"
+		count := 0
+		for _, b := range resp.Buckets {
+			if strings.HasPrefix(*b.Name, "prefix-test") {
+				count++
+			}
+		}
+		if count != 2 {
+			t.Errorf("Expected 2 buckets with prefix 'prefix-test', got %d", count)
+		}
+	})
+}
+
 func TestListObjectsV1(t *testing.T) {
 	client := setupTestClient(t)
 

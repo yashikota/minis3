@@ -5,9 +5,11 @@ import (
 )
 
 type ListAllMyBucketsResult struct {
-	XMLName xml.Name     `xml:"ListAllMyBucketsResult"`
-	Owner   *Owner       `xml:"Owner"`
-	Buckets []BucketInfo `xml:"Buckets>Bucket"`
+	XMLName           xml.Name     `xml:"ListAllMyBucketsResult"`
+	Owner             *Owner       `xml:"Owner"`
+	Buckets           []BucketInfo `xml:"Buckets>Bucket"`
+	ContinuationToken string       `xml:"ContinuationToken,omitempty"`
+	Prefix            string       `xml:"Prefix,omitempty"`
 }
 
 type Owner struct {
@@ -18,6 +20,21 @@ type Owner struct {
 type BucketInfo struct {
 	Name         string `xml:"Name"`
 	CreationDate string `xml:"CreationDate"`
+	BucketRegion string `xml:"BucketRegion,omitempty"`
+}
+
+// ListBucketsOptions contains options for listing buckets.
+type ListBucketsOptions struct {
+	Prefix            string
+	MaxBuckets        int
+	ContinuationToken string
+}
+
+// ListBucketsResult contains the result of listing buckets.
+type ListBucketsResult struct {
+	Buckets           []*Bucket
+	ContinuationToken string
+	IsTruncated       bool
 }
 
 type CopyObjectResult struct {

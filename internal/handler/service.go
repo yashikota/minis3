@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/xml"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
@@ -20,15 +21,45 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list := h.backend.ListBuckets()
-	resp := backend.ListAllMyBucketsResult{
-		Owner: &backend.Owner{ID: "minis3", DisplayName: "minis3"},
+	query := r.URL.Query()
+
+	// Parse query parameters per S3 ListBuckets API
+	opts := backend.ListBucketsOptions{
+		Prefix:            query.Get("prefix"),
+		ContinuationToken: query.Get("continuation-token"),
 	}
-	for _, b := range list {
+
+	// Parse max-buckets (valid range: 1-10000)
+	if maxBucketsStr := query.Get("max-buckets"); maxBucketsStr != "" {
+		maxBuckets, err := strconv.Atoi(maxBucketsStr)
+		if err != nil || maxBuckets < 1 || maxBuckets > 10000 {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"max-buckets must be an integer between 1 and 10000.",
+			)
+			return
+		}
+		opts.MaxBuckets = maxBuckets
+	}
+
+	result := h.backend.ListBucketsWithOptions(opts)
+	resp := backend.ListAllMyBucketsResult{
+		Owner:  &backend.Owner{ID: "minis3", DisplayName: "minis3"},
+		Prefix: opts.Prefix,
+	}
+
+	for _, b := range result.Buckets {
 		resp.Buckets = append(resp.Buckets, backend.BucketInfo{
 			Name:         b.Name,
 			CreationDate: b.CreationDate.Format(time.RFC3339),
+			BucketRegion: "us-east-1",
 		})
+	}
+
+	if result.IsTruncated {
+		resp.ContinuationToken = result.ContinuationToken
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
