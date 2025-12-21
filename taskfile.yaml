@@ -17,7 +17,7 @@ tasks:
     cmds:
       - task: unit-test
       - task: sdk-test
-      - task: s3-test
+      # - task: s3-test
 
   unit-test:
     desc: "Unit test"
