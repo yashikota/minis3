@@ -100,6 +100,7 @@ type ListBucketV2Result struct {
 	IsTruncated    bool           `xml:"IsTruncated"`
 	Contents       []ObjectInfo   `xml:"Contents,omitempty"`
 	CommonPrefixes []CommonPrefix `xml:"CommonPrefixes,omitempty"`
+	EncodingType   string         `xml:"EncodingType,omitempty"`
 }
 
 type ListObjectsV2Result struct {

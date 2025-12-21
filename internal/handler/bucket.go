@@ -141,6 +141,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	query := r.URL.Query()
 	prefix := query.Get("prefix")
 	delimiter := query.Get("delimiter")
+	encodingType := query.Get("encoding-type")
 
 	maxKeys := 1000
 	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
@@ -178,9 +179,17 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		IsTruncated: result.IsTruncated,
 	}
 
+	if encodingType == "url" {
+		resp.EncodingType = "url"
+	}
+
 	for _, obj := range result.Objects {
+		key := obj.Key
+		if encodingType == "url" {
+			key = url.QueryEscape(obj.Key)
+		}
 		resp.Contents = append(resp.Contents, backend.ObjectInfo{
-			Key:          obj.Key,
+			Key:          key,
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
@@ -189,8 +198,12 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	for _, cp := range result.CommonPrefixes {
+		cpValue := cp
+		if encodingType == "url" {
+			cpValue = url.QueryEscape(cp)
+		}
 		resp.CommonPrefixes = append(resp.CommonPrefixes, backend.CommonPrefix{
-			Prefix: cp,
+			Prefix: cpValue,
 		})
 	}
 
@@ -256,7 +269,7 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 	for _, obj := range result.Objects {
 		key := obj.Key
 		if encodingType == "url" {
-			key = url.PathEscape(obj.Key)
+			key = url.QueryEscape(obj.Key)
 		}
 		resp.Contents = append(resp.Contents, backend.ObjectInfo{
 			Key:          key,
@@ -270,7 +283,7 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 	for _, cp := range result.CommonPrefixes {
 		cpValue := cp
 		if encodingType == "url" {
-			cpValue = url.PathEscape(cp)
+			cpValue = url.QueryEscape(cp)
 		}
 		resp.CommonPrefixes = append(resp.CommonPrefixes, backend.CommonPrefix{
 			Prefix: cpValue,
@@ -353,7 +366,7 @@ func (h *Handler) handleListObjectVersions(
 	for _, obj := range result.Versions {
 		key := obj.Key
 		if encodingType == "url" {
-			key = url.PathEscape(obj.Key)
+			key = url.QueryEscape(obj.Key)
 		}
 		resp.Versions = append(resp.Versions, backend.VersionInfo{
 			Key:          key,
@@ -369,7 +382,7 @@ func (h *Handler) handleListObjectVersions(
 	for _, obj := range result.DeleteMarkers {
 		key := obj.Key
 		if encodingType == "url" {
-			key = url.PathEscape(obj.Key)
+			key = url.QueryEscape(obj.Key)
 		}
 		resp.DeleteMarkers = append(resp.DeleteMarkers, backend.DeleteMarker{
 			Key:          key,
@@ -382,7 +395,7 @@ func (h *Handler) handleListObjectVersions(
 	for _, cp := range result.CommonPrefixes {
 		cpValue := cp
 		if encodingType == "url" {
-			cpValue = url.PathEscape(cp)
+			cpValue = url.QueryEscape(cp)
 		}
 		resp.CommonPrefixes = append(resp.CommonPrefixes, backend.CommonPrefix{
 			Prefix: cpValue,
@@ -446,6 +459,7 @@ func (h *Handler) handlePutBucketVersioning(
 	r *http.Request,
 	bucketName string,
 ) {
+	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		backend.WriteError(
@@ -456,7 +470,6 @@ func (h *Handler) handlePutBucketVersioning(
 		)
 		return
 	}
-	defer func() { _ = r.Body.Close() }()
 
 	var config backend.VersioningConfiguration
 	if err := xml.Unmarshal(body, &config); err != nil {

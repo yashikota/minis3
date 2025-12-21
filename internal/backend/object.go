@@ -22,6 +22,121 @@ func (ov *ObjectVersions) getLatestVersion() *Object {
 	return nil
 }
 
+// addVersionToObject adds a new version to an object's version list.
+// This handles versioning-enabled buckets (prepend new version) and
+// unset/suspended buckets (replace null version).
+// Caller must hold the lock.
+func addVersionToObject(bucket *Bucket, key string, obj *Object) {
+	// Get or create ObjectVersions
+	versions, exists := bucket.Objects[key]
+	if !exists {
+		versions = &ObjectVersions{}
+		bucket.Objects[key] = versions
+	}
+
+	// Update IsLatest for all existing versions
+	for _, v := range versions.Versions {
+		v.IsLatest = false
+	}
+
+	if bucket.VersioningStatus == VersioningEnabled {
+		// Versioning enabled: prepend new version
+		versions.Versions = append([]*Object{obj}, versions.Versions...)
+	} else {
+		// Unset or Suspended: replace null version or add if none exists
+		newVersions := make([]*Object, 0, len(versions.Versions))
+		for _, v := range versions.Versions {
+			if v.VersionId != NullVersionId {
+				newVersions = append(newVersions, v)
+			}
+		}
+		// Prepend new null version
+		versions.Versions = append([]*Object{obj}, newVersions...)
+	}
+}
+
+// createDeleteMarkerUnlocked creates a delete marker based on the bucket's versioning status.
+// Returns the result of the delete operation.
+// Caller must hold the lock.
+func createDeleteMarkerUnlocked(bucket *Bucket, key string) *DeleteObjectVersionResult {
+	versions, exists := bucket.Objects[key]
+
+	switch bucket.VersioningStatus {
+	case VersioningEnabled:
+		// Create DeleteMarker
+		if !exists {
+			versions = &ObjectVersions{}
+			bucket.Objects[key] = versions
+		}
+
+		// Update IsLatest for existing versions
+		for _, v := range versions.Versions {
+			v.IsLatest = false
+		}
+
+		deleteMarker := &Object{
+			Key:            key,
+			VersionId:      GenerateVersionId(),
+			IsLatest:       true,
+			IsDeleteMarker: true,
+			LastModified:   time.Now().UTC(),
+		}
+		versions.Versions = append([]*Object{deleteMarker}, versions.Versions...)
+
+		return &DeleteObjectVersionResult{
+			VersionId:      deleteMarker.VersionId,
+			IsDeleteMarker: true,
+			DeletedObject:  deleteMarker,
+		}
+
+	case VersioningSuspended:
+		// Delete null version if exists, create null DeleteMarker
+		if !exists {
+			versions = &ObjectVersions{}
+			bucket.Objects[key] = versions
+		}
+
+		// Remove existing null version
+		var deletedObj *Object
+		newVersions := make([]*Object, 0, len(versions.Versions))
+		for _, v := range versions.Versions {
+			if v.VersionId == NullVersionId {
+				deletedObj = v
+			} else {
+				v.IsLatest = false
+				newVersions = append(newVersions, v)
+			}
+		}
+
+		// Create null DeleteMarker
+		deleteMarker := &Object{
+			Key:            key,
+			VersionId:      NullVersionId,
+			IsLatest:       true,
+			IsDeleteMarker: true,
+			LastModified:   time.Now().UTC(),
+		}
+		versions.Versions = append([]*Object{deleteMarker}, newVersions...)
+
+		result := &DeleteObjectVersionResult{
+			VersionId:      NullVersionId,
+			IsDeleteMarker: true,
+			DeletedObject:  deleteMarker,
+		}
+		if deletedObj != nil {
+			result.DeletedObject = deletedObj
+		}
+		return result
+
+	default:
+		// VersioningUnset: physically delete
+		if exists {
+			delete(bucket.Objects, key)
+		}
+		return &DeleteObjectVersionResult{}
+	}
+}
+
 // PutObject stores an object in a bucket.
 // Returns the created object with its version ID.
 func (b *Backend) PutObject(
@@ -65,33 +180,7 @@ func (b *Backend) PutObject(
 		ChecksumCRC32:  base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
 	}
 
-	// Get or create ObjectVersions
-	versions, exists := bucket.Objects[key]
-	if !exists {
-		versions = &ObjectVersions{}
-		bucket.Objects[key] = versions
-	}
-
-	// Update IsLatest for all existing versions
-	for _, v := range versions.Versions {
-		v.IsLatest = false
-	}
-
-	if bucket.VersioningStatus == VersioningEnabled {
-		// Versioning enabled: prepend new version
-		versions.Versions = append([]*Object{obj}, versions.Versions...)
-	} else {
-		// Unset or Suspended: replace null version or add if none exists
-		// Find and remove existing null version
-		newVersions := make([]*Object, 0, len(versions.Versions))
-		for _, v := range versions.Versions {
-			if v.VersionId != NullVersionId {
-				newVersions = append(newVersions, v)
-			}
-		}
-		// Prepend new null version
-		versions.Versions = append([]*Object{obj}, newVersions...)
-	}
+	addVersionToObject(bucket, key, obj)
 
 	return obj, nil
 }
@@ -209,83 +298,8 @@ func (b *Backend) DeleteObjectVersion(
 		}, nil
 	}
 
-	// No versionId specified
-	switch bucket.VersioningStatus {
-	case VersioningEnabled:
-		// Create DeleteMarker
-		if !exists {
-			versions = &ObjectVersions{}
-			bucket.Objects[key] = versions
-		}
-
-		// Update IsLatest for existing versions
-		for _, v := range versions.Versions {
-			v.IsLatest = false
-		}
-
-		deleteMarker := &Object{
-			Key:            key,
-			VersionId:      GenerateVersionId(),
-			IsLatest:       true,
-			IsDeleteMarker: true,
-			LastModified:   time.Now().UTC(),
-		}
-		versions.Versions = append([]*Object{deleteMarker}, versions.Versions...)
-
-		return &DeleteObjectVersionResult{
-			VersionId:      deleteMarker.VersionId,
-			IsDeleteMarker: true,
-			DeletedObject:  deleteMarker,
-		}, nil
-
-	case VersioningSuspended:
-		// Delete null version if exists, create null DeleteMarker
-		if !exists {
-			versions = &ObjectVersions{}
-			bucket.Objects[key] = versions
-		}
-
-		// Remove existing null version
-		var deletedObj *Object
-		newVersions := make([]*Object, 0, len(versions.Versions))
-		for _, v := range versions.Versions {
-			if v.VersionId == NullVersionId {
-				deletedObj = v
-			} else {
-				v.IsLatest = false
-				newVersions = append(newVersions, v)
-			}
-		}
-
-		// Create null DeleteMarker
-		deleteMarker := &Object{
-			Key:            key,
-			VersionId:      NullVersionId,
-			IsLatest:       true,
-			IsDeleteMarker: true,
-			LastModified:   time.Now().UTC(),
-		}
-		versions.Versions = append([]*Object{deleteMarker}, newVersions...)
-
-		result := &DeleteObjectVersionResult{
-			VersionId:      NullVersionId,
-			IsDeleteMarker: true,
-			DeletedObject:  deleteMarker,
-		}
-		if deletedObj != nil {
-			result.DeletedObject = deletedObj
-		}
-		return result, nil
-
-	default:
-		// VersioningUnset: physically delete
-		if !exists {
-			// S3 returns success even if object doesn't exist
-			return &DeleteObjectVersionResult{}, nil
-		}
-		delete(bucket.Objects, key)
-		return &DeleteObjectVersionResult{}, nil
-	}
+	// No versionId specified: create delete marker or physically delete
+	return createDeleteMarkerUnlocked(bucket, key), nil
 }
 
 // CopyObject copies an object from source to destination
@@ -339,30 +353,7 @@ func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Obje
 		ChecksumCRC32:  srcObj.ChecksumCRC32,
 	}
 
-	// Get or create ObjectVersions for destination
-	dstVersions, exists := dstBkt.Objects[dstKey]
-	if !exists {
-		dstVersions = &ObjectVersions{}
-		dstBkt.Objects[dstKey] = dstVersions
-	}
-
-	// Update IsLatest for existing versions
-	for _, v := range dstVersions.Versions {
-		v.IsLatest = false
-	}
-
-	if dstBkt.VersioningStatus == VersioningEnabled {
-		dstVersions.Versions = append([]*Object{obj}, dstVersions.Versions...)
-	} else {
-		// Replace null version
-		newVersions := make([]*Object, 0, len(dstVersions.Versions))
-		for _, v := range dstVersions.Versions {
-			if v.VersionId != NullVersionId {
-				newVersions = append(newVersions, v)
-			}
-		}
-		dstVersions.Versions = append([]*Object{obj}, newVersions...)
-	}
+	addVersionToObject(dstBkt, dstKey, obj)
 
 	return obj, nil
 }
@@ -379,62 +370,11 @@ func (b *Backend) DeleteObjects(bucketName string, keys []string) ([]DeleteObjec
 
 	results := make([]DeleteObjectResult, 0, len(keys))
 	for _, key := range keys {
-		result := DeleteObjectResult{
+		createDeleteMarkerUnlocked(bucket, key)
+		results = append(results, DeleteObjectResult{
 			Key:     key,
 			Deleted: true,
-		}
-
-		versions, exists := bucket.Objects[key]
-
-		switch bucket.VersioningStatus {
-		case VersioningEnabled:
-			// Create DeleteMarker
-			if !exists {
-				versions = &ObjectVersions{}
-				bucket.Objects[key] = versions
-			}
-			for _, v := range versions.Versions {
-				v.IsLatest = false
-			}
-			deleteMarker := &Object{
-				Key:            key,
-				VersionId:      GenerateVersionId(),
-				IsLatest:       true,
-				IsDeleteMarker: true,
-				LastModified:   time.Now().UTC(),
-			}
-			versions.Versions = append([]*Object{deleteMarker}, versions.Versions...)
-
-		case VersioningSuspended:
-			// Remove null version, create null DeleteMarker
-			if !exists {
-				versions = &ObjectVersions{}
-				bucket.Objects[key] = versions
-			}
-			newVersions := make([]*Object, 0, len(versions.Versions))
-			for _, v := range versions.Versions {
-				if v.VersionId != NullVersionId {
-					v.IsLatest = false
-					newVersions = append(newVersions, v)
-				}
-			}
-			deleteMarker := &Object{
-				Key:            key,
-				VersionId:      NullVersionId,
-				IsLatest:       true,
-				IsDeleteMarker: true,
-				LastModified:   time.Now().UTC(),
-			}
-			versions.Versions = append([]*Object{deleteMarker}, newVersions...)
-
-		default:
-			// VersioningUnset: physically delete
-			if exists {
-				delete(bucket.Objects, key)
-			}
-		}
-
-		results = append(results, result)
+		})
 	}
 
 	return results, nil
