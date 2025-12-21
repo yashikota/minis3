@@ -1,4 +1,4 @@
-name: S3 Compatibility Tests
+name: Test
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
 jobs:
   s3-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -29,5 +29,5 @@ jobs:
         with:
           aqua_version: v2.55.2
 
-      - name: Run s3-tests
-        run: task s3test || true
+      - name: Run s3-test
+        run: task s3-test || true

@@ -41,10 +41,23 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		w.Header().Set("ETag", obj.ETag)
+		// Add version ID header if versioning is enabled
+		if obj.VersionId != backend.NullVersionId {
+			w.Header().Set("x-amz-version-id", obj.VersionId)
+		}
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodGet:
-		obj, err := h.backend.GetObject(bucketName, key)
+		versionId := r.URL.Query().Get("versionId")
+		var obj *backend.Object
+		var err error
+
+		if versionId != "" {
+			obj, err = h.backend.GetObjectVersion(bucketName, key, versionId)
+		} else {
+			obj, err = h.backend.GetObject(bucketName, key)
+		}
+
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketNotFound) {
 				backend.WriteError(
@@ -52,6 +65,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 					http.StatusNotFound,
 					"NoSuchBucket",
 					"The specified bucket does not exist.",
+				)
+			} else if errors.Is(err, backend.ErrVersionNotFound) {
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchVersion",
+					"The specified version does not exist.",
 				)
 			} else {
 				backend.WriteError(
@@ -63,15 +83,38 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			}
 			return
 		}
+
+		// Check if this is a DeleteMarker
+		if obj.IsDeleteMarker {
+			w.Header().Set("x-amz-delete-marker", "true")
+			if obj.VersionId != backend.NullVersionId {
+				w.Header().Set("x-amz-version-id", obj.VersionId)
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
 		w.Header().Set("ETag", obj.ETag)
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
+		if obj.VersionId != backend.NullVersionId {
+			w.Header().Set("x-amz-version-id", obj.VersionId)
+		}
 		_, _ = w.Write(obj.Data)
 
 	case http.MethodDelete:
-		err := h.backend.DeleteObject(bucketName, key)
+		versionId := r.URL.Query().Get("versionId")
+		var result *backend.DeleteObjectVersionResult
+		var err error
+
+		if versionId != "" {
+			result, err = h.backend.DeleteObjectVersion(bucketName, key, versionId)
+		} else {
+			result, err = h.backend.DeleteObject(bucketName, key)
+		}
+
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketNotFound) {
 				backend.WriteError(
@@ -82,20 +125,62 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 				)
 				return
 			}
+			if errors.Is(err, backend.ErrVersionNotFound) {
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchVersion",
+					"The specified version does not exist.",
+				)
+				return
+			}
+		}
+
+		// Set response headers based on result
+		if result != nil {
+			if result.VersionId != "" && result.VersionId != backend.NullVersionId {
+				w.Header().Set("x-amz-version-id", result.VersionId)
+			}
+			if result.IsDeleteMarker {
+				w.Header().Set("x-amz-delete-marker", "true")
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 
 	case http.MethodHead:
-		obj, err := h.backend.GetObject(bucketName, key)
+		versionId := r.URL.Query().Get("versionId")
+		var obj *backend.Object
+		var err error
+
+		if versionId != "" {
+			obj, err = h.backend.GetObjectVersion(bucketName, key, versionId)
+		} else {
+			obj, err = h.backend.GetObject(bucketName, key)
+		}
+
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+
+		// Check if this is a DeleteMarker
+		if obj.IsDeleteMarker {
+			w.Header().Set("x-amz-delete-marker", "true")
+			if obj.VersionId != backend.NullVersionId {
+				w.Header().Set("x-amz-version-id", obj.VersionId)
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
 		w.Header().Set("ETag", obj.ETag)
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
+		if obj.VersionId != backend.NullVersionId {
+			w.Header().Set("x-amz-version-id", obj.VersionId)
+		}
 		w.WriteHeader(http.StatusOK)
 
 	default:
@@ -230,6 +315,11 @@ func (h *Handler) handleCopyObject(
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
+	}
+
+	// Add version ID header if versioning is enabled
+	if obj.VersionId != backend.NullVersionId {
+		w.Header().Set("x-amz-version-id", obj.VersionId)
 	}
 
 	resp := backend.CopyObjectResult{

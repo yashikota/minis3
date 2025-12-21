@@ -11,7 +11,134 @@ import (
 	"time"
 )
 
-// PutObject stores an object in a bucket
+// getLatestVersion returns the latest non-DeleteMarker version of an object.
+// Returns nil if no such version exists.
+func (ov *ObjectVersions) getLatestVersion() *Object {
+	for _, v := range ov.Versions {
+		if !v.IsDeleteMarker {
+			return v
+		}
+	}
+	return nil
+}
+
+// addVersionToObject adds a new version to an object's version list.
+// This handles versioning-enabled buckets (prepend new version) and
+// unset/suspended buckets (replace null version).
+// Caller must hold the lock.
+func addVersionToObject(bucket *Bucket, key string, obj *Object) {
+	// Get or create ObjectVersions
+	versions, exists := bucket.Objects[key]
+	if !exists {
+		versions = &ObjectVersions{}
+		bucket.Objects[key] = versions
+	}
+
+	// Update IsLatest for all existing versions
+	for _, v := range versions.Versions {
+		v.IsLatest = false
+	}
+
+	if bucket.VersioningStatus == VersioningEnabled {
+		// Versioning enabled: prepend new version
+		versions.Versions = append([]*Object{obj}, versions.Versions...)
+	} else {
+		// Unset or Suspended: replace null version or add if none exists
+		newVersions := make([]*Object, 0, len(versions.Versions))
+		for _, v := range versions.Versions {
+			if v.VersionId != NullVersionId {
+				newVersions = append(newVersions, v)
+			}
+		}
+		// Prepend new null version
+		versions.Versions = append([]*Object{obj}, newVersions...)
+	}
+}
+
+// createDeleteMarkerUnlocked creates a delete marker based on the bucket's versioning status.
+// Returns the result of the delete operation.
+// Caller must hold the lock.
+func createDeleteMarkerUnlocked(bucket *Bucket, key string) *DeleteObjectVersionResult {
+	versions, exists := bucket.Objects[key]
+
+	switch bucket.VersioningStatus {
+	case VersioningEnabled:
+		// Create DeleteMarker
+		if !exists {
+			versions = &ObjectVersions{}
+			bucket.Objects[key] = versions
+		}
+
+		// Update IsLatest for existing versions
+		for _, v := range versions.Versions {
+			v.IsLatest = false
+		}
+
+		deleteMarker := &Object{
+			Key:            key,
+			VersionId:      GenerateVersionId(),
+			IsLatest:       true,
+			IsDeleteMarker: true,
+			LastModified:   time.Now().UTC(),
+		}
+		versions.Versions = append([]*Object{deleteMarker}, versions.Versions...)
+
+		return &DeleteObjectVersionResult{
+			VersionId:      deleteMarker.VersionId,
+			IsDeleteMarker: true,
+			DeletedObject:  deleteMarker,
+		}
+
+	case VersioningSuspended:
+		// Delete null version if exists, create null DeleteMarker
+		if !exists {
+			versions = &ObjectVersions{}
+			bucket.Objects[key] = versions
+		}
+
+		// Remove existing null version
+		var deletedObj *Object
+		newVersions := make([]*Object, 0, len(versions.Versions))
+		for _, v := range versions.Versions {
+			if v.VersionId == NullVersionId {
+				deletedObj = v
+			} else {
+				v.IsLatest = false
+				newVersions = append(newVersions, v)
+			}
+		}
+
+		// Create null DeleteMarker
+		deleteMarker := &Object{
+			Key:            key,
+			VersionId:      NullVersionId,
+			IsLatest:       true,
+			IsDeleteMarker: true,
+			LastModified:   time.Now().UTC(),
+		}
+		versions.Versions = append([]*Object{deleteMarker}, newVersions...)
+
+		result := &DeleteObjectVersionResult{
+			VersionId:      NullVersionId,
+			IsDeleteMarker: true,
+			DeletedObject:  deleteMarker,
+		}
+		if deletedObj != nil {
+			result.DeletedObject = deletedObj
+		}
+		return result
+
+	default:
+		// VersioningUnset: physically delete
+		if exists {
+			delete(bucket.Objects, key)
+		}
+		return &DeleteObjectVersionResult{}
+	}
+}
+
+// PutObject stores an object in a bucket.
+// Returns the created object with its version ID.
 func (b *Backend) PutObject(
 	bucketName, key string,
 	data []byte,
@@ -30,22 +157,42 @@ func (b *Backend) PutObject(
 	w := io.MultiWriter(md5Hash, crc32Hash)
 	_, _ = w.Write(data)
 
-	obj := &Object{
-		Key:           key,
-		LastModified:  time.Now().UTC(),
-		ETag:          fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
-		Size:          int64(len(data)),
-		ContentType:   contentType,
-		Data:          data,
-		ChecksumCRC32: base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
+	// Determine version ID based on versioning status
+	var versionId string
+	switch bucket.VersioningStatus {
+	case VersioningEnabled:
+		versionId = GenerateVersionId()
+	default:
+		// VersioningUnset or VersioningSuspended: use "null"
+		versionId = NullVersionId
 	}
 
-	bucket.Objects[key] = obj
+	obj := &Object{
+		Key:            key,
+		VersionId:      versionId,
+		IsLatest:       true,
+		IsDeleteMarker: false,
+		LastModified:   time.Now().UTC(),
+		ETag:           fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
+		Size:           int64(len(data)),
+		ContentType:    contentType,
+		Data:           data,
+		ChecksumCRC32:  base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
+	}
+
+	addVersionToObject(bucket, key, obj)
+
 	return obj, nil
 }
 
-// GetObject retrieves an object from a bucket
+// GetObject retrieves the latest version of an object from a bucket.
 func (b *Backend) GetObject(bucketName, key string) (*Object, error) {
+	return b.GetObjectVersion(bucketName, key, "")
+}
+
+// GetObjectVersion retrieves a specific version of an object.
+// If versionId is empty, returns the latest non-DeleteMarker version.
+func (b *Backend) GetObjectVersion(bucketName, key, versionId string) (*Object, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -53,24 +200,106 @@ func (b *Backend) GetObject(bucketName, key string) (*Object, error) {
 	if !ok {
 		return nil, ErrBucketNotFound
 	}
-	obj, ok := bucket.Objects[key]
-	if !ok {
+
+	versions, ok := bucket.Objects[key]
+	if !ok || len(versions.Versions) == 0 {
 		return nil, ErrObjectNotFound
 	}
-	return obj, nil
+
+	if versionId == "" {
+		// Return latest non-DeleteMarker version
+		obj := versions.getLatestVersion()
+		if obj == nil {
+			// All versions are DeleteMarkers
+			return nil, ErrObjectNotFound
+		}
+		return obj, nil
+	}
+
+	// Find specific version
+	for _, v := range versions.Versions {
+		if v.VersionId == versionId {
+			return v, nil
+		}
+	}
+
+	return nil, ErrVersionNotFound
 }
 
-// DeleteObject removes an object from a bucket
-func (b *Backend) DeleteObject(bucketName, key string) error {
+// DeleteObjectResult contains the result of deleting an object or version.
+type DeleteObjectVersionResult struct {
+	VersionId      string
+	IsDeleteMarker bool
+	DeletedObject  *Object // The object that was deleted/created
+}
+
+// DeleteObject removes an object from a bucket.
+// With versioning enabled, creates a DeleteMarker instead of deleting.
+// Returns information about the deletion.
+func (b *Backend) DeleteObject(bucketName, key string) (*DeleteObjectVersionResult, error) {
+	return b.DeleteObjectVersion(bucketName, key, "")
+}
+
+// DeleteObjectVersion deletes a specific version or creates a DeleteMarker.
+// If versionId is empty and versioning is enabled, creates a DeleteMarker.
+// If versionId is specified, physically deletes that version.
+func (b *Backend) DeleteObjectVersion(
+	bucketName, key, versionId string,
+) (*DeleteObjectVersionResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	bucket, ok := b.buckets[bucketName]
 	if !ok {
-		return ErrBucketNotFound
+		return nil, ErrBucketNotFound
 	}
-	delete(bucket.Objects, key)
-	return nil
+
+	versions, exists := bucket.Objects[key]
+
+	if versionId != "" {
+		// Delete specific version
+		if !exists {
+			return nil, ErrObjectNotFound
+		}
+
+		// Find and remove the version
+		var deletedObj *Object
+		var isDeleteMarker bool
+		newVersions := make([]*Object, 0, len(versions.Versions))
+		for _, v := range versions.Versions {
+			if v.VersionId == versionId {
+				deletedObj = v
+				isDeleteMarker = v.IsDeleteMarker
+			} else {
+				newVersions = append(newVersions, v)
+			}
+		}
+
+		if deletedObj == nil {
+			return nil, ErrVersionNotFound
+		}
+
+		versions.Versions = newVersions
+
+		// Update IsLatest for remaining versions
+		if len(versions.Versions) > 0 {
+			versions.Versions[0].IsLatest = true
+		}
+
+		// Clean up empty ObjectVersions
+		if len(versions.Versions) == 0 {
+			delete(bucket.Objects, key)
+		}
+
+		return &DeleteObjectVersionResult{
+			VersionId:      versionId,
+			IsDeleteMarker: isDeleteMarker,
+			DeletedObject:  deletedObj,
+		}, nil
+	}
+
+	// No versionId specified: create delete marker or physically delete
+	return createDeleteMarkerUnlocked(bucket, key), nil
 }
 
 // CopyObject copies an object from source to destination
@@ -83,8 +312,14 @@ func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Obje
 		return nil, ErrSourceBucketNotFound
 	}
 
-	srcObj, ok := srcBkt.Objects[srcKey]
-	if !ok {
+	srcVersions, ok := srcBkt.Objects[srcKey]
+	if !ok || len(srcVersions.Versions) == 0 {
+		return nil, ErrSourceObjectNotFound
+	}
+
+	// Get latest non-DeleteMarker version
+	srcObj := srcVersions.getLatestVersion()
+	if srcObj == nil {
 		return nil, ErrSourceObjectNotFound
 	}
 
@@ -96,17 +331,30 @@ func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Obje
 	copiedData := make([]byte, len(srcObj.Data))
 	copy(copiedData, srcObj.Data)
 
-	obj := &Object{
-		Key:           dstKey,
-		LastModified:  time.Now().UTC(),
-		ETag:          srcObj.ETag,
-		Size:          srcObj.Size,
-		ContentType:   srcObj.ContentType,
-		Data:          copiedData,
-		ChecksumCRC32: srcObj.ChecksumCRC32,
+	// Determine version ID for destination
+	var versionId string
+	switch dstBkt.VersioningStatus {
+	case VersioningEnabled:
+		versionId = GenerateVersionId()
+	default:
+		versionId = NullVersionId
 	}
 
-	dstBkt.Objects[dstKey] = obj
+	obj := &Object{
+		Key:            dstKey,
+		VersionId:      versionId,
+		IsLatest:       true,
+		IsDeleteMarker: false,
+		LastModified:   time.Now().UTC(),
+		ETag:           srcObj.ETag,
+		Size:           srcObj.Size,
+		ContentType:    srcObj.ContentType,
+		Data:           copiedData,
+		ChecksumCRC32:  srcObj.ChecksumCRC32,
+	}
+
+	addVersionToObject(dstBkt, dstKey, obj)
+
 	return obj, nil
 }
 
@@ -122,7 +370,7 @@ func (b *Backend) DeleteObjects(bucketName string, keys []string) ([]DeleteObjec
 
 	results := make([]DeleteObjectResult, 0, len(keys))
 	for _, key := range keys {
-		delete(bucket.Objects, key)
+		createDeleteMarkerUnlocked(bucket, key)
 		results = append(results, DeleteObjectResult{
 			Key:     key,
 			Deleted: true,
@@ -145,9 +393,15 @@ func (b *Backend) ListObjectsV1(
 		return nil, ErrBucketNotFound
 	}
 
+	// Collect all keys with their latest non-DeleteMarker version
 	allKeys := make([]string, 0, len(bucket.Objects))
-	for key := range bucket.Objects {
-		allKeys = append(allKeys, key)
+	keyToObj := make(map[string]*Object)
+	for key, versions := range bucket.Objects {
+		obj := versions.getLatestVersion()
+		if obj != nil {
+			allKeys = append(allKeys, key)
+			keyToObj[key] = obj
+		}
 	}
 	sort.Strings(allKeys)
 
@@ -176,7 +430,7 @@ func (b *Backend) ListObjectsV1(
 				continue
 			}
 		}
-		entries = append(entries, listEntry{key: key, object: bucket.Objects[key]})
+		entries = append(entries, listEntry{key: key, object: keyToObj[key]})
 	}
 
 	for cp := range commonPrefixSet {
@@ -220,9 +474,15 @@ func (b *Backend) ListObjectsV2(
 		return nil, ErrBucketNotFound
 	}
 
+	// Collect all keys with their latest non-DeleteMarker version
 	keys := make([]string, 0, len(bucket.Objects))
-	for key := range bucket.Objects {
-		keys = append(keys, key)
+	keyToObj := make(map[string]*Object)
+	for key, versions := range bucket.Objects {
+		obj := versions.getLatestVersion()
+		if obj != nil {
+			keys = append(keys, key)
+			keyToObj[key] = obj
+		}
 	}
 	sort.Strings(keys)
 
@@ -230,7 +490,7 @@ func (b *Backend) ListObjectsV2(
 	commonPrefixSet := make(map[string]struct{})
 
 	for _, key := range keys {
-		obj := bucket.Objects[key]
+		obj := keyToObj[key]
 
 		if prefix != "" && !strings.HasPrefix(key, prefix) {
 			continue
@@ -290,5 +550,125 @@ func (b *Backend) ListObjectsV2(
 	}
 
 	result.KeyCount = len(result.Objects) + len(result.CommonPrefixes)
+	return result, nil
+}
+
+// ListObjectVersions lists all versions of objects in a bucket.
+func (b *Backend) ListObjectVersions(
+	bucketName, prefix, delimiter, keyMarker, versionIdMarker string,
+	maxKeys int,
+) (*ListObjectVersionsResult, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return nil, ErrBucketNotFound
+	}
+
+	// Collect all keys
+	allKeys := make([]string, 0, len(bucket.Objects))
+	for key := range bucket.Objects {
+		allKeys = append(allKeys, key)
+	}
+	sort.Strings(allKeys)
+
+	type versionEntry struct {
+		key       string
+		versionId string
+		object    *Object
+	}
+
+	var allVersions []versionEntry
+	commonPrefixSet := make(map[string]struct{})
+
+	for _, key := range allKeys {
+		if prefix != "" && !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		if delimiter != "" {
+			subKey := key[len(prefix):]
+			if idx := strings.Index(subKey, delimiter); idx != -1 {
+				commonPrefix := prefix + subKey[:idx+len(delimiter)]
+				commonPrefixSet[commonPrefix] = struct{}{}
+				continue
+			}
+		}
+
+		versions := bucket.Objects[key]
+		for _, v := range versions.Versions {
+			allVersions = append(allVersions, versionEntry{
+				key:       key,
+				versionId: v.VersionId,
+				object:    v,
+			})
+		}
+	}
+
+	// Sort by key, then by LastModified descending (newest first)
+	sort.Slice(allVersions, func(i, j int) bool {
+		if allVersions[i].key != allVersions[j].key {
+			return allVersions[i].key < allVersions[j].key
+		}
+		return allVersions[i].object.LastModified.After(allVersions[j].object.LastModified)
+	})
+
+	// Apply key-marker and version-id-marker
+	startIdx := 0
+	if keyMarker != "" {
+		for i, ve := range allVersions {
+			if ve.key > keyMarker {
+				startIdx = i
+				break
+			}
+			if ve.key == keyMarker && versionIdMarker != "" && ve.versionId == versionIdMarker {
+				startIdx = i + 1
+				break
+			}
+			if ve.key == keyMarker && versionIdMarker == "" {
+				// Skip all versions of keyMarker
+				continue
+			}
+		}
+		// If marker is after all entries
+		if startIdx == 0 && len(allVersions) > 0 &&
+			allVersions[len(allVersions)-1].key <= keyMarker {
+			startIdx = len(allVersions)
+		}
+	}
+
+	result := &ListObjectVersionsResult{}
+
+	// Collect common prefixes
+	for cp := range commonPrefixSet {
+		result.CommonPrefixes = append(result.CommonPrefixes, cp)
+	}
+	sort.Strings(result.CommonPrefixes)
+
+	// Apply maxKeys
+	endIdx := startIdx + maxKeys
+	if endIdx > len(allVersions) {
+		endIdx = len(allVersions)
+	} else {
+		result.IsTruncated = true
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		ve := allVersions[i]
+		if ve.object.IsDeleteMarker {
+			result.DeleteMarkers = append(result.DeleteMarkers, ve.object)
+		} else {
+			result.Versions = append(result.Versions, ve.object)
+		}
+	}
+
+	// Set next markers if truncated
+	if result.IsTruncated && endIdx > startIdx {
+		lastEntry := allVersions[endIdx-1]
+		result.NextKeyMarker = lastEntry.key
+		result.NextVersionIdMarker = lastEntry.versionId
+	}
+
 	return result, nil
 }

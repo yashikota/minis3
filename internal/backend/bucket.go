@@ -104,9 +104,11 @@ func (b *Backend) CreateBucket(name string) error {
 	}
 
 	b.buckets[name] = &Bucket{
-		Name:         name,
-		CreationDate: time.Now().UTC(),
-		Objects:      make(map[string]*Object),
+		Name:             name,
+		CreationDate:     time.Now().UTC(),
+		VersioningStatus: VersioningUnset,
+		MFADelete:        MFADeleteDisabled,
+		Objects:          make(map[string]*ObjectVersions),
 	}
 	return nil
 }
@@ -205,4 +207,38 @@ func sortBucketsByName(buckets []*Bucket) {
 	sort.Slice(buckets, func(i, j int) bool {
 		return buckets[i].Name < buckets[j].Name
 	})
+}
+
+// SetBucketVersioning sets the versioning configuration for a bucket.
+func (b *Backend) SetBucketVersioning(
+	bucketName string,
+	status VersioningStatus,
+	mfaDelete MFADeleteStatus,
+) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.VersioningStatus = status
+	bucket.MFADelete = mfaDelete
+	return nil
+}
+
+// GetBucketVersioning returns the versioning configuration for a bucket.
+func (b *Backend) GetBucketVersioning(
+	bucketName string,
+) (VersioningStatus, MFADeleteStatus, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return VersioningUnset, MFADeleteDisabled, ErrBucketNotFound
+	}
+
+	return bucket.VersioningStatus, bucket.MFADelete, nil
 }
