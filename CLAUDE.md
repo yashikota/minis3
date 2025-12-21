@@ -7,9 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This project uses [Task](https://taskfile.dev/) as the task runner (requires `task` CLI):
 
 - `task lint` - Run golangci-lint with auto-fix and formatting
-- `task test` - Run all unit tests and integration tests
-- `task integration` - Run only integration tests (in integration/ directory)
-- `go test -v ./...` - Run unit tests without Task
+- `task test` - Run all tests
+- `task unit-test` - Run unit test
+- `task sdk-test` - Run sdk test
+- `task s3-test` - Run s3-test
 - `go test -v -run TestName ./...` - Run a specific test
 
 The project uses [aqua](https://aquaproj.github.io/) for tool management in CI.
