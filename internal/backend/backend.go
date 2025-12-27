@@ -22,6 +22,10 @@ type Bucket struct {
 	VersioningStatus VersioningStatus // Versioning state (Unset, Enabled, Suspended)
 	MFADelete        MFADeleteStatus  // MFA Delete configuration
 	Objects          map[string]*ObjectVersions
+	Location         string            // Region location constraint (empty = us-east-1)
+	Tags             map[string]string // Bucket tags
+	Policy           string            // Bucket policy (JSON)
+	ACL              *AccessControlPolicy
 }
 
 // ObjectVersions holds all versions of an object.
@@ -41,6 +45,7 @@ type Object struct {
 	ContentType    string
 	Data           []byte // nil for DeleteMarker
 	ChecksumCRC32  string
+	ACL            *AccessControlPolicy
 }
 
 var (
@@ -56,6 +61,9 @@ var (
 	ErrVersionNotFound           = errors.New("version not found")
 	ErrMethodNotAllowed          = errors.New("method not allowed")
 	ErrMFADeleteRequired         = errors.New("MFA delete required")
+	ErrNoSuchTagSet              = errors.New("the TagSet does not exist")
+	ErrNoSuchBucketPolicy        = errors.New("the bucket policy does not exist")
+	ErrMalformedPolicy           = errors.New("malformed policy document")
 )
 
 func New() *Backend {

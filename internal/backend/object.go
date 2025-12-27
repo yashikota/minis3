@@ -358,8 +358,16 @@ func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Obje
 	return obj, nil
 }
 
-// DeleteObjects deletes multiple objects from a bucket
-func (b *Backend) DeleteObjects(bucketName string, keys []string) ([]DeleteObjectResult, error) {
+// DeleteObjects deletes multiple objects from a bucket.
+// If VersionId is specified for an object, that specific version is deleted.
+// If VersionId is empty, behavior depends on versioning:
+//   - Enabled: creates a delete marker
+//   - Suspended: creates a null delete marker
+//   - Unset: physically deletes the object
+func (b *Backend) DeleteObjects(
+	bucketName string,
+	objects []ObjectIdentifier,
+) ([]DeleteObjectsResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -368,13 +376,63 @@ func (b *Backend) DeleteObjects(bucketName string, keys []string) ([]DeleteObjec
 		return nil, ErrBucketNotFound
 	}
 
-	results := make([]DeleteObjectResult, 0, len(keys))
-	for _, key := range keys {
-		createDeleteMarkerUnlocked(bucket, key)
-		results = append(results, DeleteObjectResult{
-			Key:     key,
-			Deleted: true,
-		})
+	results := make([]DeleteObjectsResult, 0, len(objects))
+	for _, obj := range objects {
+		result := DeleteObjectsResult{
+			Key:       obj.Key,
+			VersionId: obj.VersionId,
+		}
+
+		if obj.VersionId != "" {
+			// Delete specific version
+			versions, exists := bucket.Objects[obj.Key]
+			if !exists {
+				// S3 returns success even if key doesn't exist when VersionId is specified
+				results = append(results, result)
+				continue
+			}
+
+			// Find and remove the version
+			var deletedObj *Object
+			newVersions := make([]*Object, 0, len(versions.Versions))
+			for _, v := range versions.Versions {
+				if v.VersionId == obj.VersionId {
+					deletedObj = v
+					result.DeleteMarker = v.IsDeleteMarker
+				} else {
+					newVersions = append(newVersions, v)
+				}
+			}
+
+			if deletedObj == nil {
+				// Version not found, but S3 returns success
+				results = append(results, result)
+				continue
+			}
+
+			versions.Versions = newVersions
+
+			// Update IsLatest for remaining versions
+			if len(versions.Versions) > 0 {
+				versions.Versions[0].IsLatest = true
+			}
+
+			// Clean up empty ObjectVersions
+			if len(versions.Versions) == 0 {
+				delete(bucket.Objects, obj.Key)
+			}
+		} else {
+			// No VersionId specified: create delete marker or physically delete
+			deleteResult := createDeleteMarkerUnlocked(bucket, obj.Key)
+			if deleteResult != nil {
+				result.DeleteMarker = deleteResult.IsDeleteMarker
+				if deleteResult.IsDeleteMarker {
+					result.DeleteMarkerVersionId = deleteResult.VersionId
+				}
+			}
+		}
+
+		results = append(results, result)
 	}
 
 	return results, nil

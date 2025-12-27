@@ -18,15 +18,15 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | CreateBucket | ✅ | |
 | DeleteBucket | ✅ | |
 | HeadBucket | ✅ | |
-| GetBucketLocation | ⌛ | |
+| GetBucketLocation | ✅ | |
 | GetBucketVersioning | ✅ | |
 | PutBucketVersioning | ✅ | |
-| GetBucketTagging | ⌛ | |
-| PutBucketTagging | ⌛ | |
-| DeleteBucketTagging | ⌛ | |
-| GetBucketPolicy | ⌛ | |
-| PutBucketPolicy | ⌛ | |
-| DeleteBucketPolicy | ⌛ | |
+| GetBucketTagging | ✅ | |
+| PutBucketTagging | ✅ | |
+| DeleteBucketTagging | ✅ | |
+| GetBucketPolicy | ✅ | |
+| PutBucketPolicy | ✅ | |
+| DeleteBucketPolicy | ✅ | |
 
 ### 📦 Object Operations
 

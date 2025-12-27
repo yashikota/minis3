@@ -83,10 +83,13 @@ type ErrorResponse struct {
 	HostId    string   `xml:"HostId"` // optional but common
 }
 
-type DeleteObjectResult struct {
-	Key     string
-	Deleted bool
-	Error   error
+// DeleteObjectsResult represents the result of deleting a single object in batch delete.
+type DeleteObjectsResult struct {
+	Key                   string
+	VersionId             string
+	DeleteMarker          bool
+	DeleteMarkerVersionId string
+	Error                 error
 }
 
 type ListBucketV2Result struct {
@@ -209,3 +212,78 @@ type ListObjectVersionsResult struct {
 	NextKeyMarker       string
 	NextVersionIdMarker string
 }
+
+// LocationConstraint represents the response for GetBucketLocation.
+// For us-east-1, the content is empty (null in S3 terms).
+type LocationConstraint struct {
+	XMLName            xml.Name `xml:"LocationConstraint"`
+	Xmlns              string   `xml:"xmlns,attr,omitempty"`
+	LocationConstraint string   `xml:",chardata"`
+}
+
+// Tag represents a single tag key-value pair.
+type Tag struct {
+	Key   string `xml:"Key"`
+	Value string `xml:"Value"`
+}
+
+// Tagging represents the request/response for bucket tagging operations.
+type Tagging struct {
+	XMLName xml.Name `xml:"Tagging"`
+	Xmlns   string   `xml:"xmlns,attr,omitempty"`
+	TagSet  []Tag    `xml:"TagSet>Tag"`
+}
+
+// AccessControlPolicy represents an S3 ACL.
+type AccessControlPolicy struct {
+	XMLName           xml.Name          `xml:"AccessControlPolicy"`
+	Xmlns             string            `xml:"xmlns,attr,omitempty"`
+	Owner             *Owner            `xml:"Owner"`
+	AccessControlList AccessControlList `xml:"AccessControlList"`
+}
+
+// AccessControlList contains the grants for an ACL.
+type AccessControlList struct {
+	Grants []Grant `xml:"Grant"`
+}
+
+// Grant represents a single permission grant.
+type Grant struct {
+	Grantee    *Grantee `xml:"Grantee"`
+	Permission string   `xml:"Permission"`
+}
+
+// Grantee represents the entity receiving permission.
+type Grantee struct {
+	XMLName     xml.Name `xml:"Grantee"`
+	Xmlns       string   `xml:"xmlns:xsi,attr,omitempty"`
+	Type        string   `xml:"xsi:type,attr"`
+	ID          string   `xml:"ID,omitempty"`
+	DisplayName string   `xml:"DisplayName,omitempty"`
+	URI         string   `xml:"URI,omitempty"`
+}
+
+// CannedACL represents predefined ACL values.
+type CannedACL string
+
+const (
+	ACLPrivate           CannedACL = "private"
+	ACLPublicRead        CannedACL = "public-read"
+	ACLPublicReadWrite   CannedACL = "public-read-write"
+	ACLAuthenticatedRead CannedACL = "authenticated-read"
+)
+
+// ACL permission constants.
+const (
+	PermissionFullControl = "FULL_CONTROL"
+	PermissionRead        = "READ"
+	PermissionWrite       = "WRITE"
+	PermissionReadACP     = "READ_ACP"
+	PermissionWriteACP    = "WRITE_ACP"
+)
+
+// Well-known grantee URIs.
+const (
+	AllUsersURI           = "http://acs.amazonaws.com/groups/global/AllUsers"
+	AuthenticatedUsersURI = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"
+)

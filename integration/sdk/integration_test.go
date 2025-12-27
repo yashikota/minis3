@@ -1030,3 +1030,193 @@ func TestListObjectsV1(t *testing.T) {
 		}
 	})
 }
+
+func TestGetBucketLocation(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "location-test-bucket"
+	t.Cleanup(func() {
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// Get location
+	resp, err := client.GetBucketLocation(context.TODO(), &s3.GetBucketLocationInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("GetBucketLocation failed: %v", err)
+	}
+
+	// For us-east-1 (default), LocationConstraint should be empty
+	if resp.LocationConstraint != "" {
+		t.Logf("LocationConstraint: %v", resp.LocationConstraint)
+	}
+}
+
+func TestBucketTagging(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "tagging-test-bucket"
+	t.Cleanup(func() {
+		client.DeleteBucketTagging(context.TODO(), &s3.DeleteBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("NoTagsInitially", func(t *testing.T) {
+		_, err := client.GetBucketTagging(context.TODO(), &s3.GetBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		// Should return NoSuchTagSet error
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchTagSet" {
+			t.Errorf("Expected NoSuchTagSet error, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetTags", func(t *testing.T) {
+		_, err := client.PutBucketTagging(context.TODO(), &s3.PutBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+			Tagging: &types.Tagging{
+				TagSet: []types.Tag{
+					{Key: aws.String("Project"), Value: aws.String("Test")},
+					{Key: aws.String("Environment"), Value: aws.String("Dev")},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutBucketTagging failed: %v", err)
+		}
+
+		resp, err := client.GetBucketTagging(context.TODO(), &s3.GetBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("GetBucketTagging failed: %v", err)
+		}
+
+		if len(resp.TagSet) != 2 {
+			t.Errorf("Expected 2 tags, got %d", len(resp.TagSet))
+		}
+	})
+
+	t.Run("DeleteTags", func(t *testing.T) {
+		_, err := client.DeleteBucketTagging(context.TODO(), &s3.DeleteBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeleteBucketTagging failed: %v", err)
+		}
+
+		_, err = client.GetBucketTagging(context.TODO(), &s3.GetBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchTagSet" {
+			t.Errorf("Expected NoSuchTagSet error after delete, got: %v", err)
+		}
+	})
+}
+
+func TestBucketPolicy(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "policy-test-bucket"
+	t.Cleanup(func() {
+		client.DeleteBucketPolicy(context.TODO(), &s3.DeleteBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	policy := `{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Principal": "*",
+				"Action": "s3:GetObject",
+				"Resource": "arn:aws:s3:::policy-test-bucket/*"
+			}
+		]
+	}`
+
+	t.Run("NoPolicyInitially", func(t *testing.T) {
+		_, err := client.GetBucketPolicy(context.TODO(), &s3.GetBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchBucketPolicy" {
+			t.Errorf("Expected NoSuchBucketPolicy error, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetPolicy", func(t *testing.T) {
+		_, err := client.PutBucketPolicy(context.TODO(), &s3.PutBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+			Policy: aws.String(policy),
+		})
+		if err != nil {
+			t.Fatalf("PutBucketPolicy failed: %v", err)
+		}
+
+		resp, err := client.GetBucketPolicy(context.TODO(), &s3.GetBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("GetBucketPolicy failed: %v", err)
+		}
+
+		if resp.Policy == nil || *resp.Policy == "" {
+			t.Error("Expected policy to be returned")
+		}
+	})
+
+	t.Run("DeletePolicy", func(t *testing.T) {
+		_, err := client.DeleteBucketPolicy(context.TODO(), &s3.DeleteBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeleteBucketPolicy failed: %v", err)
+		}
+
+		_, err = client.GetBucketPolicy(context.TODO(), &s3.GetBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchBucketPolicy" {
+			t.Errorf("Expected NoSuchBucketPolicy error after delete, got: %v", err)
+		}
+	})
+}

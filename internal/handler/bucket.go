@@ -15,6 +15,24 @@ import (
 
 // handleBucket handles bucket-level operations.
 func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketName string) {
+	// Handle ACL operations
+	if r.URL.Query().Has("acl") {
+		switch r.Method {
+		case http.MethodGet:
+			h.handleGetBucketACL(w, r, bucketName)
+		case http.MethodPut:
+			h.handlePutBucketACL(w, r, bucketName)
+		default:
+			backend.WriteError(
+				w,
+				http.StatusMethodNotAllowed,
+				"MethodNotAllowed",
+				"The specified method is not allowed against this resource.",
+			)
+		}
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		if r.URL.Query().Has("versioning") {
@@ -23,6 +41,18 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("versions") {
 			h.handleListObjectVersions(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("location") {
+			h.handleGetBucketLocation(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("tagging") {
+			h.handleGetBucketTagging(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("policy") {
+			h.handleGetBucketPolicy(w, r, bucketName)
 			return
 		}
 		if r.URL.Query().Get("list-type") == "2" {
@@ -44,6 +74,14 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 	case http.MethodPut:
 		if r.URL.Query().Has("versioning") {
 			h.handlePutBucketVersioning(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("tagging") {
+			h.handlePutBucketTagging(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("policy") {
+			h.handlePutBucketPolicy(w, r, bucketName)
 			return
 		}
 		// Parse CreateBucketConfiguration from request body if present
@@ -97,6 +135,14 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		w.Header().Set("Location", "/"+bucketName)
 		w.WriteHeader(http.StatusOK)
 	case http.MethodDelete:
+		if r.URL.Query().Has("tagging") {
+			h.handleDeleteBucketTagging(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("policy") {
+			h.handleDeleteBucketPolicy(w, r, bucketName)
+			return
+		}
 		err := h.backend.DeleteBucket(bucketName)
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketNotEmpty) {
@@ -574,4 +620,370 @@ func validateMFAHeader(header string) error {
 	}
 
 	return nil
+}
+
+// handleGetBucketLocation handles GetBucketLocation requests.
+func (h *Handler) handleGetBucketLocation(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	location, err := h.backend.GetBucketLocation(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	resp := backend.LocationConstraint{
+		Xmlns:              "http://s3.amazonaws.com/doc/2006-03-01/",
+		LocationConstraint: location,
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handleGetBucketTagging handles GetBucketTagging requests.
+func (h *Handler) handleGetBucketTagging(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	tags, err := h.backend.GetBucketTagging(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrNoSuchTagSet) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchTagSet",
+				"The TagSet does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	resp := backend.Tagging{
+		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+	}
+	for k, v := range tags {
+		resp.TagSet = append(resp.TagSet, backend.Tag{Key: k, Value: v})
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutBucketTagging handles PutBucketTagging requests.
+func (h *Handler) handlePutBucketTagging(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var tagging backend.Tagging
+	if err := xml.Unmarshal(body, &tagging); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	// Convert to map
+	tags := make(map[string]string)
+	for _, tag := range tagging.TagSet {
+		if tag.Key == "" {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidTag",
+				"The tag key cannot be empty.",
+			)
+			return
+		}
+		tags[tag.Key] = tag.Value
+	}
+
+	err = h.backend.PutBucketTagging(bucketName, tags)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeleteBucketTagging handles DeleteBucketTagging requests.
+func (h *Handler) handleDeleteBucketTagging(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	err := h.backend.DeleteBucketTagging(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetBucketPolicy handles GetBucketPolicy requests.
+func (h *Handler) handleGetBucketPolicy(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	policy, err := h.backend.GetBucketPolicy(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrNoSuchBucketPolicy) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucketPolicy",
+				"The bucket policy does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	// Policy is returned as JSON directly (not XML)
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(policy))
+}
+
+// handlePutBucketPolicy handles PutBucketPolicy requests.
+func (h *Handler) handlePutBucketPolicy(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	err = h.backend.PutBucketPolicy(bucketName, string(body))
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrMalformedPolicy) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"MalformedPolicy",
+				"This policy contains invalid Json.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDeleteBucketPolicy handles DeleteBucketPolicy requests.
+func (h *Handler) handleDeleteBucketPolicy(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	err := h.backend.DeleteBucketPolicy(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetBucketACL handles GetBucketAcl requests.
+func (h *Handler) handleGetBucketACL(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	acl, err := h.backend.GetBucketACL(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(acl)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutBucketACL handles PutBucketAcl requests.
+func (h *Handler) handlePutBucketACL(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	// Check for canned ACL header first
+	cannedACL := r.Header.Get("x-amz-acl")
+	if cannedACL != "" {
+		acl := backend.CannedACLToPolicy(cannedACL)
+		if err := h.backend.PutBucketACL(bucketName, acl); err != nil {
+			if errors.Is(err, backend.ErrBucketNotFound) {
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchBucket",
+					"The specified bucket does not exist.",
+				)
+			} else {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Parse ACL from request body
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var acl backend.AccessControlPolicy
+	if err := xml.Unmarshal(body, &acl); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedACLError",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	if err := h.backend.PutBucketACL(bucketName, &acl); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
