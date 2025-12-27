@@ -14,6 +14,24 @@ import (
 
 // handleObject handles object-level operations.
 func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketName, key string) {
+	// Handle ACL operations
+	if r.URL.Query().Has("acl") {
+		switch r.Method {
+		case http.MethodGet:
+			h.handleGetObjectACL(w, r, bucketName, key)
+		case http.MethodPut:
+			h.handlePutObjectACL(w, r, bucketName, key)
+		default:
+			backend.WriteError(
+				w,
+				http.StatusMethodNotAllowed,
+				"MethodNotAllowed",
+				"The specified method is not allowed against this resource.",
+			)
+		}
+		return
+	}
+
 	switch r.Method {
 	case http.MethodPut:
 		copySource := r.Header.Get("x-amz-copy-source")
@@ -228,12 +246,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		return
 	}
 
-	keys := make([]string, len(deleteReq.Objects))
-	for i, obj := range deleteReq.Objects {
-		keys[i] = obj.Key
-	}
-
-	results, err := h.backend.DeleteObjects(bucketName, keys)
+	results, err := h.backend.DeleteObjects(bucketName, deleteReq.Objects)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -249,10 +262,26 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	for _, result := range results {
-		if !deleteReq.Quiet {
-			resp.Deleted = append(resp.Deleted, backend.DeletedObject{
-				Key: result.Key,
+		if result.Error != nil {
+			resp.Errors = append(resp.Errors, backend.DeleteError{
+				Key:     result.Key,
+				Code:    "InternalError",
+				Message: result.Error.Error(),
 			})
+		} else if !deleteReq.Quiet {
+			deleted := backend.DeletedObject{
+				Key: result.Key,
+			}
+			if result.VersionId != "" {
+				deleted.VersionId = result.VersionId
+			}
+			if result.DeleteMarker {
+				deleted.DeleteMarker = true
+				if result.DeleteMarkerVersionId != "" {
+					deleted.DeleteMarkerVersionId = result.DeleteMarkerVersionId
+				}
+			}
+			resp.Deleted = append(resp.Deleted, deleted)
 		}
 	}
 
@@ -335,4 +364,124 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 	_, _ = w.Write(output)
+}
+
+// handleGetObjectACL handles GetObjectAcl requests.
+func (h *Handler) handleGetObjectACL(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName, key string,
+) {
+	acl, err := h.backend.GetObjectACL(bucketName, key)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrObjectNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified key does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(acl)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutObjectACL handles PutObjectAcl requests.
+func (h *Handler) handlePutObjectACL(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName, key string,
+) {
+	// Check for canned ACL header first
+	cannedACL := r.Header.Get("x-amz-acl")
+	if cannedACL != "" {
+		acl := backend.CannedACLToPolicy(cannedACL)
+		if err := h.backend.PutObjectACL(bucketName, key, acl); err != nil {
+			if errors.Is(err, backend.ErrBucketNotFound) {
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchBucket",
+					"The specified bucket does not exist.",
+				)
+			} else if errors.Is(err, backend.ErrObjectNotFound) {
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchKey",
+					"The specified key does not exist.",
+				)
+			} else {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Parse ACL from request body
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var acl backend.AccessControlPolicy
+	if err := xml.Unmarshal(body, &acl); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedACLError",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	if err := h.backend.PutObjectACL(bucketName, key, &acl); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrObjectNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified key does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
