@@ -393,6 +393,18 @@ func NewDefaultACL() *AccessControlPolicy {
 	}
 }
 
+// newGroupGrant creates a Grant for a group URI with the specified permission.
+func newGroupGrant(uri, permission string) Grant {
+	return Grant{
+		Grantee: &Grantee{
+			Xmlns: "http://www.w3.org/2001/XMLSchema-instance",
+			Type:  "Group",
+			URI:   uri,
+		},
+		Permission: permission,
+	}
+}
+
 // CannedACLToPolicy converts a canned ACL string to an AccessControlPolicy.
 func CannedACLToPolicy(cannedACL string) *AccessControlPolicy {
 	owner := DefaultOwner()
@@ -416,42 +428,15 @@ func CannedACLToPolicy(cannedACL string) *AccessControlPolicy {
 
 	switch CannedACL(cannedACL) {
 	case ACLPublicRead:
-		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants, Grant{
-			Grantee: &Grantee{
-				Xmlns: "http://www.w3.org/2001/XMLSchema-instance",
-				Type:  "Group",
-				URI:   AllUsersURI,
-			},
-			Permission: PermissionRead,
-		})
+		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
+			newGroupGrant(AllUsersURI, PermissionRead))
 	case ACLPublicReadWrite:
 		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
-			Grant{
-				Grantee: &Grantee{
-					Xmlns: "http://www.w3.org/2001/XMLSchema-instance",
-					Type:  "Group",
-					URI:   AllUsersURI,
-				},
-				Permission: PermissionRead,
-			},
-			Grant{
-				Grantee: &Grantee{
-					Xmlns: "http://www.w3.org/2001/XMLSchema-instance",
-					Type:  "Group",
-					URI:   AllUsersURI,
-				},
-				Permission: PermissionWrite,
-			},
-		)
+			newGroupGrant(AllUsersURI, PermissionRead),
+			newGroupGrant(AllUsersURI, PermissionWrite))
 	case ACLAuthenticatedRead:
-		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants, Grant{
-			Grantee: &Grantee{
-				Xmlns: "http://www.w3.org/2001/XMLSchema-instance",
-				Type:  "Group",
-				URI:   AuthenticatedUsersURI,
-			},
-			Permission: PermissionRead,
-		})
+		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
+			newGroupGrant(AuthenticatedUsersURI, PermissionRead))
 	}
 
 	return acl
@@ -489,7 +474,9 @@ func (b *Backend) PutBucketACL(bucketName string, acl *AccessControlPolicy) erro
 }
 
 // GetObjectACL returns the ACL for an object.
-func (b *Backend) GetObjectACL(bucketName, key string) (*AccessControlPolicy, error) {
+// If versionId is empty, returns the ACL for the latest version.
+// If versionId is specified, returns the ACL for that specific version.
+func (b *Backend) GetObjectACL(bucketName, key, versionId string) (*AccessControlPolicy, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -503,8 +490,23 @@ func (b *Backend) GetObjectACL(bucketName, key string) (*AccessControlPolicy, er
 		return nil, ErrObjectNotFound
 	}
 
-	// Get the latest (current) version
-	obj := versions.Versions[0]
+	var obj *Object
+	if versionId == "" {
+		// Get the latest (current) version
+		obj = versions.Versions[0]
+	} else {
+		// Find specific version
+		for _, v := range versions.Versions {
+			if v.VersionId == versionId {
+				obj = v
+				break
+			}
+		}
+		if obj == nil {
+			return nil, ErrVersionNotFound
+		}
+	}
+
 	if obj.IsDeleteMarker {
 		return nil, ErrObjectNotFound
 	}
@@ -517,7 +519,9 @@ func (b *Backend) GetObjectACL(bucketName, key string) (*AccessControlPolicy, er
 }
 
 // PutObjectACL sets the ACL for an object.
-func (b *Backend) PutObjectACL(bucketName, key string, acl *AccessControlPolicy) error {
+// If versionId is empty, sets the ACL for the latest version.
+// If versionId is specified, sets the ACL for that specific version.
+func (b *Backend) PutObjectACL(bucketName, key, versionId string, acl *AccessControlPolicy) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -531,7 +535,27 @@ func (b *Backend) PutObjectACL(bucketName, key string, acl *AccessControlPolicy)
 		return ErrObjectNotFound
 	}
 
-	// Set ACL on the latest version
-	versions.Versions[0].ACL = acl
+	var obj *Object
+	if versionId == "" {
+		// Set ACL on the latest version
+		obj = versions.Versions[0]
+	} else {
+		// Find specific version
+		for _, v := range versions.Versions {
+			if v.VersionId == versionId {
+				obj = v
+				break
+			}
+		}
+		if obj == nil {
+			return ErrVersionNotFound
+		}
+	}
+
+	if obj.IsDeleteMarker {
+		return ErrObjectNotFound
+	}
+
+	obj.ACL = acl
 	return nil
 }

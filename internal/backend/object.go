@@ -191,7 +191,8 @@ func (b *Backend) GetObject(bucketName, key string) (*Object, error) {
 }
 
 // GetObjectVersion retrieves a specific version of an object.
-// If versionId is empty, returns the latest non-DeleteMarker version.
+// If versionId is empty, returns the latest version (which may be a DeleteMarker).
+// Callers should check IsDeleteMarker and handle appropriately.
 func (b *Backend) GetObjectVersion(bucketName, key, versionId string) (*Object, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -207,13 +208,9 @@ func (b *Backend) GetObjectVersion(bucketName, key, versionId string) (*Object, 
 	}
 
 	if versionId == "" {
-		// Return latest non-DeleteMarker version
-		obj := versions.getLatestVersion()
-		if obj == nil {
-			// All versions are DeleteMarkers
-			return nil, ErrObjectNotFound
-		}
-		return obj, nil
+		// Return the latest version (may be a DeleteMarker)
+		// Caller should check IsDeleteMarker
+		return versions.Versions[0], nil
 	}
 
 	// Find specific version
@@ -393,18 +390,18 @@ func (b *Backend) DeleteObjects(
 			}
 
 			// Find and remove the version
-			var deletedObj *Object
+			found := false
 			newVersions := make([]*Object, 0, len(versions.Versions))
 			for _, v := range versions.Versions {
 				if v.VersionId == obj.VersionId {
-					deletedObj = v
+					found = true
 					result.DeleteMarker = v.IsDeleteMarker
 				} else {
 					newVersions = append(newVersions, v)
 				}
 			}
 
-			if deletedObj == nil {
+			if !found {
 				// Version not found, but S3 returns success
 				results = append(results, result)
 				continue

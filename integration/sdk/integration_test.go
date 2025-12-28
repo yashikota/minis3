@@ -1139,6 +1139,188 @@ func TestBucketTagging(t *testing.T) {
 	})
 }
 
+func TestDeleteObjectsWithVersioning(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "delete-objects-versioning-test"
+
+	// Cleanup helper for versioned bucket
+	cleanupVersionedBucket := func() {
+		// List all versions and delete them
+		versResp, err := client.ListObjectVersions(context.TODO(), &s3.ListObjectVersionsInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err == nil {
+			// Delete all versions
+			for _, v := range versResp.Versions {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket:    aws.String(bucketName),
+					Key:       v.Key,
+					VersionId: v.VersionId,
+				})
+			}
+			// Delete all delete markers
+			for _, dm := range versResp.DeleteMarkers {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket:    aws.String(bucketName),
+					Key:       dm.Key,
+					VersionId: dm.VersionId,
+				})
+			}
+		}
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	}
+	t.Cleanup(cleanupVersionedBucket)
+
+	// 1. Create bucket and enable versioning
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	_, err = client.PutBucketVersioning(context.TODO(), &s3.PutBucketVersioningInput{
+		Bucket: aws.String(bucketName),
+		VersioningConfiguration: &types.VersioningConfiguration{
+			Status: types.BucketVersioningStatusEnabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutBucketVersioning failed: %v", err)
+	}
+
+	// 2. Create multiple versions of an object
+	key := "versioned-file.txt"
+	var versionIds []string
+
+	for i := 1; i <= 3; i++ {
+		resp, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Body:   strings.NewReader("content version " + string(rune('0'+i))),
+		})
+		if err != nil {
+			t.Fatalf("PutObject (version %d) failed: %v", i, err)
+		}
+		if resp.VersionId != nil {
+			versionIds = append(versionIds, *resp.VersionId)
+		}
+	}
+
+	if len(versionIds) < 3 {
+		t.Fatalf("Expected 3 version IDs, got %d", len(versionIds))
+	}
+
+	// 3. Delete specific version using DeleteObjects
+	t.Run("DeleteSpecificVersion", func(t *testing.T) {
+		deleteResp, err := client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &types.Delete{
+				Objects: []types.ObjectIdentifier{
+					{Key: aws.String(key), VersionId: aws.String(versionIds[1])}, // Delete middle version
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("DeleteObjects failed: %v", err)
+		}
+
+		if len(deleteResp.Deleted) != 1 {
+			t.Errorf("Expected 1 deleted object, got %d", len(deleteResp.Deleted))
+		}
+		if deleteResp.Deleted[0].VersionId == nil || *deleteResp.Deleted[0].VersionId != versionIds[1] {
+			t.Errorf("Expected deleted version ID %s, got %v", versionIds[1], deleteResp.Deleted[0].VersionId)
+		}
+
+		// Verify deleted version is gone
+		_, err = client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:    aws.String(bucketName),
+			Key:       aws.String(key),
+			VersionId: aws.String(versionIds[1]),
+		})
+		if err == nil {
+			t.Error("Expected error getting deleted version, but succeeded")
+		}
+
+		// Verify other versions still exist
+		_, err = client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:    aws.String(bucketName),
+			Key:       aws.String(key),
+			VersionId: aws.String(versionIds[0]),
+		})
+		if err != nil {
+			t.Errorf("First version should still exist: %v", err)
+		}
+
+		_, err = client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:    aws.String(bucketName),
+			Key:       aws.String(key),
+			VersionId: aws.String(versionIds[2]),
+		})
+		if err != nil {
+			t.Errorf("Third version should still exist: %v", err)
+		}
+	})
+
+	// 4. Delete non-existent version (should succeed)
+	t.Run("DeleteNonExistentVersion", func(t *testing.T) {
+		deleteResp, err := client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &types.Delete{
+				Objects: []types.ObjectIdentifier{
+					{Key: aws.String(key), VersionId: aws.String("nonexistent-version-id")},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("DeleteObjects should succeed even for non-existent version: %v", err)
+		}
+
+		// S3 returns success for non-existent versions
+		if len(deleteResp.Deleted) != 1 {
+			t.Errorf("Expected 1 deleted entry (even for non-existent), got %d", len(deleteResp.Deleted))
+		}
+	})
+
+	// 5. Test DeleteMarker behavior
+	t.Run("DeleteMarkerCreation", func(t *testing.T) {
+		// Delete without version ID creates a delete marker
+		deleteResp, err := client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &types.Delete{
+				Objects: []types.ObjectIdentifier{
+					{Key: aws.String(key)}, // No VersionId = create delete marker
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("DeleteObjects failed: %v", err)
+		}
+
+		if len(deleteResp.Deleted) != 1 {
+			t.Errorf("Expected 1 deleted object, got %d", len(deleteResp.Deleted))
+		}
+		if deleteResp.Deleted[0].DeleteMarker == nil || !*deleteResp.Deleted[0].DeleteMarker {
+			t.Error("Expected DeleteMarker to be true")
+		}
+		if deleteResp.Deleted[0].DeleteMarkerVersionId == nil || *deleteResp.Deleted[0].DeleteMarkerVersionId == "" {
+			t.Error("Expected DeleteMarkerVersionId to be set")
+		}
+
+		// Now GetObject should fail (object appears deleted)
+		_, err = client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		if err == nil {
+			t.Error("Expected error getting object with delete marker, but succeeded")
+		}
+	})
+}
+
 func TestBucketPolicy(t *testing.T) {
 	client := setupTestClient(t)
 

@@ -108,7 +108,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			if obj.VersionId != backend.NullVersionId {
 				w.Header().Set("x-amz-version-id", obj.VersionId)
 			}
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			// Return 404 NoSuchKey when latest version is a delete marker
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified key does not exist.",
+			)
 			return
 		}
 
@@ -187,7 +193,8 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			if obj.VersionId != backend.NullVersionId {
 				w.Header().Set("x-amz-version-id", obj.VersionId)
 			}
-			w.WriteHeader(http.StatusMethodNotAllowed)
+			// Return 404 when latest version is a delete marker
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 
@@ -369,10 +376,11 @@ func (h *Handler) handleCopyObject(
 // handleGetObjectACL handles GetObjectAcl requests.
 func (h *Handler) handleGetObjectACL(
 	w http.ResponseWriter,
-	_ *http.Request,
+	r *http.Request,
 	bucketName, key string,
 ) {
-	acl, err := h.backend.GetObjectACL(bucketName, key)
+	versionId := r.URL.Query().Get("versionId")
+	acl, err := h.backend.GetObjectACL(bucketName, key, versionId)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -387,6 +395,13 @@ func (h *Handler) handleGetObjectACL(
 				http.StatusNotFound,
 				"NoSuchKey",
 				"The specified key does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrVersionNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchVersion",
+				"The specified version does not exist.",
 			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -410,28 +425,14 @@ func (h *Handler) handlePutObjectACL(
 	r *http.Request,
 	bucketName, key string,
 ) {
+	versionId := r.URL.Query().Get("versionId")
+
 	// Check for canned ACL header first
 	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
 		acl := backend.CannedACLToPolicy(cannedACL)
-		if err := h.backend.PutObjectACL(bucketName, key, acl); err != nil {
-			if errors.Is(err, backend.ErrBucketNotFound) {
-				backend.WriteError(
-					w,
-					http.StatusNotFound,
-					"NoSuchBucket",
-					"The specified bucket does not exist.",
-				)
-			} else if errors.Is(err, backend.ErrObjectNotFound) {
-				backend.WriteError(
-					w,
-					http.StatusNotFound,
-					"NoSuchKey",
-					"The specified key does not exist.",
-				)
-			} else {
-				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-			}
+		if err := h.backend.PutObjectACL(bucketName, key, versionId, acl); err != nil {
+			h.writePutObjectACLError(w, err)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -462,26 +463,38 @@ func (h *Handler) handlePutObjectACL(
 		return
 	}
 
-	if err := h.backend.PutObjectACL(bucketName, key, &acl); err != nil {
-		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(
-				w,
-				http.StatusNotFound,
-				"NoSuchBucket",
-				"The specified bucket does not exist.",
-			)
-		} else if errors.Is(err, backend.ErrObjectNotFound) {
-			backend.WriteError(
-				w,
-				http.StatusNotFound,
-				"NoSuchKey",
-				"The specified key does not exist.",
-			)
-		} else {
-			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-		}
+	if err := h.backend.PutObjectACL(bucketName, key, versionId, &acl); err != nil {
+		h.writePutObjectACLError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// writePutObjectACLError writes the appropriate error response for PutObjectACL.
+func (h *Handler) writePutObjectACLError(w http.ResponseWriter, err error) {
+	if errors.Is(err, backend.ErrBucketNotFound) {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+	} else if errors.Is(err, backend.ErrObjectNotFound) {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchKey",
+			"The specified key does not exist.",
+		)
+	} else if errors.Is(err, backend.ErrVersionNotFound) {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchVersion",
+			"The specified version does not exist.",
+		)
+	} else {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+	}
 }

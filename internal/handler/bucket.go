@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -689,8 +690,14 @@ func (h *Handler) handleGetBucketTagging(
 	resp := backend.Tagging{
 		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
 	}
-	for k, v := range tags {
-		resp.TagSet = append(resp.TagSet, backend.Tag{Key: k, Value: v})
+	// Sort keys for deterministic output
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		resp.TagSet = append(resp.TagSet, backend.Tag{Key: k, Value: tags[k]})
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
