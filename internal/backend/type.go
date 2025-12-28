@@ -292,3 +292,150 @@ const (
 	AllUsersURI           = "http://acs.amazonaws.com/groups/global/AllUsers"
 	AuthenticatedUsersURI = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"
 )
+
+// MultipartUpload represents an in-progress multipart upload.
+type MultipartUpload struct {
+	UploadId    string
+	Bucket      string
+	Key         string
+	Initiated   string // RFC3339 formatted time
+	Parts       map[int]*PartInfo
+	ContentType string
+	Metadata    map[string]string
+}
+
+// PartInfo represents an uploaded part.
+type PartInfo struct {
+	PartNumber   int
+	ETag         string
+	Size         int64
+	Data         []byte
+	LastModified string // RFC3339 formatted time
+}
+
+// InitiateMultipartUploadResult is the XML response for CreateMultipartUpload.
+type InitiateMultipartUploadResult struct {
+	XMLName  xml.Name `xml:"InitiateMultipartUploadResult"`
+	Xmlns    string   `xml:"xmlns,attr,omitempty"`
+	Bucket   string   `xml:"Bucket"`
+	Key      string   `xml:"Key"`
+	UploadId string   `xml:"UploadId"`
+}
+
+// CompleteMultipartUploadRequest is the XML request for CompleteMultipartUpload.
+type CompleteMultipartUploadRequest struct {
+	XMLName xml.Name      `xml:"CompleteMultipartUpload"`
+	Parts   []CompletePart `xml:"Part"`
+}
+
+// CompletePart represents a part in CompleteMultipartUpload request.
+type CompletePart struct {
+	PartNumber int    `xml:"PartNumber"`
+	ETag       string `xml:"ETag"`
+}
+
+// CompleteMultipartUploadResult is the XML response for CompleteMultipartUpload.
+type CompleteMultipartUploadResult struct {
+	XMLName  xml.Name `xml:"CompleteMultipartUploadResult"`
+	Xmlns    string   `xml:"xmlns,attr,omitempty"`
+	Location string   `xml:"Location"`
+	Bucket   string   `xml:"Bucket"`
+	Key      string   `xml:"Key"`
+	ETag     string   `xml:"ETag"`
+}
+
+// ListMultipartUploadsResult is the XML response for ListMultipartUploads.
+type ListMultipartUploadsResult struct {
+	XMLName            xml.Name          `xml:"ListMultipartUploadsResult"`
+	Xmlns              string            `xml:"xmlns,attr,omitempty"`
+	Bucket             string            `xml:"Bucket"`
+	KeyMarker          string            `xml:"KeyMarker"`
+	UploadIdMarker     string            `xml:"UploadIdMarker"`
+	NextKeyMarker      string            `xml:"NextKeyMarker,omitempty"`
+	NextUploadIdMarker string            `xml:"NextUploadIdMarker,omitempty"`
+	MaxUploads         int               `xml:"MaxUploads"`
+	IsTruncated        bool              `xml:"IsTruncated"`
+	Uploads            []UploadInfo      `xml:"Upload,omitempty"`
+	Prefix             string            `xml:"Prefix,omitempty"`
+	Delimiter          string            `xml:"Delimiter,omitempty"`
+	CommonPrefixes     []CommonPrefix    `xml:"CommonPrefixes,omitempty"`
+	EncodingType       string            `xml:"EncodingType,omitempty"`
+}
+
+// UploadInfo represents an upload in ListMultipartUploads response.
+type UploadInfo struct {
+	Key          string `xml:"Key"`
+	UploadId     string `xml:"UploadId"`
+	Initiator    *Owner `xml:"Initiator"`
+	Owner        *Owner `xml:"Owner"`
+	StorageClass string `xml:"StorageClass"`
+	Initiated    string `xml:"Initiated"`
+}
+
+// ListPartsResult is the XML response for ListParts.
+type ListPartsResult struct {
+	XMLName              xml.Name   `xml:"ListPartsResult"`
+	Xmlns                string     `xml:"xmlns,attr,omitempty"`
+	Bucket               string     `xml:"Bucket"`
+	Key                  string     `xml:"Key"`
+	UploadId             string     `xml:"UploadId"`
+	Initiator            *Owner     `xml:"Initiator"`
+	Owner                *Owner     `xml:"Owner"`
+	StorageClass         string     `xml:"StorageClass"`
+	PartNumberMarker     int        `xml:"PartNumberMarker"`
+	NextPartNumberMarker int        `xml:"NextPartNumberMarker,omitempty"`
+	MaxParts             int        `xml:"MaxParts"`
+	IsTruncated          bool       `xml:"IsTruncated"`
+	Parts                []PartItem `xml:"Part,omitempty"`
+}
+
+// PartItem represents a part in ListParts response.
+type PartItem struct {
+	PartNumber   int    `xml:"PartNumber"`
+	LastModified string `xml:"LastModified"`
+	ETag         string `xml:"ETag"`
+	Size         int64  `xml:"Size"`
+}
+
+// ObjectLockConfiguration represents the bucket's Object Lock configuration.
+type ObjectLockConfiguration struct {
+	XMLName           xml.Name            `xml:"ObjectLockConfiguration"`
+	Xmlns             string              `xml:"xmlns,attr,omitempty"`
+	ObjectLockEnabled string              `xml:"ObjectLockEnabled,omitempty"`
+	Rule              *ObjectLockRule     `xml:"Rule,omitempty"`
+}
+
+// ObjectLockRule contains the default retention rule.
+type ObjectLockRule struct {
+	DefaultRetention *DefaultRetention `xml:"DefaultRetention,omitempty"`
+}
+
+// DefaultRetention represents the default retention settings.
+type DefaultRetention struct {
+	Mode  string `xml:"Mode,omitempty"`  // GOVERNANCE or COMPLIANCE
+	Days  int    `xml:"Days,omitempty"`
+	Years int    `xml:"Years,omitempty"`
+}
+
+// ObjectLockRetention represents the retention settings for an object.
+type ObjectLockRetention struct {
+	XMLName         xml.Name `xml:"Retention"`
+	Xmlns           string   `xml:"xmlns,attr,omitempty"`
+	Mode            string   `xml:"Mode,omitempty"`
+	RetainUntilDate string   `xml:"RetainUntilDate,omitempty"`
+}
+
+// ObjectLockLegalHold represents the legal hold status for an object.
+type ObjectLockLegalHold struct {
+	XMLName xml.Name `xml:"LegalHold"`
+	Xmlns   string   `xml:"xmlns,attr,omitempty"`
+	Status  string   `xml:"Status"` // ON or OFF
+}
+
+// Object Lock mode constants.
+const (
+	RetentionModeGovernance = "GOVERNANCE"
+	RetentionModeCompliance = "COMPLIANCE"
+	LegalHoldStatusOn       = "ON"
+	LegalHoldStatusOff      = "OFF"
+)

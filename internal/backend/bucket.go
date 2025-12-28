@@ -364,9 +364,10 @@ func isValidJSON(s string) bool {
 }
 
 // DefaultOwner returns the default owner for minis3.
+// The ID matches the s3tests.conf user_id for test compatibility.
 func DefaultOwner() *Owner {
 	return &Owner{
-		ID:          "minis3owner",
+		ID:          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		DisplayName: "minis3",
 	}
 }
@@ -558,4 +559,37 @@ func (b *Backend) PutObjectACL(bucketName, key, versionId string, acl *AccessCon
 
 	obj.ACL = acl
 	return nil
+}
+
+// IsACLPublicRead checks if the ACL grants public read access.
+func IsACLPublicRead(acl *AccessControlPolicy) bool {
+	if acl == nil {
+		return false
+	}
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee != nil &&
+			grant.Grantee.URI == AllUsersURI &&
+			(grant.Permission == PermissionRead || grant.Permission == PermissionFullControl) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsObjectPubliclyReadable checks if an object is publicly readable.
+func (b *Backend) IsObjectPubliclyReadable(bucketName, key, versionId string) bool {
+	acl, err := b.GetObjectACL(bucketName, key, versionId)
+	if err != nil {
+		return false
+	}
+	return IsACLPublicRead(acl)
+}
+
+// IsBucketPubliclyReadable checks if a bucket is publicly readable.
+func (b *Backend) IsBucketPubliclyReadable(bucketName string) bool {
+	acl, err := b.GetBucketACL(bucketName)
+	if err != nil {
+		return false
+	}
+	return IsACLPublicRead(acl)
 }

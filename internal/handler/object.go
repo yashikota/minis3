@@ -15,6 +15,7 @@ import (
 
 // extractMetadata extracts x-amz-meta-* headers from the request.
 // AWS S3 lowercases all metadata keys, so we do the same for compatibility.
+// Non-ASCII values may be URL-encoded by AWS SDK, so we decode them.
 func extractMetadata(r *http.Request) map[string]string {
 	metadata := make(map[string]string)
 	for key, values := range r.Header {
@@ -23,7 +24,12 @@ func extractMetadata(r *http.Request) map[string]string {
 			// Extract the key portion after "x-amz-meta-" and lowercase it
 			// This matches AWS S3 behavior which lowercases all metadata keys
 			metaKey := strings.ToLower(key[len("X-Amz-Meta-"):])
-			metadata[metaKey] = values[0]
+			value := values[0]
+			// Try to URL-decode the value (AWS SDK may encode non-ASCII chars)
+			if decoded, err := url.QueryUnescape(value); err == nil {
+				value = decoded
+			}
+			metadata[metaKey] = value
 		}
 	}
 	if len(metadata) == 0 {
@@ -34,11 +40,27 @@ func extractMetadata(r *http.Request) map[string]string {
 
 // setMetadataHeaders sets x-amz-meta-* response headers without Go's canonicalization.
 // This preserves lowercase keys as required by S3 API compatibility.
+// Non-ASCII values are URL-encoded for HTTP header compatibility.
 func setMetadataHeaders(w http.ResponseWriter, metadata map[string]string) {
 	for k, v := range metadata {
+		// Check if value contains non-ASCII characters
+		needsEncoding := false
+		for i := 0; i < len(v); i++ {
+			if v[i] > 127 {
+				needsEncoding = true
+				break
+			}
+		}
+
+		encodedValue := v
+		if needsEncoding {
+			// URL-encode non-ASCII characters for HTTP header compatibility
+			encodedValue = url.QueryEscape(v)
+		}
+
 		// Use direct map access to avoid Go's header canonicalization
 		// This ensures "x-amz-meta-foo" stays lowercase, not "X-Amz-Meta-Foo"
-		w.Header()["x-amz-meta-"+k] = []string{v}
+		w.Header()["x-amz-meta-"+k] = []string{encodedValue}
 	}
 }
 
@@ -80,6 +102,72 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		return
 	}
 
+	// Handle Object Lock Retention operations
+	if r.URL.Query().Has("retention") {
+		switch r.Method {
+		case http.MethodGet:
+			h.handleGetObjectRetention(w, r, bucketName, key)
+		case http.MethodPut:
+			h.handlePutObjectRetention(w, r, bucketName, key)
+		default:
+			backend.WriteError(
+				w,
+				http.StatusMethodNotAllowed,
+				"MethodNotAllowed",
+				"The specified method is not allowed against this resource.",
+			)
+		}
+		return
+	}
+
+	// Handle Object Lock Legal Hold operations
+	if r.URL.Query().Has("legal-hold") {
+		switch r.Method {
+		case http.MethodGet:
+			h.handleGetObjectLegalHold(w, r, bucketName, key)
+		case http.MethodPut:
+			h.handlePutObjectLegalHold(w, r, bucketName, key)
+		default:
+			backend.WriteError(
+				w,
+				http.StatusMethodNotAllowed,
+				"MethodNotAllowed",
+				"The specified method is not allowed against this resource.",
+			)
+		}
+		return
+	}
+
+	// Handle multipart upload operations
+	query := r.URL.Query()
+	if query.Has("uploadId") {
+		uploadId := query.Get("uploadId")
+		switch r.Method {
+		case http.MethodPut:
+			if query.Has("partNumber") {
+				h.handleUploadPart(w, r, bucketName, key)
+				return
+			}
+		case http.MethodPost:
+			h.handleCompleteMultipartUpload(w, r, bucketName, key)
+			return
+		case http.MethodDelete:
+			h.handleAbortMultipartUpload(w, r, bucketName, key)
+			return
+		case http.MethodGet:
+			if uploadId != "" {
+				h.handleListParts(w, r, bucketName, key)
+				return
+			}
+		}
+	}
+
+	// Handle CreateMultipartUpload (POST with ?uploads)
+	if r.Method == http.MethodPost && query.Has("uploads") {
+		h.handleCreateMultipartUpload(w, r, bucketName, key)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodPut:
 		copySource := r.Header.Get("x-amz-copy-source")
@@ -88,19 +176,37 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
-		data, err := io.ReadAll(r.Body)
+		var data []byte
+		var err error
+
+		// Check for AWS chunked encoding
+		contentEncoding := r.Header.Get("Content-Encoding")
+		if isAWSChunkedEncoding(contentEncoding) {
+			data, err = decodeAWSChunkedBody(r.Body)
+		} else {
+			data, err = io.ReadAll(r.Body)
+		}
 		if err != nil {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		defer func() { _ = r.Body.Close() }()
 
+		// Strip aws-chunked from content encoding (it's a transfer encoding, not content encoding)
+		storedContentEncoding := contentEncoding
+		if isAWSChunkedEncoding(contentEncoding) {
+			storedContentEncoding = strings.Replace(contentEncoding, "aws-chunked", "", 1)
+			storedContentEncoding = strings.TrimPrefix(storedContentEncoding, ",")
+			storedContentEncoding = strings.TrimSuffix(storedContentEncoding, ",")
+			storedContentEncoding = strings.TrimSpace(storedContentEncoding)
+		}
+
 		opts := backend.PutObjectOptions{
 			ContentType:        r.Header.Get("Content-Type"),
 			Metadata:           extractMetadata(r),
 			CacheControl:       r.Header.Get("Cache-Control"),
 			Expires:            parseExpires(r.Header.Get("Expires")),
-			ContentEncoding:    r.Header.Get("Content-Encoding"),
+			ContentEncoding:    storedContentEncoding,
 			ContentLanguage:    r.Header.Get("Content-Language"),
 			ContentDisposition: r.Header.Get("Content-Disposition"),
 		}
@@ -417,6 +523,16 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
+	// Parse versionId from copy source (format: /bucket/key?versionId=xxx)
+	var srcVersionId string
+	if idx := strings.Index(decodedCopySource, "?"); idx != -1 {
+		queryStr := decodedCopySource[idx+1:]
+		decodedCopySource = decodedCopySource[:idx]
+		if values, err := url.ParseQuery(queryStr); err == nil {
+			srcVersionId = values.Get("versionId")
+		}
+	}
+
 	srcBucket, srcKey := extractBucketAndKey(decodedCopySource)
 	if srcBucket == "" || srcKey == "" {
 		backend.WriteError(
@@ -461,7 +577,7 @@ func (h *Handler) handleCopyObject(
 		opts.ContentDisposition = r.Header.Get("Content-Disposition")
 	}
 
-	obj, err := h.backend.CopyObject(srcBucket, srcKey, dstBucket, dstKey, opts)
+	obj, srcVersionIdUsed, err := h.backend.CopyObject(srcBucket, srcKey, srcVersionId, dstBucket, dstKey, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrSourceBucketNotFound) ||
 			errors.Is(err, backend.ErrDestinationBucketNotFound) {
@@ -473,13 +589,20 @@ func (h *Handler) handleCopyObject(
 			)
 		} else if errors.Is(err, backend.ErrSourceObjectNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+		} else if errors.Is(err, backend.ErrVersionNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchVersion", "The specified version does not exist.")
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
 
-	// Add version ID header if versioning is enabled
+	// Add source version ID header if specified
+	if srcVersionIdUsed != "" && srcVersionIdUsed != backend.NullVersionId {
+		w.Header().Set("x-amz-copy-source-version-id", srcVersionIdUsed)
+	}
+
+	// Add destination version ID header if versioning is enabled
 	if obj.VersionId != backend.NullVersionId {
 		w.Header().Set("x-amz-version-id", obj.VersionId)
 	}

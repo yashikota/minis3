@@ -23,6 +23,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleRequest is the main dispatch point.
 func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
+	// Verify presigned URL if applicable
+	if isPresignedURL(r) {
+		if err := verifyPresignedURL(r); err != nil {
+			if pe, ok := err.(*presignedError); ok {
+				backend.WriteError(w, http.StatusForbidden, pe.code, pe.message)
+			} else {
+				backend.WriteError(w, http.StatusForbidden, "AccessDenied", err.Error())
+			}
+			return
+		}
+	}
+
 	path := r.URL.Path
 	if path == "/" {
 		h.handleService(w, r)

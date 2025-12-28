@@ -317,33 +317,56 @@ type CopyObjectOptions struct {
 	ContentDisposition string
 }
 
-// CopyObject copies an object from source to destination
+// CopyObject copies an object from source to destination.
+// If srcVersionId is specified, copies that specific version.
+// Returns the copied object and the source version ID that was used.
 func (b *Backend) CopyObject(
-	srcBucket, srcKey, dstBucket, dstKey string,
+	srcBucket, srcKey, srcVersionId, dstBucket, dstKey string,
 	opts CopyObjectOptions,
-) (*Object, error) {
+) (*Object, string, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	srcBkt, ok := b.buckets[srcBucket]
 	if !ok {
-		return nil, ErrSourceBucketNotFound
+		return nil, "", ErrSourceBucketNotFound
 	}
 
 	srcVersions, ok := srcBkt.Objects[srcKey]
 	if !ok || len(srcVersions.Versions) == 0 {
-		return nil, ErrSourceObjectNotFound
+		return nil, "", ErrSourceObjectNotFound
 	}
 
-	// Get latest non-DeleteMarker version
-	srcObj := srcVersions.getLatestVersion()
-	if srcObj == nil {
-		return nil, ErrSourceObjectNotFound
+	var srcObj *Object
+	var actualVersionId string
+
+	if srcVersionId != "" {
+		// Find specific version
+		for _, v := range srcVersions.Versions {
+			if v.VersionId == srcVersionId {
+				srcObj = v
+				actualVersionId = v.VersionId
+				break
+			}
+		}
+		if srcObj == nil {
+			return nil, "", ErrVersionNotFound
+		}
+		if srcObj.IsDeleteMarker {
+			return nil, "", ErrSourceObjectNotFound
+		}
+	} else {
+		// Get latest non-DeleteMarker version
+		srcObj = srcVersions.getLatestVersion()
+		if srcObj == nil {
+			return nil, "", ErrSourceObjectNotFound
+		}
+		actualVersionId = srcObj.VersionId
 	}
 
 	dstBkt, ok := b.buckets[dstBucket]
 	if !ok {
-		return nil, ErrDestinationBucketNotFound
+		return nil, "", ErrDestinationBucketNotFound
 	}
 
 	copiedData := make([]byte, len(srcObj.Data))
@@ -401,7 +424,7 @@ func (b *Backend) CopyObject(
 
 	addVersionToObject(dstBkt, dstKey, obj)
 
-	return obj, nil
+	return obj, actualVersionId, nil
 }
 
 // DeleteObjects deletes multiple objects from a bucket.

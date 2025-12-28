@@ -56,6 +56,14 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleGetBucketPolicy(w, r, bucketName)
 			return
 		}
+		if r.URL.Query().Has("uploads") {
+			h.handleListMultipartUploads(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("object-lock") {
+			h.handleGetObjectLockConfiguration(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Get("list-type") == "2" {
 			h.handleListObjectsV2(w, r, bucketName)
 			return
@@ -83,6 +91,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("policy") {
 			h.handlePutBucketPolicy(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("object-lock") {
+			h.handlePutObjectLockConfiguration(w, r, bucketName)
 			return
 		}
 		// Parse CreateBucketConfiguration from request body if present

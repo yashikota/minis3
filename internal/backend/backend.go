@@ -11,21 +11,24 @@ import (
 
 // Backend holds the state of the S3 world.
 type Backend struct {
-	mu      sync.RWMutex
-	buckets map[string]*Bucket
+	mu       sync.RWMutex
+	buckets  map[string]*Bucket
+	uploads  map[string]*MultipartUpload // key: uploadId
 }
 
 // Bucket represents an S3 bucket containing objects and metadata
 type Bucket struct {
-	Name             string
-	CreationDate     time.Time
-	VersioningStatus VersioningStatus // Versioning state (Unset, Enabled, Suspended)
-	MFADelete        MFADeleteStatus  // MFA Delete configuration
-	Objects          map[string]*ObjectVersions
-	Location         string            // Region location constraint (empty = us-east-1)
-	Tags             map[string]string // Bucket tags
-	Policy           string            // Bucket policy (JSON)
-	ACL              *AccessControlPolicy
+	Name                    string
+	CreationDate            time.Time
+	VersioningStatus        VersioningStatus // Versioning state (Unset, Enabled, Suspended)
+	MFADelete               MFADeleteStatus  // MFA Delete configuration
+	Objects                 map[string]*ObjectVersions
+	Location                string            // Region location constraint (empty = us-east-1)
+	Tags                    map[string]string // Bucket tags
+	Policy                  string            // Bucket policy (JSON)
+	ACL                     *AccessControlPolicy
+	ObjectLockEnabled       bool                     // Whether object lock is enabled
+	ObjectLockConfiguration *ObjectLockConfiguration // Default object lock configuration
 }
 
 // ObjectVersions holds all versions of an object.
@@ -53,6 +56,10 @@ type Object struct {
 	ContentEncoding    string            // Content-Encoding header
 	ContentLanguage    string            // Content-Language header
 	ContentDisposition string            // Content-Disposition header
+	// Object Lock fields
+	RetentionMode    string     // GOVERNANCE or COMPLIANCE
+	RetainUntilDate  *time.Time // Retention until date
+	LegalHoldStatus  string     // ON or OFF
 }
 
 // PutObjectOptions contains options for PutObject operation.
@@ -83,11 +90,19 @@ var (
 	ErrNoSuchBucketPolicy        = errors.New("the bucket policy does not exist")
 	ErrMalformedPolicy           = errors.New("malformed policy document")
 	ErrInvalidRequest            = errors.New("invalid request")
+	ErrNoSuchUpload              = errors.New("the specified upload does not exist")
+	ErrInvalidPart               = errors.New("one or more of the specified parts could not be found")
+	ErrInvalidPartOrder          = errors.New("the list of parts was not in ascending order")
+	ErrEntityTooSmall            = errors.New("your proposed upload is smaller than the minimum allowed object size")
+	ErrObjectLockNotEnabled      = errors.New("object lock is not enabled for this bucket")
+	ErrNoSuchObjectLockConfig    = errors.New("the object lock configuration does not exist")
+	ErrObjectLocked              = errors.New("object is locked")
 )
 
 func New() *Backend {
 	return &Backend{
 		buckets: make(map[string]*Bucket),
+		uploads: make(map[string]*MultipartUpload),
 	}
 }
 
