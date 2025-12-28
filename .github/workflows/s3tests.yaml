@@ -1,11 +1,6 @@
 name: S3 Tests
 
 on:
-  push:
-    paths:
-      - "**.go"
-      - "integration/s3-test/**"
-      - ".github/workflows/s3tests.yaml"
   pull_request:
     paths:
       - "**.go"
