@@ -182,8 +182,8 @@ func calculatePresignedSignatureV4(
 	r *http.Request,
 	secretKey, dateStamp, region, service, signedHeadersStr string,
 ) string {
-	// Get canonical URI
-	canonicalURI := r.URL.Path
+	// Get canonical URI (must use escaped path for SigV4)
+	canonicalURI := r.URL.EscapedPath()
 	if canonicalURI == "" {
 		canonicalURI = "/"
 	}

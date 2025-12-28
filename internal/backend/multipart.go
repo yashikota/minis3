@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -147,7 +148,10 @@ func (b *Backend) CompleteMultipartUpload(
 	// Calculate final ETag (S3 multipart ETag format: MD5-of-MD5s-numberOfParts)
 	md5Hash := md5.New()
 	for _, etag := range partETags {
-		decoded, _ := decodeHex(etag)
+		decoded, err := hex.DecodeString(etag)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ETag format: %w", err)
+		}
 		md5Hash.Write(decoded)
 	}
 	finalETag := fmt.Sprintf("\"%x-%d\"", md5Hash.Sum(nil), len(parts))
@@ -191,27 +195,6 @@ func (b *Backend) CompleteMultipartUpload(
 	delete(b.uploads, uploadId)
 
 	return obj, nil
-}
-
-// decodeHex decodes a hex string to bytes.
-func decodeHex(s string) ([]byte, error) {
-	s = strings.TrimPrefix(s, "\"")
-	s = strings.TrimSuffix(s, "\"")
-
-	if len(s)%2 != 0 {
-		return nil, fmt.Errorf("invalid hex string length")
-	}
-
-	result := make([]byte, len(s)/2)
-	for i := 0; i < len(s); i += 2 {
-		var b byte
-		_, err := fmt.Sscanf(s[i:i+2], "%02x", &b)
-		if err != nil {
-			return nil, err
-		}
-		result[i/2] = b
-	}
-	return result, nil
 }
 
 // AbortMultipartUpload aborts a multipart upload.
