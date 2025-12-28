@@ -142,7 +142,7 @@ func createDeleteMarkerUnlocked(bucket *Bucket, key string) *DeleteObjectVersion
 func (b *Backend) PutObject(
 	bucketName, key string,
 	data []byte,
-	contentType string,
+	opts PutObjectOptions,
 ) (*Object, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -168,16 +168,22 @@ func (b *Backend) PutObject(
 	}
 
 	obj := &Object{
-		Key:            key,
-		VersionId:      versionId,
-		IsLatest:       true,
-		IsDeleteMarker: false,
-		LastModified:   time.Now().UTC(),
-		ETag:           fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
-		Size:           int64(len(data)),
-		ContentType:    contentType,
-		Data:           data,
-		ChecksumCRC32:  base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
+		Key:                key,
+		VersionId:          versionId,
+		IsLatest:           true,
+		IsDeleteMarker:     false,
+		LastModified:       time.Now().UTC(),
+		ETag:               fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
+		Size:               int64(len(data)),
+		ContentType:        opts.ContentType,
+		Data:               data,
+		ChecksumCRC32:      base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
+		Metadata:           opts.Metadata,
+		CacheControl:       opts.CacheControl,
+		Expires:            opts.Expires,
+		ContentEncoding:    opts.ContentEncoding,
+		ContentLanguage:    opts.ContentLanguage,
+		ContentDisposition: opts.ContentDisposition,
 	}
 
 	addVersionToObject(bucket, key, obj)
@@ -299,8 +305,23 @@ func (b *Backend) DeleteObjectVersion(
 	return createDeleteMarkerUnlocked(bucket, key), nil
 }
 
+// CopyObjectOptions contains options for CopyObject operation.
+type CopyObjectOptions struct {
+	MetadataDirective  string            // "COPY" (default) or "REPLACE"
+	Metadata           map[string]string // Used when MetadataDirective is "REPLACE"
+	ContentType        string            // Used when MetadataDirective is "REPLACE"
+	CacheControl       string
+	Expires            *time.Time
+	ContentEncoding    string
+	ContentLanguage    string
+	ContentDisposition string
+}
+
 // CopyObject copies an object from source to destination
-func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Object, error) {
+func (b *Backend) CopyObject(
+	srcBucket, srcKey, dstBucket, dstKey string,
+	opts CopyObjectOptions,
+) (*Object, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -345,9 +366,37 @@ func (b *Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Obje
 		LastModified:   time.Now().UTC(),
 		ETag:           srcObj.ETag,
 		Size:           srcObj.Size,
-		ContentType:    srcObj.ContentType,
 		Data:           copiedData,
 		ChecksumCRC32:  srcObj.ChecksumCRC32,
+	}
+
+	// Handle metadata directive
+	if opts.MetadataDirective == "REPLACE" {
+		// Use new metadata from options
+		obj.ContentType = opts.ContentType
+		obj.Metadata = opts.Metadata
+		obj.CacheControl = opts.CacheControl
+		obj.Expires = opts.Expires
+		obj.ContentEncoding = opts.ContentEncoding
+		obj.ContentLanguage = opts.ContentLanguage
+		obj.ContentDisposition = opts.ContentDisposition
+	} else {
+		// Default: COPY - copy metadata from source
+		obj.ContentType = srcObj.ContentType
+		obj.CacheControl = srcObj.CacheControl
+		obj.ContentEncoding = srcObj.ContentEncoding
+		obj.ContentLanguage = srcObj.ContentLanguage
+		obj.ContentDisposition = srcObj.ContentDisposition
+		if srcObj.Expires != nil {
+			expires := *srcObj.Expires
+			obj.Expires = &expires
+		}
+		if srcObj.Metadata != nil {
+			obj.Metadata = make(map[string]string, len(srcObj.Metadata))
+			for k, v := range srcObj.Metadata {
+				obj.Metadata[k] = v
+			}
+		}
 	}
 
 	addVersionToObject(dstBkt, dstKey, obj)

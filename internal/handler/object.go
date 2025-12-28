@@ -7,10 +7,58 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
 )
+
+// extractMetadata extracts x-amz-meta-* headers from the request.
+// AWS S3 lowercases all metadata keys, so we do the same for compatibility.
+func extractMetadata(r *http.Request) map[string]string {
+	metadata := make(map[string]string)
+	for key, values := range r.Header {
+		lowerKey := strings.ToLower(key)
+		if strings.HasPrefix(lowerKey, "x-amz-meta-") && len(values) > 0 {
+			// Extract the key portion after "x-amz-meta-" and lowercase it
+			// This matches AWS S3 behavior which lowercases all metadata keys
+			metaKey := strings.ToLower(key[len("X-Amz-Meta-"):])
+			metadata[metaKey] = values[0]
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+// setMetadataHeaders sets x-amz-meta-* response headers without Go's canonicalization.
+// This preserves lowercase keys as required by S3 API compatibility.
+func setMetadataHeaders(w http.ResponseWriter, metadata map[string]string) {
+	for k, v := range metadata {
+		// Use direct map access to avoid Go's header canonicalization
+		// This ensures "x-amz-meta-foo" stays lowercase, not "X-Amz-Meta-Foo"
+		w.Header()["x-amz-meta-"+k] = []string{v}
+	}
+}
+
+// parseExpires parses the Expires header value.
+func parseExpires(value string) *time.Time {
+	if value == "" {
+		return nil
+	}
+	// Try RFC1123 format first (standard HTTP date)
+	t, err := time.Parse(http.TimeFormat, value)
+	if err == nil {
+		return &t
+	}
+	// Try RFC3339 format
+	t, err = time.Parse(time.RFC3339, value)
+	if err == nil {
+		return &t
+	}
+	return nil
+}
 
 // handleObject handles object-level operations.
 func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketName, key string) {
@@ -47,8 +95,17 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		defer func() { _ = r.Body.Close() }()
 
-		contentType := r.Header.Get("Content-Type")
-		obj, err := h.backend.PutObject(bucketName, key, data, contentType)
+		opts := backend.PutObjectOptions{
+			ContentType:        r.Header.Get("Content-Type"),
+			Metadata:           extractMetadata(r),
+			CacheControl:       r.Header.Get("Cache-Control"),
+			Expires:            parseExpires(r.Header.Get("Expires")),
+			ContentEncoding:    r.Header.Get("Content-Encoding"),
+			ContentLanguage:    r.Header.Get("Content-Language"),
+			ContentDisposition: r.Header.Get("Content-Disposition"),
+		}
+
+		obj, err := h.backend.PutObject(bucketName, key, data, opts)
 		if err != nil {
 			backend.WriteError(
 				w,
@@ -126,6 +183,24 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if obj.VersionId != backend.NullVersionId {
 			w.Header().Set("x-amz-version-id", obj.VersionId)
 		}
+		// Set optional headers if present
+		if obj.CacheControl != "" {
+			w.Header().Set("Cache-Control", obj.CacheControl)
+		}
+		if obj.Expires != nil {
+			w.Header().Set("Expires", obj.Expires.Format(http.TimeFormat))
+		}
+		if obj.ContentEncoding != "" {
+			w.Header().Set("Content-Encoding", obj.ContentEncoding)
+		}
+		if obj.ContentLanguage != "" {
+			w.Header().Set("Content-Language", obj.ContentLanguage)
+		}
+		if obj.ContentDisposition != "" {
+			w.Header().Set("Content-Disposition", obj.ContentDisposition)
+		}
+		// Set custom metadata headers
+		setMetadataHeaders(w, obj.Metadata)
 		_, _ = w.Write(obj.Data)
 
 	case http.MethodDelete:
@@ -206,6 +281,24 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if obj.VersionId != backend.NullVersionId {
 			w.Header().Set("x-amz-version-id", obj.VersionId)
 		}
+		// Set optional headers if present
+		if obj.CacheControl != "" {
+			w.Header().Set("Cache-Control", obj.CacheControl)
+		}
+		if obj.Expires != nil {
+			w.Header().Set("Expires", obj.Expires.Format(http.TimeFormat))
+		}
+		if obj.ContentEncoding != "" {
+			w.Header().Set("Content-Encoding", obj.ContentEncoding)
+		}
+		if obj.ContentLanguage != "" {
+			w.Header().Set("Content-Language", obj.ContentLanguage)
+		}
+		if obj.ContentDisposition != "" {
+			w.Header().Set("Content-Disposition", obj.ContentDisposition)
+		}
+		// Set custom metadata headers
+		setMetadataHeaders(w, obj.Metadata)
 		w.WriteHeader(http.StatusOK)
 
 	default:
@@ -310,7 +403,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 // handleCopyObject handles copy object operations.
 func (h *Handler) handleCopyObject(
 	w http.ResponseWriter,
-	_ *http.Request,
+	r *http.Request,
 	dstBucket, dstKey, copySource string,
 ) {
 	decodedCopySource, err := url.PathUnescape(copySource)
@@ -335,7 +428,40 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
-	obj, err := h.backend.CopyObject(srcBucket, srcKey, dstBucket, dstKey)
+	// Get metadata directive
+	metadataDirective := r.Header.Get("x-amz-metadata-directive")
+	if metadataDirective == "" {
+		metadataDirective = "COPY"
+	}
+
+	// Check for self-copy without REPLACE
+	if srcBucket == dstBucket && srcKey == dstKey && metadataDirective != "REPLACE" {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"This copy request is illegal because it is trying to copy an object to itself without changing the object's metadata, storage class, website redirect location or encryption attributes.",
+		)
+		return
+	}
+
+	// Build copy options
+	opts := backend.CopyObjectOptions{
+		MetadataDirective: metadataDirective,
+	}
+
+	// If REPLACE, extract new metadata from request headers
+	if metadataDirective == "REPLACE" {
+		opts.ContentType = r.Header.Get("Content-Type")
+		opts.Metadata = extractMetadata(r)
+		opts.CacheControl = r.Header.Get("Cache-Control")
+		opts.Expires = parseExpires(r.Header.Get("Expires"))
+		opts.ContentEncoding = r.Header.Get("Content-Encoding")
+		opts.ContentLanguage = r.Header.Get("Content-Language")
+		opts.ContentDisposition = r.Header.Get("Content-Disposition")
+	}
+
+	obj, err := h.backend.CopyObject(srcBucket, srcKey, dstBucket, dstKey, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrSourceBucketNotFound) ||
 			errors.Is(err, backend.ErrDestinationBucketNotFound) {

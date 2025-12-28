@@ -1414,3 +1414,93 @@ func TestBucketPolicy(t *testing.T) {
 		}
 	})
 }
+
+func TestObjectMetadata(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "metadata-test-bucket"
+	key := "test.txt"
+	content := "test content"
+
+	t.Cleanup(func() {
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("PutObjectWithMetadata", func(t *testing.T) {
+		_, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket:      aws.String(bucketName),
+			Key:         aws.String(key),
+			Body:        strings.NewReader(content),
+			Metadata:    map[string]string{"meta1": "value1", "meta2": "value2"},
+			ContentType: aws.String("text/plain"),
+		})
+		if err != nil {
+			t.Fatalf("PutObject with metadata failed: %v", err)
+		}
+
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+
+		if resp.Metadata["meta1"] != "value1" {
+			t.Errorf("Expected metadata 'meta1' to be 'value1', got '%s'", resp.Metadata["meta1"])
+		}
+		if resp.Metadata["meta2"] != "value2" {
+			t.Errorf("Expected metadata 'meta2' to be 'value2', got '%s'", resp.Metadata["meta2"])
+		}
+	})
+
+	t.Run("CopyObjectReplacingMetadata", func(t *testing.T) {
+		// First put object without metadata
+		_, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Body:   strings.NewReader(content),
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+
+		// Copy to itself with new metadata
+		_, err = client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+			Bucket:            aws.String(bucketName),
+			Key:               aws.String(key),
+			CopySource:        aws.String(bucketName + "/" + key),
+			MetadataDirective: "REPLACE",
+			Metadata:          map[string]string{"newmeta": "newvalue"},
+		})
+		if err != nil {
+			t.Fatalf("CopyObject with REPLACE metadata failed: %v", err)
+		}
+
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		if err != nil {
+			t.Fatalf("GetObject after copy failed: %v", err)
+		}
+
+		if resp.Metadata["newmeta"] != "newvalue" {
+			t.Errorf("Expected metadata 'newmeta' to be 'newvalue', got '%s'. Full metadata: %v", resp.Metadata["newmeta"], resp.Metadata)
+		}
+	})
+}

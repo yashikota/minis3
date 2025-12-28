@@ -46,6 +46,24 @@ type Object struct {
 	Data           []byte // nil for DeleteMarker
 	ChecksumCRC32  string
 	ACL            *AccessControlPolicy
+	// Metadata fields
+	Metadata           map[string]string // x-amz-meta-* custom metadata
+	CacheControl       string            // Cache-Control header
+	Expires            *time.Time        // Expires header
+	ContentEncoding    string            // Content-Encoding header
+	ContentLanguage    string            // Content-Language header
+	ContentDisposition string            // Content-Disposition header
+}
+
+// PutObjectOptions contains options for PutObject operation.
+type PutObjectOptions struct {
+	ContentType        string
+	Metadata           map[string]string
+	CacheControl       string
+	Expires            *time.Time
+	ContentEncoding    string
+	ContentLanguage    string
+	ContentDisposition string
 }
 
 var (
@@ -64,6 +82,7 @@ var (
 	ErrNoSuchTagSet              = errors.New("the TagSet does not exist")
 	ErrNoSuchBucketPolicy        = errors.New("the bucket policy does not exist")
 	ErrMalformedPolicy           = errors.New("malformed policy document")
+	ErrInvalidRequest            = errors.New("invalid request")
 )
 
 func New() *Backend {
