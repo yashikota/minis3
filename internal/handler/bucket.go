@@ -189,6 +189,8 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	prefix := query.Get("prefix")
 	delimiter := query.Get("delimiter")
 	encodingType := query.Get("encoding-type")
+	continuationToken := query.Get("continuation-token")
+	startAfter := query.Get("start-after")
 
 	maxKeys := 1000
 	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
@@ -205,7 +207,14 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		maxKeys = parsed
 	}
 
-	result, err := h.backend.ListObjectsV2(bucketName, prefix, delimiter, maxKeys)
+	result, err := h.backend.ListObjectsV2(
+		bucketName,
+		prefix,
+		delimiter,
+		continuationToken,
+		startAfter,
+		maxKeys,
+	)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -217,19 +226,23 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	resp := backend.ListBucketV2Result{
-		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
-		Name:        bucketName,
-		Prefix:      prefix,
-		Delimiter:   delimiter,
-		MaxKeys:     maxKeys,
-		KeyCount:    result.KeyCount,
-		IsTruncated: result.IsTruncated,
+		Xmlns:                 "http://s3.amazonaws.com/doc/2006-03-01/",
+		Name:                  bucketName,
+		Prefix:                prefix,
+		Delimiter:             delimiter,
+		MaxKeys:               maxKeys,
+		KeyCount:              result.KeyCount,
+		IsTruncated:           result.IsTruncated,
+		ContinuationToken:     continuationToken,
+		NextContinuationToken: result.NextContinuationToken,
+		StartAfter:            startAfter,
 	}
 
 	if encodingType == "url" {
 		resp.EncodingType = "url"
 	}
 
+	owner := backend.DefaultOwner()
 	for _, obj := range result.Objects {
 		key := obj.Key
 		if encodingType == "url" {
@@ -241,6 +254,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 			ETag:         obj.ETag,
 			Size:         obj.Size,
 			StorageClass: "STANDARD",
+			Owner:        owner,
 		})
 	}
 
@@ -313,6 +327,7 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 		resp.EncodingType = "url"
 	}
 
+	owner := backend.DefaultOwner()
 	for _, obj := range result.Objects {
 		key := obj.Key
 		if encodingType == "url" {
@@ -324,6 +339,7 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 			ETag:         obj.ETag,
 			Size:         obj.Size,
 			StorageClass: "STANDARD",
+			Owner:        owner,
 		})
 	}
 

@@ -93,24 +93,28 @@ type DeleteObjectsResult struct {
 }
 
 type ListBucketV2Result struct {
-	XMLName        xml.Name       `xml:"ListBucketResult"`
-	Xmlns          string         `xml:"xmlns,attr,omitempty"`
-	Name           string         `xml:"Name"`
-	Prefix         string         `xml:"Prefix"`
-	Delimiter      string         `xml:"Delimiter,omitempty"`
-	MaxKeys        int            `xml:"MaxKeys"`
-	KeyCount       int            `xml:"KeyCount"`
-	IsTruncated    bool           `xml:"IsTruncated"`
-	Contents       []ObjectInfo   `xml:"Contents,omitempty"`
-	CommonPrefixes []CommonPrefix `xml:"CommonPrefixes,omitempty"`
-	EncodingType   string         `xml:"EncodingType,omitempty"`
+	XMLName               xml.Name       `xml:"ListBucketResult"`
+	Xmlns                 string         `xml:"xmlns,attr,omitempty"`
+	Name                  string         `xml:"Name"`
+	Prefix                string         `xml:"Prefix"`
+	Delimiter             string         `xml:"Delimiter,omitempty"`
+	MaxKeys               int            `xml:"MaxKeys"`
+	KeyCount              int            `xml:"KeyCount"`
+	IsTruncated           bool           `xml:"IsTruncated"`
+	ContinuationToken     string         `xml:"ContinuationToken,omitempty"`
+	NextContinuationToken string         `xml:"NextContinuationToken,omitempty"`
+	StartAfter            string         `xml:"StartAfter,omitempty"`
+	Contents              []ObjectInfo   `xml:"Contents,omitempty"`
+	CommonPrefixes        []CommonPrefix `xml:"CommonPrefixes,omitempty"`
+	EncodingType          string         `xml:"EncodingType,omitempty"`
 }
 
 type ListObjectsV2Result struct {
-	Objects        []*Object
-	CommonPrefixes []string
-	IsTruncated    bool
-	KeyCount       int
+	Objects               []*Object
+	CommonPrefixes        []string
+	IsTruncated           bool
+	KeyCount              int
+	NextContinuationToken string
 }
 
 type ObjectInfo struct {
@@ -119,6 +123,7 @@ type ObjectInfo struct {
 	ETag         string `xml:"ETag"`
 	Size         int64  `xml:"Size"`
 	StorageClass string `xml:"StorageClass"`
+	Owner        *Owner `xml:"Owner,omitempty"`
 }
 
 type CommonPrefix struct {

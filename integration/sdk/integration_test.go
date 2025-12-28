@@ -535,8 +535,8 @@ func TestListObjectsV2(t *testing.T) {
 		if *resp.KeyCount != 0 {
 			t.Errorf("Expected 0 objects with max-keys=0, got %d", *resp.KeyCount)
 		}
-		if resp.IsTruncated == nil || !*resp.IsTruncated {
-			t.Error("Expected IsTruncated to be true with max-keys=0")
+		if resp.IsTruncated != nil && *resp.IsTruncated {
+			t.Error("Expected IsTruncated to be false with max-keys=0")
 		}
 	})
 }
@@ -1220,7 +1220,10 @@ func TestDeleteObjectsWithVersioning(t *testing.T) {
 			Bucket: aws.String(bucketName),
 			Delete: &types.Delete{
 				Objects: []types.ObjectIdentifier{
-					{Key: aws.String(key), VersionId: aws.String(versionIds[1])}, // Delete middle version
+					{
+						Key:       aws.String(key),
+						VersionId: aws.String(versionIds[1]),
+					}, // Delete middle version
 				},
 			},
 		})
@@ -1231,8 +1234,13 @@ func TestDeleteObjectsWithVersioning(t *testing.T) {
 		if len(deleteResp.Deleted) != 1 {
 			t.Errorf("Expected 1 deleted object, got %d", len(deleteResp.Deleted))
 		}
-		if deleteResp.Deleted[0].VersionId == nil || *deleteResp.Deleted[0].VersionId != versionIds[1] {
-			t.Errorf("Expected deleted version ID %s, got %v", versionIds[1], deleteResp.Deleted[0].VersionId)
+		if deleteResp.Deleted[0].VersionId == nil ||
+			*deleteResp.Deleted[0].VersionId != versionIds[1] {
+			t.Errorf(
+				"Expected deleted version ID %s, got %v",
+				versionIds[1],
+				deleteResp.Deleted[0].VersionId,
+			)
 		}
 
 		// Verify deleted version is gone
@@ -1281,7 +1289,10 @@ func TestDeleteObjectsWithVersioning(t *testing.T) {
 
 		// S3 returns success for non-existent versions
 		if len(deleteResp.Deleted) != 1 {
-			t.Errorf("Expected 1 deleted entry (even for non-existent), got %d", len(deleteResp.Deleted))
+			t.Errorf(
+				"Expected 1 deleted entry (even for non-existent), got %d",
+				len(deleteResp.Deleted),
+			)
 		}
 	})
 
@@ -1306,7 +1317,8 @@ func TestDeleteObjectsWithVersioning(t *testing.T) {
 		if deleteResp.Deleted[0].DeleteMarker == nil || !*deleteResp.Deleted[0].DeleteMarker {
 			t.Error("Expected DeleteMarker to be true")
 		}
-		if deleteResp.Deleted[0].DeleteMarkerVersionId == nil || *deleteResp.Deleted[0].DeleteMarkerVersionId == "" {
+		if deleteResp.Deleted[0].DeleteMarkerVersionId == nil ||
+			*deleteResp.Deleted[0].DeleteMarkerVersionId == "" {
 			t.Error("Expected DeleteMarkerVersionId to be set")
 		}
 

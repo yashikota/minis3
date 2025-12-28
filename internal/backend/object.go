@@ -497,12 +497,16 @@ func (b *Backend) ListObjectsV1(
 	})
 
 	result := &ListObjectsV1Result{}
-	if maxKeys >= 0 && len(entries) > maxKeys {
+	// Only truncate if maxKeys > 0 and there are more entries than maxKeys
+	if maxKeys > 0 && len(entries) > maxKeys {
 		result.IsTruncated = true
-		if delimiter != "" && maxKeys > 0 {
+		if delimiter != "" {
 			result.NextMarker = entries[maxKeys-1].key
 		}
 		entries = entries[:maxKeys]
+	} else if maxKeys == 0 {
+		// max-keys=0: return no entries, IsTruncated=false
+		entries = nil
 	}
 
 	for _, entry := range entries {
@@ -516,9 +520,9 @@ func (b *Backend) ListObjectsV1(
 	return result, nil
 }
 
-// ListObjectsV2 lists objects with support for prefix, delimiter, and max-keys.
+// ListObjectsV2 lists objects with support for prefix, delimiter, continuation token, and max-keys.
 func (b *Backend) ListObjectsV2(
-	bucketName, prefix, delimiter string,
+	bucketName, prefix, delimiter, continuationToken, startAfter string,
 	maxKeys int,
 ) (*ListObjectsV2Result, error) {
 	b.mu.RLock()
@@ -544,8 +548,17 @@ func (b *Backend) ListObjectsV2(
 	result := &ListObjectsV2Result{}
 	commonPrefixSet := make(map[string]struct{})
 
+	// Determine the start marker (continuationToken takes precedence over startAfter)
+	marker := continuationToken
+	if marker == "" {
+		marker = startAfter
+	}
+
 	for _, key := range keys {
-		obj := keyToObj[key]
+		// Apply marker filter
+		if marker != "" && key <= marker {
+			continue
+		}
 
 		if prefix != "" && !strings.HasPrefix(key, prefix) {
 			continue
@@ -561,7 +574,7 @@ func (b *Backend) ListObjectsV2(
 			}
 		}
 
-		result.Objects = append(result.Objects, obj)
+		result.Objects = append(result.Objects, keyToObj[key])
 	}
 
 	commonPrefixes := make([]string, 0, len(commonPrefixSet))
@@ -589,9 +602,15 @@ func (b *Backend) ListObjectsV2(
 	})
 
 	totalCount := len(entries)
-	if maxKeys >= 0 && totalCount > maxKeys {
+	// Only truncate if maxKeys > 0 and there are more entries than maxKeys
+	if maxKeys > 0 && totalCount > maxKeys {
 		result.IsTruncated = true
+		// Set NextContinuationToken to the last key in the truncated result
+		result.NextContinuationToken = entries[maxKeys-1].key
 		entries = entries[:maxKeys]
+	} else if maxKeys == 0 {
+		// max-keys=0: return no entries, IsTruncated=false
+		entries = nil
 	}
 
 	result.Objects = nil
