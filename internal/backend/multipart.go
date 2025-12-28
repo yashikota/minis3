@@ -172,17 +172,17 @@ func (b *Backend) CompleteMultipartUpload(
 	}
 
 	obj := &Object{
-		Key:           key,
-		VersionId:     versionId,
-		IsLatest:      true,
+		Key:            key,
+		VersionId:      versionId,
+		IsLatest:       true,
 		IsDeleteMarker: false,
-		LastModified:  time.Now().UTC(),
-		ETag:          finalETag,
-		Size:          int64(len(data)),
-		ContentType:   contentType,
-		Data:          data,
-		ChecksumCRC32: base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
-		Metadata:      upload.Metadata,
+		LastModified:   time.Now().UTC(),
+		ETag:           finalETag,
+		Size:           int64(len(data)),
+		ContentType:    contentType,
+		Data:           data,
+		ChecksumCRC32:  base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
+		Metadata:       upload.Metadata,
 	}
 
 	addVersionToObject(bucket, key, obj)

@@ -11,9 +11,9 @@ import (
 
 // Backend holds the state of the S3 world.
 type Backend struct {
-	mu       sync.RWMutex
-	buckets  map[string]*Bucket
-	uploads  map[string]*MultipartUpload // key: uploadId
+	mu      sync.RWMutex
+	buckets map[string]*Bucket
+	uploads map[string]*MultipartUpload // key: uploadId
 }
 
 // Bucket represents an S3 bucket containing objects and metadata
@@ -57,9 +57,9 @@ type Object struct {
 	ContentLanguage    string            // Content-Language header
 	ContentDisposition string            // Content-Disposition header
 	// Object Lock fields
-	RetentionMode    string     // GOVERNANCE or COMPLIANCE
-	RetainUntilDate  *time.Time // Retention until date
-	LegalHoldStatus  string     // ON or OFF
+	RetentionMode   string     // GOVERNANCE or COMPLIANCE
+	RetainUntilDate *time.Time // Retention until date
+	LegalHoldStatus string     // ON or OFF
 }
 
 // PutObjectOptions contains options for PutObject operation.
@@ -91,12 +91,16 @@ var (
 	ErrMalformedPolicy           = errors.New("malformed policy document")
 	ErrInvalidRequest            = errors.New("invalid request")
 	ErrNoSuchUpload              = errors.New("the specified upload does not exist")
-	ErrInvalidPart               = errors.New("one or more of the specified parts could not be found")
-	ErrInvalidPartOrder          = errors.New("the list of parts was not in ascending order")
-	ErrEntityTooSmall            = errors.New("your proposed upload is smaller than the minimum allowed object size")
-	ErrObjectLockNotEnabled      = errors.New("object lock is not enabled for this bucket")
-	ErrNoSuchObjectLockConfig    = errors.New("the object lock configuration does not exist")
-	ErrObjectLocked              = errors.New("object is locked")
+	ErrInvalidPart               = errors.New(
+		"one or more of the specified parts could not be found",
+	)
+	ErrInvalidPartOrder = errors.New("the list of parts was not in ascending order")
+	ErrEntityTooSmall   = errors.New(
+		"your proposed upload is smaller than the minimum allowed object size",
+	)
+	ErrObjectLockNotEnabled   = errors.New("object lock is not enabled for this bucket")
+	ErrNoSuchObjectLockConfig = errors.New("the object lock configuration does not exist")
+	ErrObjectLocked           = errors.New("object is locked")
 )
 
 func New() *Backend {

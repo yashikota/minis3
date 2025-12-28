@@ -577,7 +577,14 @@ func (h *Handler) handleCopyObject(
 		opts.ContentDisposition = r.Header.Get("Content-Disposition")
 	}
 
-	obj, srcVersionIdUsed, err := h.backend.CopyObject(srcBucket, srcKey, srcVersionId, dstBucket, dstKey, opts)
+	obj, srcVersionIdUsed, err := h.backend.CopyObject(
+		srcBucket,
+		srcKey,
+		srcVersionId,
+		dstBucket,
+		dstKey,
+		opts,
+	)
 	if err != nil {
 		if errors.Is(err, backend.ErrSourceBucketNotFound) ||
 			errors.Is(err, backend.ErrDestinationBucketNotFound) {

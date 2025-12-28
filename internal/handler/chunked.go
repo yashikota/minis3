@@ -32,7 +32,6 @@ func decodeAWSChunkedBody(body io.Reader) ([]byte, error) {
 
 type chunkedReader struct {
 	r io.Reader
-	buf bytes.Buffer
 }
 
 func (cr *chunkedReader) readChunk() ([]byte, error) {

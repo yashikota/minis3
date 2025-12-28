@@ -324,7 +324,7 @@ type InitiateMultipartUploadResult struct {
 
 // CompleteMultipartUploadRequest is the XML request for CompleteMultipartUpload.
 type CompleteMultipartUploadRequest struct {
-	XMLName xml.Name      `xml:"CompleteMultipartUpload"`
+	XMLName xml.Name       `xml:"CompleteMultipartUpload"`
 	Parts   []CompletePart `xml:"Part"`
 }
 
@@ -346,20 +346,20 @@ type CompleteMultipartUploadResult struct {
 
 // ListMultipartUploadsResult is the XML response for ListMultipartUploads.
 type ListMultipartUploadsResult struct {
-	XMLName            xml.Name          `xml:"ListMultipartUploadsResult"`
-	Xmlns              string            `xml:"xmlns,attr,omitempty"`
-	Bucket             string            `xml:"Bucket"`
-	KeyMarker          string            `xml:"KeyMarker"`
-	UploadIdMarker     string            `xml:"UploadIdMarker"`
-	NextKeyMarker      string            `xml:"NextKeyMarker,omitempty"`
-	NextUploadIdMarker string            `xml:"NextUploadIdMarker,omitempty"`
-	MaxUploads         int               `xml:"MaxUploads"`
-	IsTruncated        bool              `xml:"IsTruncated"`
-	Uploads            []UploadInfo      `xml:"Upload,omitempty"`
-	Prefix             string            `xml:"Prefix,omitempty"`
-	Delimiter          string            `xml:"Delimiter,omitempty"`
-	CommonPrefixes     []CommonPrefix    `xml:"CommonPrefixes,omitempty"`
-	EncodingType       string            `xml:"EncodingType,omitempty"`
+	XMLName            xml.Name       `xml:"ListMultipartUploadsResult"`
+	Xmlns              string         `xml:"xmlns,attr,omitempty"`
+	Bucket             string         `xml:"Bucket"`
+	KeyMarker          string         `xml:"KeyMarker"`
+	UploadIdMarker     string         `xml:"UploadIdMarker"`
+	NextKeyMarker      string         `xml:"NextKeyMarker,omitempty"`
+	NextUploadIdMarker string         `xml:"NextUploadIdMarker,omitempty"`
+	MaxUploads         int            `xml:"MaxUploads"`
+	IsTruncated        bool           `xml:"IsTruncated"`
+	Uploads            []UploadInfo   `xml:"Upload,omitempty"`
+	Prefix             string         `xml:"Prefix,omitempty"`
+	Delimiter          string         `xml:"Delimiter,omitempty"`
+	CommonPrefixes     []CommonPrefix `xml:"CommonPrefixes,omitempty"`
+	EncodingType       string         `xml:"EncodingType,omitempty"`
 }
 
 // UploadInfo represents an upload in ListMultipartUploads response.
@@ -399,10 +399,10 @@ type PartItem struct {
 
 // ObjectLockConfiguration represents the bucket's Object Lock configuration.
 type ObjectLockConfiguration struct {
-	XMLName           xml.Name            `xml:"ObjectLockConfiguration"`
-	Xmlns             string              `xml:"xmlns,attr,omitempty"`
-	ObjectLockEnabled string              `xml:"ObjectLockEnabled,omitempty"`
-	Rule              *ObjectLockRule     `xml:"Rule,omitempty"`
+	XMLName           xml.Name        `xml:"ObjectLockConfiguration"`
+	Xmlns             string          `xml:"xmlns,attr,omitempty"`
+	ObjectLockEnabled string          `xml:"ObjectLockEnabled,omitempty"`
+	Rule              *ObjectLockRule `xml:"Rule,omitempty"`
 }
 
 // ObjectLockRule contains the default retention rule.
@@ -412,7 +412,7 @@ type ObjectLockRule struct {
 
 // DefaultRetention represents the default retention settings.
 type DefaultRetention struct {
-	Mode  string `xml:"Mode,omitempty"`  // GOVERNANCE or COMPLIANCE
+	Mode  string `xml:"Mode,omitempty"` // GOVERNANCE or COMPLIANCE
 	Days  int    `xml:"Days,omitempty"`
 	Years int    `xml:"Years,omitempty"`
 }

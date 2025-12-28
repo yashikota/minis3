@@ -1500,7 +1500,11 @@ func TestObjectMetadata(t *testing.T) {
 		}
 
 		if resp.Metadata["newmeta"] != "newvalue" {
-			t.Errorf("Expected metadata 'newmeta' to be 'newvalue', got '%s'. Full metadata: %v", resp.Metadata["newmeta"], resp.Metadata)
+			t.Errorf(
+				"Expected metadata 'newmeta' to be 'newvalue', got '%s'. Full metadata: %v",
+				resp.Metadata["newmeta"],
+				resp.Metadata,
+			)
 		}
 	})
 }

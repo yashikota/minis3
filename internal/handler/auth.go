@@ -62,44 +62,68 @@ func verifyPresignedURLV4(r *http.Request) error {
 	// Check required parameters
 	algorithm := query.Get("X-Amz-Algorithm")
 	if algorithm != "AWS4-HMAC-SHA256" {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "Invalid algorithm"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "Invalid algorithm",
+		}
 	}
 
 	credential := query.Get("X-Amz-Credential")
 	if credential == "" {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "Missing X-Amz-Credential"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "Missing X-Amz-Credential",
+		}
 	}
 
 	dateStr := query.Get("X-Amz-Date")
 	if dateStr == "" {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "Missing X-Amz-Date"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "Missing X-Amz-Date",
+		}
 	}
 
 	expiresStr := query.Get("X-Amz-Expires")
 	if expiresStr == "" {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "Missing X-Amz-Expires"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "Missing X-Amz-Expires",
+		}
 	}
 
 	signature := query.Get("X-Amz-Signature")
 	if signature == "" {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "Missing X-Amz-Signature"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "Missing X-Amz-Signature",
+		}
 	}
 
 	// Parse and check expiration
 	expires, err := strconv.ParseInt(expiresStr, 10, 64)
 	if err != nil || expires <= 0 {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "Invalid X-Amz-Expires"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "Invalid X-Amz-Expires",
+		}
 	}
 
 	// Maximum expiration is 7 days (604800 seconds)
 	if expires > 604800 {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "X-Amz-Expires must be less than 604800 seconds"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "X-Amz-Expires must be less than 604800 seconds",
+		}
 	}
 
 	// Parse request time
 	requestTime, err := time.Parse("20060102T150405Z", dateStr)
 	if err != nil {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "Invalid X-Amz-Date format"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "Invalid X-Amz-Date format",
+		}
 	}
 
 	// Check if URL has expired
@@ -111,7 +135,10 @@ func verifyPresignedURLV4(r *http.Request) error {
 	// Parse credential to get access key
 	credParts := strings.Split(credential, "/")
 	if len(credParts) < 5 {
-		return &presignedError{code: "AuthorizationQueryParametersError", message: "Invalid X-Amz-Credential format"}
+		return &presignedError{
+			code:    "AuthorizationQueryParametersError",
+			message: "Invalid X-Amz-Credential format",
+		}
 	}
 
 	accessKey := credParts[0]
@@ -123,22 +150,38 @@ func verifyPresignedURLV4(r *http.Request) error {
 	credentials := DefaultCredentials()
 	secretKey, ok := credentials[accessKey]
 	if !ok {
-		return &presignedError{code: "InvalidAccessKeyId", message: "The AWS Access Key Id you provided does not exist in our records"}
+		return &presignedError{
+			code:    "InvalidAccessKeyId",
+			message: "The AWS Access Key Id you provided does not exist in our records",
+		}
 	}
 
 	// Verify signature
 	signedHeaders := query.Get("X-Amz-SignedHeaders")
-	expectedSignature := calculatePresignedSignatureV4(r, secretKey, dateStamp, region, service, signedHeaders)
+	expectedSignature := calculatePresignedSignatureV4(
+		r,
+		secretKey,
+		dateStamp,
+		region,
+		service,
+		signedHeaders,
+	)
 
 	if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
-		return &presignedError{code: "SignatureDoesNotMatch", message: "The request signature we calculated does not match the signature you provided"}
+		return &presignedError{
+			code:    "SignatureDoesNotMatch",
+			message: "The request signature we calculated does not match the signature you provided",
+		}
 	}
 
 	return nil
 }
 
 // calculatePresignedSignatureV4 calculates the AWS Signature Version 4 for presigned URL.
-func calculatePresignedSignatureV4(r *http.Request, secretKey, dateStamp, region, service, signedHeadersStr string) string {
+func calculatePresignedSignatureV4(
+	r *http.Request,
+	secretKey, dateStamp, region, service, signedHeadersStr string,
+) string {
 	// Get canonical URI
 	canonicalURI := r.URL.Path
 	if canonicalURI == "" {
@@ -271,9 +314,4 @@ func sha256Hash(data string) string {
 	h := sha256.New()
 	h.Write([]byte(data))
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-// hasAuthorizationHeader checks if the request has an Authorization header.
-func hasAuthorizationHeader(r *http.Request) bool {
-	return r.Header.Get("Authorization") != ""
 }

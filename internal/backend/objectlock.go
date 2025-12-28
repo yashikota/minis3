@@ -28,7 +28,10 @@ func (b *Backend) GetObjectLockConfiguration(bucketName string) (*ObjectLockConf
 }
 
 // PutObjectLockConfiguration sets the Object Lock configuration for a bucket.
-func (b *Backend) PutObjectLockConfiguration(bucketName string, config *ObjectLockConfiguration) error {
+func (b *Backend) PutObjectLockConfiguration(
+	bucketName string,
+	config *ObjectLockConfiguration,
+) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -47,7 +50,9 @@ func (b *Backend) PutObjectLockConfiguration(bucketName string, config *ObjectLo
 }
 
 // GetObjectRetention returns the retention settings for an object.
-func (b *Backend) GetObjectRetention(bucketName, key, versionId string) (*ObjectLockRetention, error) {
+func (b *Backend) GetObjectRetention(
+	bucketName, key, versionId string,
+) (*ObjectLockRetention, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -95,7 +100,11 @@ func (b *Backend) GetObjectRetention(bucketName, key, versionId string) (*Object
 }
 
 // PutObjectRetention sets the retention settings for an object.
-func (b *Backend) PutObjectRetention(bucketName, key, versionId string, retention *ObjectLockRetention, bypassGovernance bool) error {
+func (b *Backend) PutObjectRetention(
+	bucketName, key, versionId string,
+	retention *ObjectLockRetention,
+	bypassGovernance bool,
+) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -140,7 +149,8 @@ func (b *Backend) PutObjectRetention(bucketName, key, versionId string, retentio
 	}
 
 	// Check if object is locked with GOVERNANCE mode
-	if obj.RetentionMode == RetentionModeGovernance && !bypassGovernance && obj.RetainUntilDate != nil {
+	if obj.RetentionMode == RetentionModeGovernance && !bypassGovernance &&
+		obj.RetainUntilDate != nil {
 		if time.Now().Before(*obj.RetainUntilDate) {
 			return ErrObjectLocked
 		}
@@ -159,7 +169,9 @@ func (b *Backend) PutObjectRetention(bucketName, key, versionId string, retentio
 }
 
 // GetObjectLegalHold returns the legal hold status for an object.
-func (b *Backend) GetObjectLegalHold(bucketName, key, versionId string) (*ObjectLockLegalHold, error) {
+func (b *Backend) GetObjectLegalHold(
+	bucketName, key, versionId string,
+) (*ObjectLockLegalHold, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -207,7 +219,10 @@ func (b *Backend) GetObjectLegalHold(bucketName, key, versionId string) (*Object
 }
 
 // PutObjectLegalHold sets the legal hold status for an object.
-func (b *Backend) PutObjectLegalHold(bucketName, key, versionId string, legalHold *ObjectLockLegalHold) error {
+func (b *Backend) PutObjectLegalHold(
+	bucketName, key, versionId string,
+	legalHold *ObjectLockLegalHold,
+) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
