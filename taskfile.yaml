@@ -34,4 +34,45 @@ tasks:
     desc: "ceph/s3-tests test"
     dir: integration/s3-test
     cmds:
-      - docker compose up --build --abort-on-container-exit
+      - docker compose up --build --abort-on-container-exit 2>&1 | tee s3-test.log
+
+  s3-test-summary:
+    desc: "Show s3-test results summary"
+    dir: integration/s3-test
+    silent: true
+    cmds:
+      - |
+        if [ ! -f s3-test.log ]; then
+          echo "Error: s3-test.log not found. Run 'task s3-test' first."
+          exit 1
+        fi
+        result_line=$(rg -o '\d+ failed, \d+ passed, \d+ skipped' s3-test.log | tail -1)
+        if [ -n "$result_line" ]; then
+          echo ""
+          echo "=========================================="
+          echo "S3 Test Summary"
+          echo "=========================================="
+
+          # Parse numbers
+          failed=$(echo "$result_line" | cut -d' ' -f1)
+          passed=$(echo "$result_line" | cut -d' ' -f3)
+          skipped=$(echo "$result_line" | cut -d' ' -f5)
+
+          passed=${passed:-0}
+          failed=${failed:-0}
+          skipped=${skipped:-0}
+
+          total=$((passed + failed))
+          if [ "$total" -gt 0 ]; then
+            pass_rate=$(echo "scale=2; $passed * 100 / $total" | bc)
+            echo ""
+            echo "Passed:  $passed"
+            echo "Failed:  $failed"
+            echo "Skipped: $skipped"
+            echo ""
+            echo "Pass Rate: ${pass_rate}% ($passed/$total)"
+          fi
+          echo "=========================================="
+        else
+          echo "No test results found in s3-test.log"
+        fi

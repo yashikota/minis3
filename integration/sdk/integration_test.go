@@ -535,8 +535,8 @@ func TestListObjectsV2(t *testing.T) {
 		if *resp.KeyCount != 0 {
 			t.Errorf("Expected 0 objects with max-keys=0, got %d", *resp.KeyCount)
 		}
-		if resp.IsTruncated == nil || !*resp.IsTruncated {
-			t.Error("Expected IsTruncated to be true with max-keys=0")
+		if resp.IsTruncated != nil && *resp.IsTruncated {
+			t.Error("Expected IsTruncated to be false with max-keys=0")
 		}
 	})
 }
@@ -1027,6 +1027,484 @@ func TestListObjectsV1(t *testing.T) {
 
 		if len(resp.Contents) != 0 {
 			t.Errorf("Expected 0 objects for nonexistent prefix, got %d", len(resp.Contents))
+		}
+	})
+}
+
+func TestGetBucketLocation(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "location-test-bucket"
+	t.Cleanup(func() {
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// Get location
+	resp, err := client.GetBucketLocation(context.TODO(), &s3.GetBucketLocationInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("GetBucketLocation failed: %v", err)
+	}
+
+	// For us-east-1 (default), LocationConstraint should be empty
+	if resp.LocationConstraint != "" {
+		t.Logf("LocationConstraint: %v", resp.LocationConstraint)
+	}
+}
+
+func TestBucketTagging(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "tagging-test-bucket"
+	t.Cleanup(func() {
+		client.DeleteBucketTagging(context.TODO(), &s3.DeleteBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("NoTagsInitially", func(t *testing.T) {
+		_, err := client.GetBucketTagging(context.TODO(), &s3.GetBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		// Should return NoSuchTagSet error
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchTagSet" {
+			t.Errorf("Expected NoSuchTagSet error, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetTags", func(t *testing.T) {
+		_, err := client.PutBucketTagging(context.TODO(), &s3.PutBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+			Tagging: &types.Tagging{
+				TagSet: []types.Tag{
+					{Key: aws.String("Project"), Value: aws.String("Test")},
+					{Key: aws.String("Environment"), Value: aws.String("Dev")},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutBucketTagging failed: %v", err)
+		}
+
+		resp, err := client.GetBucketTagging(context.TODO(), &s3.GetBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("GetBucketTagging failed: %v", err)
+		}
+
+		if len(resp.TagSet) != 2 {
+			t.Errorf("Expected 2 tags, got %d", len(resp.TagSet))
+		}
+	})
+
+	t.Run("DeleteTags", func(t *testing.T) {
+		_, err := client.DeleteBucketTagging(context.TODO(), &s3.DeleteBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeleteBucketTagging failed: %v", err)
+		}
+
+		_, err = client.GetBucketTagging(context.TODO(), &s3.GetBucketTaggingInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchTagSet" {
+			t.Errorf("Expected NoSuchTagSet error after delete, got: %v", err)
+		}
+	})
+}
+
+func TestDeleteObjectsWithVersioning(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "delete-objects-versioning-test"
+
+	// Cleanup helper for versioned bucket
+	cleanupVersionedBucket := func() {
+		// List all versions and delete them
+		versResp, err := client.ListObjectVersions(context.TODO(), &s3.ListObjectVersionsInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err == nil {
+			// Delete all versions
+			for _, v := range versResp.Versions {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket:    aws.String(bucketName),
+					Key:       v.Key,
+					VersionId: v.VersionId,
+				})
+			}
+			// Delete all delete markers
+			for _, dm := range versResp.DeleteMarkers {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket:    aws.String(bucketName),
+					Key:       dm.Key,
+					VersionId: dm.VersionId,
+				})
+			}
+		}
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	}
+	t.Cleanup(cleanupVersionedBucket)
+
+	// 1. Create bucket and enable versioning
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	_, err = client.PutBucketVersioning(context.TODO(), &s3.PutBucketVersioningInput{
+		Bucket: aws.String(bucketName),
+		VersioningConfiguration: &types.VersioningConfiguration{
+			Status: types.BucketVersioningStatusEnabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutBucketVersioning failed: %v", err)
+	}
+
+	// 2. Create multiple versions of an object
+	key := "versioned-file.txt"
+	var versionIds []string
+
+	for i := 1; i <= 3; i++ {
+		resp, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Body:   strings.NewReader("content version " + string(rune('0'+i))),
+		})
+		if err != nil {
+			t.Fatalf("PutObject (version %d) failed: %v", i, err)
+		}
+		if resp.VersionId != nil {
+			versionIds = append(versionIds, *resp.VersionId)
+		}
+	}
+
+	if len(versionIds) < 3 {
+		t.Fatalf("Expected 3 version IDs, got %d", len(versionIds))
+	}
+
+	// 3. Delete specific version using DeleteObjects
+	t.Run("DeleteSpecificVersion", func(t *testing.T) {
+		deleteResp, err := client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &types.Delete{
+				Objects: []types.ObjectIdentifier{
+					{
+						Key:       aws.String(key),
+						VersionId: aws.String(versionIds[1]),
+					}, // Delete middle version
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("DeleteObjects failed: %v", err)
+		}
+
+		if len(deleteResp.Deleted) != 1 {
+			t.Errorf("Expected 1 deleted object, got %d", len(deleteResp.Deleted))
+		}
+		if deleteResp.Deleted[0].VersionId == nil ||
+			*deleteResp.Deleted[0].VersionId != versionIds[1] {
+			t.Errorf(
+				"Expected deleted version ID %s, got %v",
+				versionIds[1],
+				deleteResp.Deleted[0].VersionId,
+			)
+		}
+
+		// Verify deleted version is gone
+		_, err = client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:    aws.String(bucketName),
+			Key:       aws.String(key),
+			VersionId: aws.String(versionIds[1]),
+		})
+		if err == nil {
+			t.Error("Expected error getting deleted version, but succeeded")
+		}
+
+		// Verify other versions still exist
+		_, err = client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:    aws.String(bucketName),
+			Key:       aws.String(key),
+			VersionId: aws.String(versionIds[0]),
+		})
+		if err != nil {
+			t.Errorf("First version should still exist: %v", err)
+		}
+
+		_, err = client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:    aws.String(bucketName),
+			Key:       aws.String(key),
+			VersionId: aws.String(versionIds[2]),
+		})
+		if err != nil {
+			t.Errorf("Third version should still exist: %v", err)
+		}
+	})
+
+	// 4. Delete non-existent version (should succeed)
+	t.Run("DeleteNonExistentVersion", func(t *testing.T) {
+		deleteResp, err := client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &types.Delete{
+				Objects: []types.ObjectIdentifier{
+					{Key: aws.String(key), VersionId: aws.String("nonexistent-version-id")},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("DeleteObjects should succeed even for non-existent version: %v", err)
+		}
+
+		// S3 returns success for non-existent versions
+		if len(deleteResp.Deleted) != 1 {
+			t.Errorf(
+				"Expected 1 deleted entry (even for non-existent), got %d",
+				len(deleteResp.Deleted),
+			)
+		}
+	})
+
+	// 5. Test DeleteMarker behavior
+	t.Run("DeleteMarkerCreation", func(t *testing.T) {
+		// Delete without version ID creates a delete marker
+		deleteResp, err := client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &types.Delete{
+				Objects: []types.ObjectIdentifier{
+					{Key: aws.String(key)}, // No VersionId = create delete marker
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("DeleteObjects failed: %v", err)
+		}
+
+		if len(deleteResp.Deleted) != 1 {
+			t.Errorf("Expected 1 deleted object, got %d", len(deleteResp.Deleted))
+		}
+		if deleteResp.Deleted[0].DeleteMarker == nil || !*deleteResp.Deleted[0].DeleteMarker {
+			t.Error("Expected DeleteMarker to be true")
+		}
+		if deleteResp.Deleted[0].DeleteMarkerVersionId == nil ||
+			*deleteResp.Deleted[0].DeleteMarkerVersionId == "" {
+			t.Error("Expected DeleteMarkerVersionId to be set")
+		}
+
+		// Now GetObject should fail (object appears deleted)
+		_, err = client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		if err == nil {
+			t.Error("Expected error getting object with delete marker, but succeeded")
+		}
+	})
+}
+
+func TestBucketPolicy(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "policy-test-bucket"
+	t.Cleanup(func() {
+		client.DeleteBucketPolicy(context.TODO(), &s3.DeleteBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	policy := `{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Effect": "Allow",
+				"Principal": "*",
+				"Action": "s3:GetObject",
+				"Resource": "arn:aws:s3:::policy-test-bucket/*"
+			}
+		]
+	}`
+
+	t.Run("NoPolicyInitially", func(t *testing.T) {
+		_, err := client.GetBucketPolicy(context.TODO(), &s3.GetBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchBucketPolicy" {
+			t.Errorf("Expected NoSuchBucketPolicy error, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetPolicy", func(t *testing.T) {
+		_, err := client.PutBucketPolicy(context.TODO(), &s3.PutBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+			Policy: aws.String(policy),
+		})
+		if err != nil {
+			t.Fatalf("PutBucketPolicy failed: %v", err)
+		}
+
+		resp, err := client.GetBucketPolicy(context.TODO(), &s3.GetBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("GetBucketPolicy failed: %v", err)
+		}
+
+		if resp.Policy == nil || *resp.Policy == "" {
+			t.Error("Expected policy to be returned")
+		}
+	})
+
+	t.Run("DeletePolicy", func(t *testing.T) {
+		_, err := client.DeleteBucketPolicy(context.TODO(), &s3.DeleteBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeleteBucketPolicy failed: %v", err)
+		}
+
+		_, err = client.GetBucketPolicy(context.TODO(), &s3.GetBucketPolicyInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchBucketPolicy" {
+			t.Errorf("Expected NoSuchBucketPolicy error after delete, got: %v", err)
+		}
+	})
+}
+
+func TestObjectMetadata(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "metadata-test-bucket"
+	key := "test.txt"
+	content := "test content"
+
+	t.Cleanup(func() {
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("PutObjectWithMetadata", func(t *testing.T) {
+		_, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket:      aws.String(bucketName),
+			Key:         aws.String(key),
+			Body:        strings.NewReader(content),
+			Metadata:    map[string]string{"meta1": "value1", "meta2": "value2"},
+			ContentType: aws.String("text/plain"),
+		})
+		if err != nil {
+			t.Fatalf("PutObject with metadata failed: %v", err)
+		}
+
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+
+		if resp.Metadata["meta1"] != "value1" {
+			t.Errorf("Expected metadata 'meta1' to be 'value1', got '%s'", resp.Metadata["meta1"])
+		}
+		if resp.Metadata["meta2"] != "value2" {
+			t.Errorf("Expected metadata 'meta2' to be 'value2', got '%s'", resp.Metadata["meta2"])
+		}
+	})
+
+	t.Run("CopyObjectReplacingMetadata", func(t *testing.T) {
+		// First put object without metadata
+		_, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Body:   strings.NewReader(content),
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+
+		// Copy to itself with new metadata
+		_, err = client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+			Bucket:            aws.String(bucketName),
+			Key:               aws.String(key),
+			CopySource:        aws.String(bucketName + "/" + key),
+			MetadataDirective: "REPLACE",
+			Metadata:          map[string]string{"newmeta": "newvalue"},
+		})
+		if err != nil {
+			t.Fatalf("CopyObject with REPLACE metadata failed: %v", err)
+		}
+
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		if err != nil {
+			t.Fatalf("GetObject after copy failed: %v", err)
+		}
+
+		if resp.Metadata["newmeta"] != "newvalue" {
+			t.Errorf(
+				"Expected metadata 'newmeta' to be 'newvalue', got '%s'. Full metadata: %v",
+				resp.Metadata["newmeta"],
+				resp.Metadata,
+			)
 		}
 	})
 }

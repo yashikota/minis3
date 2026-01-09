@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -241,4 +242,354 @@ func (b *Backend) GetBucketVersioning(
 	}
 
 	return bucket.VersioningStatus, bucket.MFADelete, nil
+}
+
+// GetBucketLocation returns the location constraint of the bucket.
+// For us-east-1, it returns an empty string (null in S3 terms).
+func (b *Backend) GetBucketLocation(bucketName string) (string, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return "", ErrBucketNotFound
+	}
+
+	return bucket.Location, nil
+}
+
+// GetBucketTagging returns the tag set of a bucket.
+func (b *Backend) GetBucketTagging(bucketName string) (map[string]string, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+
+	if len(bucket.Tags) == 0 {
+		return nil, ErrNoSuchTagSet
+	}
+
+	// Return a copy to prevent external modification
+	tags := make(map[string]string, len(bucket.Tags))
+	for k, v := range bucket.Tags {
+		tags[k] = v
+	}
+	return tags, nil
+}
+
+// PutBucketTagging sets the tag set for a bucket (replaces existing tags).
+func (b *Backend) PutBucketTagging(bucketName string, tags map[string]string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.Tags = tags
+	return nil
+}
+
+// DeleteBucketTagging removes all tags from a bucket.
+func (b *Backend) DeleteBucketTagging(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.Tags = nil
+	return nil
+}
+
+// GetBucketPolicy returns the bucket policy.
+func (b *Backend) GetBucketPolicy(bucketName string) (string, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return "", ErrBucketNotFound
+	}
+
+	if bucket.Policy == "" {
+		return "", ErrNoSuchBucketPolicy
+	}
+
+	return bucket.Policy, nil
+}
+
+// PutBucketPolicy sets the bucket policy.
+func (b *Backend) PutBucketPolicy(bucketName, policy string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	// Basic JSON validation
+	if !isValidJSON(policy) {
+		return ErrMalformedPolicy
+	}
+
+	bucket.Policy = policy
+	return nil
+}
+
+// DeleteBucketPolicy removes the bucket policy.
+func (b *Backend) DeleteBucketPolicy(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.Policy = ""
+	return nil
+}
+
+// isValidJSON checks if a string is valid JSON.
+func isValidJSON(s string) bool {
+	return json.Valid([]byte(s))
+}
+
+// DefaultOwner returns the default owner for minis3.
+// The ID matches the s3tests.conf user_id for test compatibility.
+func DefaultOwner() *Owner {
+	return &Owner{
+		ID:          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		DisplayName: "minis3",
+	}
+}
+
+// NewDefaultACL creates a default private ACL with the owner having full control.
+func NewDefaultACL() *AccessControlPolicy {
+	owner := DefaultOwner()
+	return &AccessControlPolicy{
+		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+		Owner: owner,
+		AccessControlList: AccessControlList{
+			Grants: []Grant{
+				{
+					Grantee: &Grantee{
+						Xmlns:       "http://www.w3.org/2001/XMLSchema-instance",
+						Type:        "CanonicalUser",
+						ID:          owner.ID,
+						DisplayName: owner.DisplayName,
+					},
+					Permission: PermissionFullControl,
+				},
+			},
+		},
+	}
+}
+
+// newGroupGrant creates a Grant for a group URI with the specified permission.
+func newGroupGrant(uri, permission string) Grant {
+	return Grant{
+		Grantee: &Grantee{
+			Xmlns: "http://www.w3.org/2001/XMLSchema-instance",
+			Type:  "Group",
+			URI:   uri,
+		},
+		Permission: permission,
+	}
+}
+
+// CannedACLToPolicy converts a canned ACL string to an AccessControlPolicy.
+func CannedACLToPolicy(cannedACL string) *AccessControlPolicy {
+	owner := DefaultOwner()
+	acl := &AccessControlPolicy{
+		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+		Owner: owner,
+		AccessControlList: AccessControlList{
+			Grants: []Grant{
+				{
+					Grantee: &Grantee{
+						Xmlns:       "http://www.w3.org/2001/XMLSchema-instance",
+						Type:        "CanonicalUser",
+						ID:          owner.ID,
+						DisplayName: owner.DisplayName,
+					},
+					Permission: PermissionFullControl,
+				},
+			},
+		},
+	}
+
+	switch CannedACL(cannedACL) {
+	case ACLPublicRead:
+		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
+			newGroupGrant(AllUsersURI, PermissionRead))
+	case ACLPublicReadWrite:
+		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
+			newGroupGrant(AllUsersURI, PermissionRead),
+			newGroupGrant(AllUsersURI, PermissionWrite))
+	case ACLAuthenticatedRead:
+		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
+			newGroupGrant(AuthenticatedUsersURI, PermissionRead))
+	}
+
+	return acl
+}
+
+// GetBucketACL returns the ACL for a bucket.
+func (b *Backend) GetBucketACL(bucketName string) (*AccessControlPolicy, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+
+	if bucket.ACL == nil {
+		return NewDefaultACL(), nil
+	}
+
+	return bucket.ACL, nil
+}
+
+// PutBucketACL sets the ACL for a bucket.
+func (b *Backend) PutBucketACL(bucketName string, acl *AccessControlPolicy) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.ACL = acl
+	return nil
+}
+
+// GetObjectACL returns the ACL for an object.
+// If versionId is empty, returns the ACL for the latest version.
+// If versionId is specified, returns the ACL for that specific version.
+func (b *Backend) GetObjectACL(bucketName, key, versionId string) (*AccessControlPolicy, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+
+	versions, exists := bucket.Objects[key]
+	if !exists || len(versions.Versions) == 0 {
+		return nil, ErrObjectNotFound
+	}
+
+	var obj *Object
+	if versionId == "" {
+		// Get the latest (current) version
+		obj = versions.Versions[0]
+	} else {
+		// Find specific version
+		for _, v := range versions.Versions {
+			if v.VersionId == versionId {
+				obj = v
+				break
+			}
+		}
+		if obj == nil {
+			return nil, ErrVersionNotFound
+		}
+	}
+
+	if obj.IsDeleteMarker {
+		return nil, ErrObjectNotFound
+	}
+
+	if obj.ACL == nil {
+		return NewDefaultACL(), nil
+	}
+
+	return obj.ACL, nil
+}
+
+// PutObjectACL sets the ACL for an object.
+// If versionId is empty, sets the ACL for the latest version.
+// If versionId is specified, sets the ACL for that specific version.
+func (b *Backend) PutObjectACL(bucketName, key, versionId string, acl *AccessControlPolicy) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	versions, exists := bucket.Objects[key]
+	if !exists || len(versions.Versions) == 0 {
+		return ErrObjectNotFound
+	}
+
+	var obj *Object
+	if versionId == "" {
+		// Set ACL on the latest version
+		obj = versions.Versions[0]
+	} else {
+		// Find specific version
+		for _, v := range versions.Versions {
+			if v.VersionId == versionId {
+				obj = v
+				break
+			}
+		}
+		if obj == nil {
+			return ErrVersionNotFound
+		}
+	}
+
+	if obj.IsDeleteMarker {
+		return ErrObjectNotFound
+	}
+
+	obj.ACL = acl
+	return nil
+}
+
+// IsACLPublicRead checks if the ACL grants public read access.
+func IsACLPublicRead(acl *AccessControlPolicy) bool {
+	if acl == nil {
+		return false
+	}
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee != nil &&
+			grant.Grantee.URI == AllUsersURI &&
+			(grant.Permission == PermissionRead || grant.Permission == PermissionFullControl) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsObjectPubliclyReadable checks if an object is publicly readable.
+func (b *Backend) IsObjectPubliclyReadable(bucketName, key, versionId string) bool {
+	acl, err := b.GetObjectACL(bucketName, key, versionId)
+	if err != nil {
+		return false
+	}
+	return IsACLPublicRead(acl)
+}
+
+// IsBucketPubliclyReadable checks if a bucket is publicly readable.
+func (b *Backend) IsBucketPubliclyReadable(bucketName string) bool {
+	acl, err := b.GetBucketACL(bucketName)
+	if err != nil {
+		return false
+	}
+	return IsACLPublicRead(acl)
 }

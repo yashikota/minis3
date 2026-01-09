@@ -1,7 +1,7 @@
-name: Test
+name: S3 Tests
 
 on:
-  push:
+  pull_request:
     paths:
       - "**.go"
       - "integration/s3-test/**"
@@ -11,7 +11,10 @@ on:
 jobs:
   s3-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -31,3 +34,86 @@ jobs:
 
       - name: Run s3-test
         run: task s3-test || true
+
+      - name: Generate summary
+        id: summary
+        working-directory: integration/s3-test
+        run: |
+          if [ ! -f s3-test.log ]; then
+            echo "s3-test.log not found"
+            exit 0
+          fi
+
+          result_line=$(grep -oE '[0-9]+ failed, [0-9]+ passed, [0-9]+ skipped' s3-test.log | tail -1)
+          if [ -n "$result_line" ]; then
+            failed=$(echo "$result_line" | cut -d' ' -f1)
+            passed=$(echo "$result_line" | cut -d' ' -f3)
+            skipped=$(echo "$result_line" | cut -d' ' -f5)
+            total=$((passed + failed))
+            if [ "$total" -gt 0 ]; then
+              pass_rate=$(echo "scale=2; $passed * 100 / $total" | bc)
+            else
+              pass_rate="0"
+            fi
+
+            echo "passed=$passed" >> $GITHUB_OUTPUT
+            echo "failed=$failed" >> $GITHUB_OUTPUT
+            echo "skipped=$skipped" >> $GITHUB_OUTPUT
+            echo "pass_rate=$pass_rate" >> $GITHUB_OUTPUT
+            echo "has_results=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && steps.summary.outputs.has_results == 'true'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const passed = '${{ steps.summary.outputs.passed }}';
+            const failed = '${{ steps.summary.outputs.failed }}';
+            const skipped = '${{ steps.summary.outputs.skipped }}';
+            const passRate = '${{ steps.summary.outputs.pass_rate }}';
+
+            const body = `## S3 Test Summary
+
+            | Metric | Count |
+            |--------|-------|
+            | Passed | ${passed} |
+            | Failed | ${failed} |
+            | Skipped | ${skipped} |
+            | **Pass Rate** | **${passRate}%** |
+
+            <details>
+            <summary>Run details</summary>
+
+            - Workflow: \`${{ github.workflow }}\`
+            - Run ID: \`${{ github.run_id }}\`
+            - Commit: \`${{ github.sha }}\`
+            </details>`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('## S3 Test Summary')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
