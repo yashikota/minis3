@@ -470,3 +470,99 @@ type GetObjectAttributesChecksum struct {
 type GetObjectAttributesObjectParts struct {
 	TotalPartsCount int `xml:"TotalPartsCount,omitempty"`
 }
+
+// LifecycleConfiguration represents bucket lifecycle rules.
+type LifecycleConfiguration struct {
+	XMLName xml.Name        `xml:"LifecycleConfiguration"`
+	Xmlns   string          `xml:"xmlns,attr,omitempty"`
+	Rules   []LifecycleRule `xml:"Rule"`
+}
+
+// LifecycleRule represents a single lifecycle rule.
+type LifecycleRule struct {
+	ID                             string                          `xml:"ID,omitempty"`
+	Status                         string                          `xml:"Status"` // Enabled or Disabled
+	Filter                         *LifecycleFilter                `xml:"Filter,omitempty"`
+	Expiration                     *LifecycleExpiration            `xml:"Expiration,omitempty"`
+	Transition                     []LifecycleTransition           `xml:"Transition,omitempty"`
+	NoncurrentVersionExpiration    *NoncurrentVersionExpiration    `xml:"NoncurrentVersionExpiration,omitempty"`
+	NoncurrentVersionTransition    []NoncurrentVersionTransition   `xml:"NoncurrentVersionTransition,omitempty"`
+	AbortIncompleteMultipartUpload *AbortIncompleteMultipartUpload `xml:"AbortIncompleteMultipartUpload,omitempty"`
+}
+
+// LifecycleFilter specifies which objects the rule applies to.
+type LifecycleFilter struct {
+	Prefix string              `xml:"Prefix,omitempty"`
+	Tag    *Tag                `xml:"Tag,omitempty"`
+	And    *LifecycleFilterAnd `xml:"And,omitempty"`
+}
+
+// LifecycleFilterAnd represents AND logic for filter conditions.
+type LifecycleFilterAnd struct {
+	Prefix string `xml:"Prefix,omitempty"`
+	Tags   []Tag  `xml:"Tag,omitempty"`
+}
+
+// LifecycleExpiration defines when objects expire.
+type LifecycleExpiration struct {
+	Days                      int    `xml:"Days,omitempty"`
+	Date                      string `xml:"Date,omitempty"`
+	ExpiredObjectDeleteMarker bool   `xml:"ExpiredObjectDeleteMarker,omitempty"`
+}
+
+// LifecycleTransition defines when objects transition to a different storage class.
+type LifecycleTransition struct {
+	Days         int    `xml:"Days,omitempty"`
+	Date         string `xml:"Date,omitempty"`
+	StorageClass string `xml:"StorageClass"`
+}
+
+// NoncurrentVersionExpiration defines when noncurrent versions expire.
+type NoncurrentVersionExpiration struct {
+	NoncurrentDays          int `xml:"NoncurrentDays,omitempty"`
+	NewerNoncurrentVersions int `xml:"NewerNoncurrentVersions,omitempty"`
+}
+
+// NoncurrentVersionTransition defines when noncurrent versions transition.
+type NoncurrentVersionTransition struct {
+	NoncurrentDays          int    `xml:"NoncurrentDays,omitempty"`
+	StorageClass            string `xml:"StorageClass"`
+	NewerNoncurrentVersions int    `xml:"NewerNoncurrentVersions,omitempty"`
+}
+
+// AbortIncompleteMultipartUpload defines when incomplete multipart uploads are aborted.
+type AbortIncompleteMultipartUpload struct {
+	DaysAfterInitiation int `xml:"DaysAfterInitiation"`
+}
+
+// Lifecycle status constants.
+const (
+	LifecycleStatusEnabled  = "Enabled"
+	LifecycleStatusDisabled = "Disabled"
+)
+
+// ServerSideEncryptionConfiguration represents bucket default encryption settings.
+type ServerSideEncryptionConfiguration struct {
+	XMLName xml.Name                   `xml:"ServerSideEncryptionConfiguration"`
+	Xmlns   string                     `xml:"xmlns,attr,omitempty"`
+	Rules   []ServerSideEncryptionRule `xml:"Rule"`
+}
+
+// ServerSideEncryptionRule represents a single encryption rule.
+type ServerSideEncryptionRule struct {
+	ApplyServerSideEncryptionByDefault *ServerSideEncryptionByDefault `xml:"ApplyServerSideEncryptionByDefault,omitempty"`
+	BucketKeyEnabled                   bool                           `xml:"BucketKeyEnabled,omitempty"`
+}
+
+// ServerSideEncryptionByDefault represents the default encryption settings.
+type ServerSideEncryptionByDefault struct {
+	SSEAlgorithm   string `xml:"SSEAlgorithm"`             // AES256, aws:kms, aws:kms:dsse
+	KMSMasterKeyID string `xml:"KMSMasterKeyID,omitempty"` // Only for aws:kms
+}
+
+// SSE algorithm constants.
+const (
+	SSEAlgorithmAES256  = "AES256"
+	SSEAlgorithmAWSKMS  = "aws:kms"
+	SSEAlgorithmKMSDSSE = "aws:kms:dsse"
+)

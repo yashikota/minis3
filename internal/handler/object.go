@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +81,142 @@ func parseExpires(value string) *time.Time {
 		return &t
 	}
 	return nil
+}
+
+// ConditionalResult represents the result of evaluating conditional headers.
+type ConditionalResult struct {
+	ShouldReturn bool
+	StatusCode   int
+}
+
+// evaluateConditionalHeaders evaluates conditional request headers against an object.
+// Returns whether the request should return early and with what status code.
+// Evaluation order follows S3 spec: If-Match, If-Unmodified-Since, If-None-Match, If-Modified-Since.
+func evaluateConditionalHeaders(r *http.Request, obj *backend.Object) ConditionalResult {
+	// 1. If-Match: return 412 if ETag doesn't match
+	ifMatch := r.Header.Get("If-Match")
+	if ifMatch != "" {
+		if !matchesETag(ifMatch, obj.ETag) {
+			return ConditionalResult{true, http.StatusPreconditionFailed}
+		}
+	}
+
+	// 2. If-Unmodified-Since: return 412 if modified after the given date
+	ifUnmodifiedSince := r.Header.Get("If-Unmodified-Since")
+	if ifUnmodifiedSince != "" {
+		t, err := time.Parse(http.TimeFormat, ifUnmodifiedSince)
+		if err == nil && obj.LastModified.After(t) {
+			return ConditionalResult{true, http.StatusPreconditionFailed}
+		}
+	}
+
+	// 3. If-None-Match: return 304 if ETag matches
+	ifNoneMatch := r.Header.Get("If-None-Match")
+	if ifNoneMatch != "" {
+		if matchesETag(ifNoneMatch, obj.ETag) {
+			return ConditionalResult{true, http.StatusNotModified}
+		}
+	}
+
+	// 4. If-Modified-Since: return 304 if not modified after the given date
+	ifModifiedSince := r.Header.Get("If-Modified-Since")
+	if ifModifiedSince != "" {
+		t, err := time.Parse(http.TimeFormat, ifModifiedSince)
+		if err == nil && !obj.LastModified.After(t) {
+			return ConditionalResult{true, http.StatusNotModified}
+		}
+	}
+
+	return ConditionalResult{false, 0}
+}
+
+// matchesETag checks if the given header value matches the object's ETag.
+// Supports wildcard "*" and comma-separated ETags.
+func matchesETag(header, etag string) bool {
+	// Handle wildcard
+	if header == "*" {
+		return true
+	}
+
+	// Normalize the object's ETag (ensure it has quotes)
+	normalizedETag := etag
+	if !strings.HasPrefix(etag, "\"") {
+		normalizedETag = "\"" + etag + "\""
+	}
+
+	// Handle comma-separated ETags
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		// Remove quotes for comparison if present, then compare
+		candidateNormalized := candidate
+		if !strings.HasPrefix(candidate, "\"") {
+			candidateNormalized = "\"" + candidate + "\""
+		}
+		if candidateNormalized == normalizedETag || candidate == etag {
+			return true
+		}
+	}
+
+	return false
+}
+
+// parseRangeHeader parses a Range header value and returns start and end positions.
+// Supported formats: "bytes=start-end", "bytes=start-", "bytes=-suffix"
+// Returns start, end (inclusive), and error if invalid.
+func parseRangeHeader(rangeHeader string, size int64) (int64, int64, error) {
+	if !strings.HasPrefix(rangeHeader, "bytes=") {
+		return 0, 0, backend.ErrInvalidRange
+	}
+
+	rangeSpec := strings.TrimPrefix(rangeHeader, "bytes=")
+
+	// Handle suffix range: bytes=-N (last N bytes)
+	if strings.HasPrefix(rangeSpec, "-") {
+		suffix, err := strconv.ParseInt(rangeSpec[1:], 10, 64)
+		if err != nil || suffix <= 0 {
+			return 0, 0, backend.ErrInvalidRange
+		}
+		if suffix >= size {
+			// Return entire object
+			return 0, size - 1, nil
+		}
+		return size - suffix, size - 1, nil
+	}
+
+	parts := strings.SplitN(rangeSpec, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, backend.ErrInvalidRange
+	}
+
+	start, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, 0, backend.ErrInvalidRange
+	}
+
+	// Handle open-ended range: bytes=N-
+	if parts[1] == "" {
+		if start >= size {
+			return 0, 0, backend.ErrInvalidRange
+		}
+		return start, size - 1, nil
+	}
+
+	end, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return 0, 0, backend.ErrInvalidRange
+	}
+
+	// Validate range
+	if start > end || start >= size {
+		return 0, 0, backend.ErrInvalidRange
+	}
+
+	// Clamp end to object size
+	if end >= size {
+		end = size - 1
+	}
+
+	return start, end, nil
 }
 
 // handleObject handles object-level operations.
@@ -312,11 +449,24 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
+		// Evaluate conditional headers before returning content
+		condResult := evaluateConditionalHeaders(r, obj)
+		if condResult.ShouldReturn {
+			w.Header().Set("ETag", obj.ETag)
+			w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+			if obj.VersionId != backend.NullVersionId {
+				w.Header().Set("x-amz-version-id", obj.VersionId)
+			}
+			w.WriteHeader(condResult.StatusCode)
+			return
+		}
+
+		// Set common headers
 		w.Header().Set("ETag", obj.ETag)
 		w.Header().Set("Content-Type", obj.ContentType)
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
+		w.Header().Set("Accept-Ranges", "bytes")
 		if obj.VersionId != backend.NullVersionId {
 			w.Header().Set("x-amz-version-id", obj.VersionId)
 		}
@@ -338,6 +488,32 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Set custom metadata headers
 		setMetadataHeaders(w, obj.Metadata)
+
+		// Handle Range request
+		rangeHeader := r.Header.Get("Range")
+		if rangeHeader != "" {
+			start, end, err := parseRangeHeader(rangeHeader, obj.Size)
+			if err != nil {
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", obj.Size))
+				backend.WriteError(
+					w,
+					http.StatusRequestedRangeNotSatisfiable,
+					"InvalidRange",
+					"The requested range is not satisfiable.",
+				)
+				return
+			}
+
+			contentLength := end - start + 1
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, obj.Size))
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", contentLength))
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(obj.Data[start : end+1])
+			return
+		}
+
+		// Normal full object response
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		_, _ = w.Write(obj.Data)
 
 	case http.MethodDelete:
@@ -410,11 +586,24 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
+		// Evaluate conditional headers before returning metadata
+		condResult := evaluateConditionalHeaders(r, obj)
+		if condResult.ShouldReturn {
+			w.Header().Set("ETag", obj.ETag)
+			w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+			if obj.VersionId != backend.NullVersionId {
+				w.Header().Set("x-amz-version-id", obj.VersionId)
+			}
+			w.WriteHeader(condResult.StatusCode)
+			return
+		}
+
 		w.Header().Set("ETag", obj.ETag)
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
+		w.Header().Set("Accept-Ranges", "bytes")
 		if obj.VersionId != backend.NullVersionId {
 			w.Header().Set("x-amz-version-id", obj.VersionId)
 		}

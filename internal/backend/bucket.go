@@ -593,3 +593,103 @@ func (b *Backend) IsBucketPubliclyReadable(bucketName string) bool {
 	}
 	return IsACLPublicRead(acl)
 }
+
+// GetBucketLifecycleConfiguration returns the lifecycle configuration for a bucket.
+func (b *Backend) GetBucketLifecycleConfiguration(
+	bucketName string,
+) (*LifecycleConfiguration, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+
+	if bucket.LifecycleConfiguration == nil {
+		return nil, ErrNoSuchLifecycleConfiguration
+	}
+
+	return bucket.LifecycleConfiguration, nil
+}
+
+// PutBucketLifecycleConfiguration sets the lifecycle configuration for a bucket.
+func (b *Backend) PutBucketLifecycleConfiguration(
+	bucketName string,
+	config *LifecycleConfiguration,
+) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.LifecycleConfiguration = config
+	return nil
+}
+
+// DeleteBucketLifecycleConfiguration removes the lifecycle configuration for a bucket.
+func (b *Backend) DeleteBucketLifecycleConfiguration(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.LifecycleConfiguration = nil
+	return nil
+}
+
+// GetBucketEncryption returns the encryption configuration for a bucket.
+func (b *Backend) GetBucketEncryption(
+	bucketName string,
+) (*ServerSideEncryptionConfiguration, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+
+	if bucket.EncryptionConfiguration == nil {
+		return nil, ErrServerSideEncryptionConfigurationNotFound
+	}
+
+	return bucket.EncryptionConfiguration, nil
+}
+
+// PutBucketEncryption sets the encryption configuration for a bucket.
+func (b *Backend) PutBucketEncryption(
+	bucketName string,
+	config *ServerSideEncryptionConfiguration,
+) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.EncryptionConfiguration = config
+	return nil
+}
+
+// DeleteBucketEncryption removes the encryption configuration for a bucket.
+func (b *Backend) DeleteBucketEncryption(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.EncryptionConfiguration = nil
+	return nil
+}

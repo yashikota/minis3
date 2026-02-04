@@ -27,8 +27,10 @@ type Bucket struct {
 	Tags                    map[string]string // Bucket tags
 	Policy                  string            // Bucket policy (JSON)
 	ACL                     *AccessControlPolicy
-	ObjectLockEnabled       bool                     // Whether object lock is enabled
-	ObjectLockConfiguration *ObjectLockConfiguration // Default object lock configuration
+	ObjectLockEnabled       bool                               // Whether object lock is enabled
+	ObjectLockConfiguration *ObjectLockConfiguration           // Default object lock configuration
+	LifecycleConfiguration  *LifecycleConfiguration            // Lifecycle rules
+	EncryptionConfiguration *ServerSideEncryptionConfiguration // Default encryption settings
 }
 
 // ObjectVersions holds all versions of an object.
@@ -99,9 +101,22 @@ var (
 	ErrEntityTooSmall   = errors.New(
 		"your proposed upload is smaller than the minimum allowed object size",
 	)
-	ErrObjectLockNotEnabled   = errors.New("object lock is not enabled for this bucket")
-	ErrNoSuchObjectLockConfig = errors.New("the object lock configuration does not exist")
-	ErrObjectLocked           = errors.New("object is locked")
+	ErrObjectLockNotEnabled = errors.New(
+		"object lock is not enabled for this bucket",
+	)
+	ErrNoSuchObjectLockConfig = errors.New(
+		"the object lock configuration does not exist",
+	)
+	ErrObjectLocked = errors.New("object is locked")
+	ErrInvalidRange = errors.New(
+		"the requested range is not satisfiable",
+	)
+	ErrNoSuchLifecycleConfiguration = errors.New(
+		"the lifecycle configuration does not exist",
+	)
+	ErrServerSideEncryptionConfigurationNotFound = errors.New(
+		"the server side encryption configuration was not found",
+	)
 )
 
 func New() *Backend {

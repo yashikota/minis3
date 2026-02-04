@@ -64,6 +64,14 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleGetObjectLockConfiguration(w, r, bucketName)
 			return
 		}
+		if r.URL.Query().Has("lifecycle") {
+			h.handleGetBucketLifecycleConfiguration(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("encryption") {
+			h.handleGetBucketEncryption(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Get("list-type") == "2" {
 			h.handleListObjectsV2(w, r, bucketName)
 			return
@@ -95,6 +103,14 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("object-lock") {
 			h.handlePutObjectLockConfiguration(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("lifecycle") {
+			h.handlePutBucketLifecycleConfiguration(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("encryption") {
+			h.handlePutBucketEncryption(w, r, bucketName)
 			return
 		}
 		// Parse CreateBucketConfiguration from request body if present
@@ -154,6 +170,14 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("policy") {
 			h.handleDeleteBucketPolicy(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("lifecycle") {
+			h.handleDeleteBucketLifecycleConfiguration(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("encryption") {
+			h.handleDeleteBucketEncryption(w, r, bucketName)
 			return
 		}
 		err := h.backend.DeleteBucket(bucketName)
@@ -1021,4 +1045,222 @@ func (h *Handler) handlePutBucketACL(
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleGetBucketLifecycleConfiguration handles GetBucketLifecycleConfiguration requests.
+func (h *Handler) handleGetBucketLifecycleConfiguration(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	config, err := h.backend.GetBucketLifecycleConfiguration(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrNoSuchLifecycleConfiguration) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchLifecycleConfiguration",
+				"The lifecycle configuration does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(config)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutBucketLifecycleConfiguration handles PutBucketLifecycleConfiguration requests.
+func (h *Handler) handlePutBucketLifecycleConfiguration(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var config backend.LifecycleConfiguration
+	if err := xml.Unmarshal(body, &config); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	if err := h.backend.PutBucketLifecycleConfiguration(bucketName, &config); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleDeleteBucketLifecycleConfiguration handles DeleteBucketLifecycleConfiguration requests.
+func (h *Handler) handleDeleteBucketLifecycleConfiguration(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	err := h.backend.DeleteBucketLifecycleConfiguration(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetBucketEncryption handles GetBucketEncryption requests.
+func (h *Handler) handleGetBucketEncryption(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	config, err := h.backend.GetBucketEncryption(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrServerSideEncryptionConfigurationNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"ServerSideEncryptionConfigurationNotFoundError",
+				"The server side encryption configuration was not found.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(config)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutBucketEncryption handles PutBucketEncryption requests.
+func (h *Handler) handlePutBucketEncryption(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var config backend.ServerSideEncryptionConfiguration
+	if err := xml.Unmarshal(body, &config); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	if err := h.backend.PutBucketEncryption(bucketName, &config); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleDeleteBucketEncryption handles DeleteBucketEncryption requests.
+func (h *Handler) handleDeleteBucketEncryption(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	err := h.backend.DeleteBucketEncryption(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -45,9 +45,11 @@ Must use `UsePathStyle = true` in AWS SDK client options (virtual-hosted style n
 
 ## Supported S3 Operations
 
-**Bucket Operations:** ListBuckets, CreateBucket, DeleteBucket, HeadBucket, GetBucketLocation, GetBucketVersioning, PutBucketVersioning, GetBucketTagging, PutBucketTagging, DeleteBucketTagging, GetBucketPolicy, PutBucketPolicy, DeleteBucketPolicy, GetBucketAcl, PutBucketAcl, GetObjectLockConfiguration, PutObjectLockConfiguration.
+**Bucket Operations:** ListBuckets, CreateBucket, DeleteBucket, HeadBucket, GetBucketLocation, GetBucketVersioning, PutBucketVersioning, GetBucketTagging, PutBucketTagging, DeleteBucketTagging, GetBucketPolicy, PutBucketPolicy, DeleteBucketPolicy, GetBucketAcl, PutBucketAcl, GetObjectLockConfiguration, PutObjectLockConfiguration, GetBucketLifecycleConfiguration, PutBucketLifecycleConfiguration, DeleteBucketLifecycle, GetBucketEncryption, PutBucketEncryption, DeleteBucketEncryption.
 
-**Object Operations:** PutObject, GetObject, DeleteObject, HeadObject, CopyObject, DeleteObjects, ListObjects, ListObjectsV2, ListObjectVersions, GetObjectAcl, PutObjectAcl, GetObjectTagging, PutObjectTagging, DeleteObjectTagging, GetObjectAttributes.
+**Object Operations:** PutObject, GetObject (with Range header support), DeleteObject, HeadObject, CopyObject, DeleteObjects, ListObjects, ListObjectsV2, ListObjectVersions, GetObjectAcl, PutObjectAcl, GetObjectTagging, PutObjectTagging, DeleteObjectTagging, GetObjectAttributes.
+
+**Conditional Headers:** If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since (for GetObject/HeadObject).
 
 **Object Lock Operations:** GetObjectLockConfiguration, PutObjectLockConfiguration, GetObjectRetention, PutObjectRetention, GetObjectLegalHold, PutObjectLegalHold.
 

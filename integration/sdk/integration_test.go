@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -1795,6 +1796,546 @@ func TestObjectMetadata(t *testing.T) {
 				resp.Metadata["newmeta"],
 				resp.Metadata,
 			)
+		}
+	})
+}
+
+func TestBucketEncryption(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "encryption-test-bucket"
+
+	t.Cleanup(func() {
+		client.DeleteBucketEncryption(context.TODO(), &s3.DeleteBucketEncryptionInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("NoEncryptionInitially", func(t *testing.T) {
+		_, err := client.GetBucketEncryption(context.TODO(), &s3.GetBucketEncryptionInput{
+			Bucket: aws.String(bucketName),
+		})
+		// Should return ServerSideEncryptionConfigurationNotFoundError
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "ServerSideEncryptionConfigurationNotFoundError" {
+			t.Errorf("Expected ServerSideEncryptionConfigurationNotFoundError, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetEncryption", func(t *testing.T) {
+		_, err := client.PutBucketEncryption(context.TODO(), &s3.PutBucketEncryptionInput{
+			Bucket: aws.String(bucketName),
+			ServerSideEncryptionConfiguration: &types.ServerSideEncryptionConfiguration{
+				Rules: []types.ServerSideEncryptionRule{
+					{
+						ApplyServerSideEncryptionByDefault: &types.ServerSideEncryptionByDefault{
+							SSEAlgorithm: types.ServerSideEncryptionAes256,
+						},
+						BucketKeyEnabled: aws.Bool(false),
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutBucketEncryption failed: %v", err)
+		}
+
+		resp, err := client.GetBucketEncryption(context.TODO(), &s3.GetBucketEncryptionInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("GetBucketEncryption failed: %v", err)
+		}
+
+		if len(resp.ServerSideEncryptionConfiguration.Rules) != 1 {
+			t.Errorf("Expected 1 encryption rule, got %d", len(resp.ServerSideEncryptionConfiguration.Rules))
+		}
+
+		rule := resp.ServerSideEncryptionConfiguration.Rules[0]
+		if rule.ApplyServerSideEncryptionByDefault == nil {
+			t.Fatal("Expected ApplyServerSideEncryptionByDefault to be set")
+		}
+		if rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm != types.ServerSideEncryptionAes256 {
+			t.Errorf("Expected SSEAlgorithm AES256, got %v", rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm)
+		}
+	})
+
+	t.Run("DeleteEncryption", func(t *testing.T) {
+		_, err := client.DeleteBucketEncryption(context.TODO(), &s3.DeleteBucketEncryptionInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeleteBucketEncryption failed: %v", err)
+		}
+
+		_, err = client.GetBucketEncryption(context.TODO(), &s3.GetBucketEncryptionInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "ServerSideEncryptionConfigurationNotFoundError" {
+			t.Errorf("Expected ServerSideEncryptionConfigurationNotFoundError after delete, got: %v", err)
+		}
+	})
+}
+
+func TestBucketLifecycle(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "lifecycle-test-bucket"
+
+	t.Cleanup(func() {
+		client.DeleteBucketLifecycle(context.TODO(), &s3.DeleteBucketLifecycleInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("NoLifecycleInitially", func(t *testing.T) {
+		_, err := client.GetBucketLifecycleConfiguration(
+			context.TODO(),
+			&s3.GetBucketLifecycleConfigurationInput{
+				Bucket: aws.String(bucketName),
+			},
+		)
+		// Should return NoSuchLifecycleConfiguration error
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchLifecycleConfiguration" {
+			t.Errorf("Expected NoSuchLifecycleConfiguration error, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetLifecycle", func(t *testing.T) {
+		_, err := client.PutBucketLifecycleConfiguration(
+			context.TODO(),
+			&s3.PutBucketLifecycleConfigurationInput{
+				Bucket: aws.String(bucketName),
+				LifecycleConfiguration: &types.BucketLifecycleConfiguration{
+					Rules: []types.LifecycleRule{
+						{
+							ID:     aws.String("expire-old-objects"),
+							Status: types.ExpirationStatusEnabled,
+							Filter: &types.LifecycleRuleFilter{
+								Prefix: aws.String("logs/"),
+							},
+							Expiration: &types.LifecycleExpiration{
+								Days: aws.Int32(30),
+							},
+						},
+						{
+							ID:     aws.String("transition-to-glacier"),
+							Status: types.ExpirationStatusEnabled,
+							Filter: &types.LifecycleRuleFilter{
+								Prefix: aws.String("archive/"),
+							},
+							Transitions: []types.Transition{
+								{
+									Days:         aws.Int32(90),
+									StorageClass: types.TransitionStorageClassGlacier,
+								},
+							},
+						},
+					},
+				},
+			},
+		)
+		if err != nil {
+			t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+		}
+
+		resp, err := client.GetBucketLifecycleConfiguration(
+			context.TODO(),
+			&s3.GetBucketLifecycleConfigurationInput{
+				Bucket: aws.String(bucketName),
+			},
+		)
+		if err != nil {
+			t.Fatalf("GetBucketLifecycleConfiguration failed: %v", err)
+		}
+
+		if len(resp.Rules) != 2 {
+			t.Errorf("Expected 2 lifecycle rules, got %d", len(resp.Rules))
+		}
+	})
+
+	t.Run("DeleteLifecycle", func(t *testing.T) {
+		_, err := client.DeleteBucketLifecycle(context.TODO(), &s3.DeleteBucketLifecycleInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeleteBucketLifecycle failed: %v", err)
+		}
+
+		_, err = client.GetBucketLifecycleConfiguration(
+			context.TODO(),
+			&s3.GetBucketLifecycleConfigurationInput{
+				Bucket: aws.String(bucketName),
+			},
+		)
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchLifecycleConfiguration" {
+			t.Errorf("Expected NoSuchLifecycleConfiguration error after delete, got: %v", err)
+		}
+	})
+}
+
+func TestConditionalHeaders(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "conditional-test-bucket"
+	key := "test.txt"
+	content := "test content for conditional headers"
+
+	t.Cleanup(func() {
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// Put object and capture ETag
+	putResp, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+		Body:   strings.NewReader(content),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	etag := *putResp.ETag
+
+	// Get object to capture LastModified
+	getResp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	getResp.Body.Close()
+	lastModified := *getResp.LastModified
+
+	t.Run("IfMatch_Success", func(t *testing.T) {
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:  aws.String(bucketName),
+			Key:     aws.String(key),
+			IfMatch: aws.String(etag),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with matching If-Match should succeed: %v", err)
+		}
+		resp.Body.Close()
+	})
+
+	t.Run("IfMatch_Failure", func(t *testing.T) {
+		_, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:  aws.String(bucketName),
+			Key:     aws.String(key),
+			IfMatch: aws.String("\"wrongetag\""),
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-matching If-Match")
+		}
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("Expected API error, got: %v", err)
+		}
+		// Should be 412 Precondition Failed
+		if apiErr.ErrorCode() != "PreconditionFailed" {
+			t.Errorf("Expected PreconditionFailed error, got: %s", apiErr.ErrorCode())
+		}
+	})
+
+	t.Run("IfNoneMatch_NotModified", func(t *testing.T) {
+		_, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:      aws.String(bucketName),
+			Key:         aws.String(key),
+			IfNoneMatch: aws.String(etag),
+		})
+		if err == nil {
+			t.Fatal("Expected 304 Not Modified for matching If-None-Match")
+		}
+		// For SDK, 304 typically returns an error
+		var respErr *smithy.OperationError
+		if errors.As(err, &respErr) {
+			// Check if it's a 304 response
+			t.Logf("Got expected condition response: %v", err)
+		}
+	})
+
+	t.Run("IfNoneMatch_Success", func(t *testing.T) {
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:      aws.String(bucketName),
+			Key:         aws.String(key),
+			IfNoneMatch: aws.String("\"differentetag\""),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with non-matching If-None-Match should succeed: %v", err)
+		}
+		resp.Body.Close()
+	})
+
+	t.Run("IfModifiedSince_NotModified", func(t *testing.T) {
+		// Use a future time - object should not have been modified since then
+		futureTime := lastModified.Add(1 * 24 * 60 * 60 * 1e9) // Add 1 day
+		_, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:          aws.String(bucketName),
+			Key:             aws.String(key),
+			IfModifiedSince: aws.Time(futureTime),
+		})
+		if err == nil {
+			t.Fatal("Expected 304 Not Modified for If-Modified-Since with future time")
+		}
+		t.Logf("Got expected condition response for If-Modified-Since: %v", err)
+	})
+
+	t.Run("IfUnmodifiedSince_Success", func(t *testing.T) {
+		// Use a future time - object was unmodified since then
+		futureTime := lastModified.Add(1 * 24 * 60 * 60 * 1e9) // Add 1 day
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:            aws.String(bucketName),
+			Key:               aws.String(key),
+			IfUnmodifiedSince: aws.Time(futureTime),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with If-Unmodified-Since (future) should succeed: %v", err)
+		}
+		resp.Body.Close()
+	})
+
+	t.Run("IfUnmodifiedSince_Failure", func(t *testing.T) {
+		// Use a past time - object was modified after that
+		pastTime := lastModified.Add(-1 * 24 * 60 * 60 * 1e9) // Subtract 1 day
+		_, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:            aws.String(bucketName),
+			Key:               aws.String(key),
+			IfUnmodifiedSince: aws.Time(pastTime),
+		})
+		if err == nil {
+			t.Fatal("Expected 412 Precondition Failed for If-Unmodified-Since with past time")
+		}
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("Expected API error, got: %v", err)
+		}
+		if apiErr.ErrorCode() != "PreconditionFailed" {
+			t.Errorf("Expected PreconditionFailed error, got: %s", apiErr.ErrorCode())
+		}
+	})
+
+	t.Run("HeadObject_IfMatch", func(t *testing.T) {
+		// Test conditional headers work with HEAD as well
+		_, err := client.HeadObject(context.TODO(), &s3.HeadObjectInput{
+			Bucket:  aws.String(bucketName),
+			Key:     aws.String(key),
+			IfMatch: aws.String(etag),
+		})
+		if err != nil {
+			t.Fatalf("HeadObject with matching If-Match should succeed: %v", err)
+		}
+	})
+
+	t.Run("HeadObject_IfMatch_Failure", func(t *testing.T) {
+		_, err := client.HeadObject(context.TODO(), &s3.HeadObjectInput{
+			Bucket:  aws.String(bucketName),
+			Key:     aws.String(key),
+			IfMatch: aws.String("\"wrongetag\""),
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-matching If-Match on HEAD")
+		}
+	})
+}
+
+func TestRangeRequests(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "range-test-bucket"
+	key := "test.txt"
+	content := "Hello, World! This is test content for range requests."
+
+	t.Cleanup(func() {
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// Put object
+	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+		Body:   strings.NewReader(content),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	t.Run("BasicRange", func(t *testing.T) {
+		// Request first 5 bytes: "Hello"
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Range:  aws.String("bytes=0-4"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with range failed: %v", err)
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if string(body) != "Hello" {
+			t.Errorf("Expected 'Hello', got '%s'", string(body))
+		}
+
+		if resp.ContentLength == nil || *resp.ContentLength != 5 {
+			t.Errorf("Expected ContentLength 5, got %v", resp.ContentLength)
+		}
+
+		if resp.ContentRange == nil {
+			t.Errorf("Expected ContentRange to be set, got nil")
+		} else if *resp.ContentRange != "bytes 0-4/54" {
+			t.Errorf("Expected ContentRange 'bytes 0-4/54', got '%s'", *resp.ContentRange)
+		}
+	})
+
+	t.Run("OpenEndedRange", func(t *testing.T) {
+		// Request from byte 50 to end
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Range:  aws.String("bytes=50-"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with open-ended range failed: %v", err)
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		expected := content[50:]
+		if string(body) != expected {
+			t.Errorf("Expected '%s', got '%s'", expected, string(body))
+		}
+	})
+
+	t.Run("SuffixRange", func(t *testing.T) {
+		// Request last 10 bytes
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Range:  aws.String("bytes=-10"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with suffix range failed: %v", err)
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		expected := content[len(content)-10:]
+		if string(body) != expected {
+			t.Errorf("Expected '%s', got '%s'", expected, string(body))
+		}
+
+		if resp.ContentLength == nil || *resp.ContentLength != 10 {
+			t.Errorf("Expected ContentLength 10, got %v", resp.ContentLength)
+		}
+	})
+
+	t.Run("InvalidRange", func(t *testing.T) {
+		// Request beyond object size
+		_, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Range:  aws.String("bytes=100-200"),
+		})
+		if err == nil {
+			t.Fatal("Expected error for invalid range, but succeeded")
+		}
+
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "InvalidRange" {
+			t.Errorf("Expected InvalidRange error, got: %v", err)
+		}
+	})
+
+	t.Run("MiddleRange", func(t *testing.T) {
+		// Request bytes 7-11: "World"
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			Range:  aws.String("bytes=7-11"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with middle range failed: %v", err)
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if string(body) != "World" {
+			t.Errorf("Expected 'World', got '%s'", string(body))
+		}
+	})
+
+	t.Run("AcceptRangesHeader", func(t *testing.T) {
+		// Normal request should have Accept-Ranges header
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+		resp.Body.Close()
+
+		if resp.AcceptRanges == nil || *resp.AcceptRanges != "bytes" {
+			t.Errorf("Expected AcceptRanges 'bytes', got %v", resp.AcceptRanges)
 		}
 	})
 }

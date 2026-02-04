@@ -31,17 +31,23 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | PutBucketAcl | ✅ | |
 | GetObjectLockConfiguration | ✅ | |
 | PutObjectLockConfiguration | ✅ | |
+| GetBucketLifecycleConfiguration | ✅ | |
+| PutBucketLifecycleConfiguration | ✅ | |
+| DeleteBucketLifecycle | ✅ | |
+| GetBucketEncryption | ✅ | |
+| PutBucketEncryption | ✅ | |
+| DeleteBucketEncryption | ✅ | |
 
 ### 📦 Object Operations
 
 | Operation | Status | Unsupported Features |
 | --------- | ------ | -------------------- |
 | PutObject | ⚠️ | StorageClass, WebsiteRedirectLocation, Tagging, ChecksumAlgorithm |
-| GetObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, ResponseCacheControl, ResponseContentDisposition, ResponseContentEncoding, ResponseContentLanguage, ResponseContentType, ResponseExpires, PartNumber, ChecksumMode |
+| GetObject | ⚠️ | ResponseCacheControl, ResponseContentDisposition, ResponseContentEncoding, ResponseContentLanguage, ResponseContentType, ResponseExpires, PartNumber, ChecksumMode |
 | DeleteObject | ⚠️ | MFA Delete (API format only) |
 | DeleteObjects | ✅ | |
 | CopyObject | ⚠️ | CopySourceIfMatch, CopySourceIfModifiedSince, CopySourceIfNoneMatch, CopySourceIfUnmodifiedSince, TaggingDirective, StorageClass, WebsiteRedirectLocation, Tagging, ChecksumAlgorithm |
-| HeadObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, PartNumber, ChecksumMode |
+| HeadObject | ⚠️ | PartNumber, ChecksumMode |
 | ListObjects | ⚠️ | RequestPayer, OptionalObjectAttributes |
 | ListObjectsV2 | ⚠️ | FetchOwner, OptionalObjectAttributes |
 | ListObjectVersions | ⚠️ | Owner information |
