@@ -693,3 +693,141 @@ func (b *Backend) DeleteBucketEncryption(bucketName string) error {
 	bucket.EncryptionConfiguration = nil
 	return nil
 }
+
+// GetBucketCORS returns the CORS configuration for a bucket.
+func (b *Backend) GetBucketCORS(bucketName string) (*CORSConfiguration, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+
+	if bucket.CORSConfiguration == nil {
+		return nil, ErrNoSuchCORSConfiguration
+	}
+
+	return bucket.CORSConfiguration, nil
+}
+
+// PutBucketCORS sets the CORS configuration for a bucket.
+func (b *Backend) PutBucketCORS(bucketName string, config *CORSConfiguration) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.CORSConfiguration = config
+	return nil
+}
+
+// DeleteBucketCORS removes the CORS configuration for a bucket.
+func (b *Backend) DeleteBucketCORS(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.CORSConfiguration = nil
+	return nil
+}
+
+// GetBucketWebsite returns the website configuration for a bucket.
+func (b *Backend) GetBucketWebsite(bucketName string) (*WebsiteConfiguration, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+
+	if bucket.WebsiteConfiguration == nil {
+		return nil, ErrNoSuchWebsiteConfiguration
+	}
+
+	return bucket.WebsiteConfiguration, nil
+}
+
+// PutBucketWebsite sets the website configuration for a bucket.
+func (b *Backend) PutBucketWebsite(bucketName string, config *WebsiteConfiguration) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.WebsiteConfiguration = config
+	return nil
+}
+
+// DeleteBucketWebsite removes the website configuration for a bucket.
+func (b *Backend) DeleteBucketWebsite(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.WebsiteConfiguration = nil
+	return nil
+}
+
+// GetPublicAccessBlock returns the public access block configuration for a bucket.
+func (b *Backend) GetPublicAccessBlock(bucketName string) (*PublicAccessBlockConfiguration, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+
+	if bucket.PublicAccessBlock == nil {
+		return nil, ErrNoSuchPublicAccessBlockConfiguration
+	}
+
+	return bucket.PublicAccessBlock, nil
+}
+
+// PutPublicAccessBlock sets the public access block configuration for a bucket.
+func (b *Backend) PutPublicAccessBlock(
+	bucketName string,
+	config *PublicAccessBlockConfiguration,
+) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.PublicAccessBlock = config
+	return nil
+}
+
+// DeletePublicAccessBlock removes the public access block configuration for a bucket.
+func (b *Backend) DeletePublicAccessBlock(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.PublicAccessBlock = nil
+	return nil
+}

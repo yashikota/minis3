@@ -1828,7 +1828,8 @@ func TestBucketEncryption(t *testing.T) {
 		})
 		// Should return ServerSideEncryptionConfigurationNotFoundError
 		var apiErr smithy.APIError
-		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "ServerSideEncryptionConfigurationNotFoundError" {
+		if !errors.As(err, &apiErr) ||
+			apiErr.ErrorCode() != "ServerSideEncryptionConfigurationNotFoundError" {
 			t.Errorf("Expected ServerSideEncryptionConfigurationNotFoundError, got: %v", err)
 		}
 	})
@@ -1859,7 +1860,10 @@ func TestBucketEncryption(t *testing.T) {
 		}
 
 		if len(resp.ServerSideEncryptionConfiguration.Rules) != 1 {
-			t.Errorf("Expected 1 encryption rule, got %d", len(resp.ServerSideEncryptionConfiguration.Rules))
+			t.Errorf(
+				"Expected 1 encryption rule, got %d",
+				len(resp.ServerSideEncryptionConfiguration.Rules),
+			)
 		}
 
 		rule := resp.ServerSideEncryptionConfiguration.Rules[0]
@@ -1867,7 +1871,10 @@ func TestBucketEncryption(t *testing.T) {
 			t.Fatal("Expected ApplyServerSideEncryptionByDefault to be set")
 		}
 		if rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm != types.ServerSideEncryptionAes256 {
-			t.Errorf("Expected SSEAlgorithm AES256, got %v", rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm)
+			t.Errorf(
+				"Expected SSEAlgorithm AES256, got %v",
+				rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm,
+			)
 		}
 	})
 
@@ -1883,8 +1890,12 @@ func TestBucketEncryption(t *testing.T) {
 			Bucket: aws.String(bucketName),
 		})
 		var apiErr smithy.APIError
-		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "ServerSideEncryptionConfigurationNotFoundError" {
-			t.Errorf("Expected ServerSideEncryptionConfigurationNotFoundError after delete, got: %v", err)
+		if !errors.As(err, &apiErr) ||
+			apiErr.ErrorCode() != "ServerSideEncryptionConfigurationNotFoundError" {
+			t.Errorf(
+				"Expected ServerSideEncryptionConfigurationNotFoundError after delete, got: %v",
+				err,
+			)
 		}
 	})
 }
@@ -2336,6 +2347,272 @@ func TestRangeRequests(t *testing.T) {
 
 		if resp.AcceptRanges == nil || *resp.AcceptRanges != "bytes" {
 			t.Errorf("Expected AcceptRanges 'bytes', got %v", resp.AcceptRanges)
+		}
+	})
+}
+
+func TestBucketCORS(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "cors-test-bucket"
+
+	t.Cleanup(func() {
+		client.DeleteBucketCors(context.TODO(), &s3.DeleteBucketCorsInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("NoCORSInitially", func(t *testing.T) {
+		_, err := client.GetBucketCors(context.TODO(), &s3.GetBucketCorsInput{
+			Bucket: aws.String(bucketName),
+		})
+		// Should return NoSuchCORSConfiguration
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchCORSConfiguration" {
+			t.Errorf("Expected NoSuchCORSConfiguration, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetCORS", func(t *testing.T) {
+		_, err := client.PutBucketCors(context.TODO(), &s3.PutBucketCorsInput{
+			Bucket: aws.String(bucketName),
+			CORSConfiguration: &types.CORSConfiguration{
+				CORSRules: []types.CORSRule{
+					{
+						AllowedMethods: []string{"GET", "PUT"},
+						AllowedOrigins: []string{"https://example.com"},
+						AllowedHeaders: []string{"*"},
+						MaxAgeSeconds:  aws.Int32(3000),
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutBucketCors failed: %v", err)
+		}
+
+		resp, err := client.GetBucketCors(context.TODO(), &s3.GetBucketCorsInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("GetBucketCors failed: %v", err)
+		}
+
+		if len(resp.CORSRules) != 1 {
+			t.Errorf("Expected 1 CORS rule, got %d", len(resp.CORSRules))
+		}
+
+		rule := resp.CORSRules[0]
+		if len(rule.AllowedMethods) != 2 {
+			t.Errorf("Expected 2 allowed methods, got %d", len(rule.AllowedMethods))
+		}
+		if len(rule.AllowedOrigins) != 1 || rule.AllowedOrigins[0] != "https://example.com" {
+			t.Errorf("Expected AllowedOrigins ['https://example.com'], got %v", rule.AllowedOrigins)
+		}
+	})
+
+	t.Run("DeleteCORS", func(t *testing.T) {
+		_, err := client.DeleteBucketCors(context.TODO(), &s3.DeleteBucketCorsInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeleteBucketCors failed: %v", err)
+		}
+
+		// Verify deletion
+		_, err = client.GetBucketCors(context.TODO(), &s3.GetBucketCorsInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchCORSConfiguration" {
+			t.Errorf("Expected NoSuchCORSConfiguration after deletion, got: %v", err)
+		}
+	})
+}
+
+func TestBucketWebsite(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "website-test-bucket"
+
+	t.Cleanup(func() {
+		client.DeleteBucketWebsite(context.TODO(), &s3.DeleteBucketWebsiteInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("NoWebsiteInitially", func(t *testing.T) {
+		_, err := client.GetBucketWebsite(context.TODO(), &s3.GetBucketWebsiteInput{
+			Bucket: aws.String(bucketName),
+		})
+		// Should return NoSuchWebsiteConfiguration
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchWebsiteConfiguration" {
+			t.Errorf("Expected NoSuchWebsiteConfiguration, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetWebsite", func(t *testing.T) {
+		_, err := client.PutBucketWebsite(context.TODO(), &s3.PutBucketWebsiteInput{
+			Bucket: aws.String(bucketName),
+			WebsiteConfiguration: &types.WebsiteConfiguration{
+				IndexDocument: &types.IndexDocument{
+					Suffix: aws.String("index.html"),
+				},
+				ErrorDocument: &types.ErrorDocument{
+					Key: aws.String("error.html"),
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutBucketWebsite failed: %v", err)
+		}
+
+		resp, err := client.GetBucketWebsite(context.TODO(), &s3.GetBucketWebsiteInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("GetBucketWebsite failed: %v", err)
+		}
+
+		if resp.IndexDocument == nil || *resp.IndexDocument.Suffix != "index.html" {
+			t.Errorf("Expected IndexDocument.Suffix 'index.html', got %v", resp.IndexDocument)
+		}
+		if resp.ErrorDocument == nil || *resp.ErrorDocument.Key != "error.html" {
+			t.Errorf("Expected ErrorDocument.Key 'error.html', got %v", resp.ErrorDocument)
+		}
+	})
+
+	t.Run("DeleteWebsite", func(t *testing.T) {
+		_, err := client.DeleteBucketWebsite(context.TODO(), &s3.DeleteBucketWebsiteInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeleteBucketWebsite failed: %v", err)
+		}
+
+		// Verify deletion
+		_, err = client.GetBucketWebsite(context.TODO(), &s3.GetBucketWebsiteInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "NoSuchWebsiteConfiguration" {
+			t.Errorf("Expected NoSuchWebsiteConfiguration after deletion, got: %v", err)
+		}
+	})
+}
+
+func TestPublicAccessBlock(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "public-access-block-test-bucket"
+
+	t.Cleanup(func() {
+		client.DeletePublicAccessBlock(context.TODO(), &s3.DeletePublicAccessBlockInput{
+			Bucket: aws.String(bucketName),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	t.Run("NoPublicAccessBlockInitially", func(t *testing.T) {
+		_, err := client.GetPublicAccessBlock(context.TODO(), &s3.GetPublicAccessBlockInput{
+			Bucket: aws.String(bucketName),
+		})
+		// Should return NoSuchPublicAccessBlockConfiguration
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) ||
+			apiErr.ErrorCode() != "NoSuchPublicAccessBlockConfiguration" {
+			t.Errorf("Expected NoSuchPublicAccessBlockConfiguration, got: %v", err)
+		}
+	})
+
+	t.Run("PutAndGetPublicAccessBlock", func(t *testing.T) {
+		_, err := client.PutPublicAccessBlock(context.TODO(), &s3.PutPublicAccessBlockInput{
+			Bucket: aws.String(bucketName),
+			PublicAccessBlockConfiguration: &types.PublicAccessBlockConfiguration{
+				BlockPublicAcls:       aws.Bool(true),
+				IgnorePublicAcls:      aws.Bool(true),
+				BlockPublicPolicy:     aws.Bool(true),
+				RestrictPublicBuckets: aws.Bool(true),
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutPublicAccessBlock failed: %v", err)
+		}
+
+		resp, err := client.GetPublicAccessBlock(context.TODO(), &s3.GetPublicAccessBlockInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("GetPublicAccessBlock failed: %v", err)
+		}
+
+		if resp.PublicAccessBlockConfiguration == nil {
+			t.Fatal("Expected PublicAccessBlockConfiguration to be set")
+		}
+		config := resp.PublicAccessBlockConfiguration
+		if config.BlockPublicAcls == nil || !*config.BlockPublicAcls {
+			t.Errorf("Expected BlockPublicAcls true, got %v", config.BlockPublicAcls)
+		}
+		if config.IgnorePublicAcls == nil || !*config.IgnorePublicAcls {
+			t.Errorf("Expected IgnorePublicAcls true, got %v", config.IgnorePublicAcls)
+		}
+		if config.BlockPublicPolicy == nil || !*config.BlockPublicPolicy {
+			t.Errorf("Expected BlockPublicPolicy true, got %v", config.BlockPublicPolicy)
+		}
+		if config.RestrictPublicBuckets == nil || !*config.RestrictPublicBuckets {
+			t.Errorf("Expected RestrictPublicBuckets true, got %v", config.RestrictPublicBuckets)
+		}
+	})
+
+	t.Run("DeletePublicAccessBlock", func(t *testing.T) {
+		_, err := client.DeletePublicAccessBlock(context.TODO(), &s3.DeletePublicAccessBlockInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err != nil {
+			t.Fatalf("DeletePublicAccessBlock failed: %v", err)
+		}
+
+		// Verify deletion
+		_, err = client.GetPublicAccessBlock(context.TODO(), &s3.GetPublicAccessBlockInput{
+			Bucket: aws.String(bucketName),
+		})
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) ||
+			apiErr.ErrorCode() != "NoSuchPublicAccessBlockConfiguration" {
+			t.Errorf("Expected NoSuchPublicAccessBlockConfiguration after deletion, got: %v", err)
 		}
 	})
 }

@@ -37,6 +37,15 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | GetBucketEncryption | ✅ | |
 | PutBucketEncryption | ✅ | |
 | DeleteBucketEncryption | ✅ | |
+| GetBucketCors | ✅ | |
+| PutBucketCors | ✅ | |
+| DeleteBucketCors | ✅ | |
+| GetBucketWebsite | ✅ | |
+| PutBucketWebsite | ✅ | |
+| DeleteBucketWebsite | ✅ | |
+| GetPublicAccessBlock | ✅ | |
+| PutPublicAccessBlock | ✅ | |
+| DeletePublicAccessBlock | ✅ | |
 
 ### 📦 Object Operations
 

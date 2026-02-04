@@ -72,6 +72,18 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleGetBucketEncryption(w, r, bucketName)
 			return
 		}
+		if r.URL.Query().Has("cors") {
+			h.handleGetBucketCORS(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("website") {
+			h.handleGetBucketWebsite(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("publicAccessBlock") {
+			h.handleGetPublicAccessBlock(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Get("list-type") == "2" {
 			h.handleListObjectsV2(w, r, bucketName)
 			return
@@ -111,6 +123,18 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("encryption") {
 			h.handlePutBucketEncryption(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("cors") {
+			h.handlePutBucketCORS(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("website") {
+			h.handlePutBucketWebsite(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("publicAccessBlock") {
+			h.handlePutPublicAccessBlock(w, r, bucketName)
 			return
 		}
 		// Parse CreateBucketConfiguration from request body if present
@@ -178,6 +202,18 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("encryption") {
 			h.handleDeleteBucketEncryption(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("cors") {
+			h.handleDeleteBucketCORS(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("website") {
+			h.handleDeleteBucketWebsite(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("publicAccessBlock") {
+			h.handleDeletePublicAccessBlock(w, r, bucketName)
 			return
 		}
 		err := h.backend.DeleteBucket(bucketName)
@@ -1248,6 +1284,333 @@ func (h *Handler) handleDeleteBucketEncryption(
 	bucketName string,
 ) {
 	err := h.backend.DeleteBucketEncryption(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetBucketCORS handles GetBucketCors requests.
+func (h *Handler) handleGetBucketCORS(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	config, err := h.backend.GetBucketCORS(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrNoSuchCORSConfiguration) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchCORSConfiguration",
+				"The CORS configuration does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(config)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutBucketCORS handles PutBucketCors requests.
+func (h *Handler) handlePutBucketCORS(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var config backend.CORSConfiguration
+	if err := xml.Unmarshal(body, &config); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	if err := h.backend.PutBucketCORS(bucketName, &config); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleDeleteBucketCORS handles DeleteBucketCors requests.
+func (h *Handler) handleDeleteBucketCORS(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	err := h.backend.DeleteBucketCORS(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetBucketWebsite handles GetBucketWebsite requests.
+func (h *Handler) handleGetBucketWebsite(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	config, err := h.backend.GetBucketWebsite(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrNoSuchWebsiteConfiguration) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchWebsiteConfiguration",
+				"The specified bucket does not have a website configuration.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(config)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutBucketWebsite handles PutBucketWebsite requests.
+func (h *Handler) handlePutBucketWebsite(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var config backend.WebsiteConfiguration
+	if err := xml.Unmarshal(body, &config); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	if err := h.backend.PutBucketWebsite(bucketName, &config); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleDeleteBucketWebsite handles DeleteBucketWebsite requests.
+func (h *Handler) handleDeleteBucketWebsite(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	err := h.backend.DeleteBucketWebsite(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetPublicAccessBlock handles GetPublicAccessBlock requests.
+func (h *Handler) handleGetPublicAccessBlock(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	config, err := h.backend.GetPublicAccessBlock(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrNoSuchPublicAccessBlockConfiguration) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchPublicAccessBlockConfiguration",
+				"The public access block configuration was not found.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(config)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutPublicAccessBlock handles PutPublicAccessBlock requests.
+func (h *Handler) handlePutPublicAccessBlock(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var config backend.PublicAccessBlockConfiguration
+	if err := xml.Unmarshal(body, &config); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	if err := h.backend.PutPublicAccessBlock(bucketName, &config); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleDeletePublicAccessBlock handles DeletePublicAccessBlock requests.
+func (h *Handler) handleDeletePublicAccessBlock(
+	w http.ResponseWriter,
+	_ *http.Request,
+	bucketName string,
+) {
+	err := h.backend.DeletePublicAccessBlock(bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(

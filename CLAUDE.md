@@ -45,7 +45,7 @@ Must use `UsePathStyle = true` in AWS SDK client options (virtual-hosted style n
 
 ## Supported S3 Operations
 
-**Bucket Operations:** ListBuckets, CreateBucket, DeleteBucket, HeadBucket, GetBucketLocation, GetBucketVersioning, PutBucketVersioning, GetBucketTagging, PutBucketTagging, DeleteBucketTagging, GetBucketPolicy, PutBucketPolicy, DeleteBucketPolicy, GetBucketAcl, PutBucketAcl, GetObjectLockConfiguration, PutObjectLockConfiguration, GetBucketLifecycleConfiguration, PutBucketLifecycleConfiguration, DeleteBucketLifecycle, GetBucketEncryption, PutBucketEncryption, DeleteBucketEncryption.
+**Bucket Operations:** ListBuckets, CreateBucket, DeleteBucket, HeadBucket, GetBucketLocation, GetBucketVersioning, PutBucketVersioning, GetBucketTagging, PutBucketTagging, DeleteBucketTagging, GetBucketPolicy, PutBucketPolicy, DeleteBucketPolicy, GetBucketAcl, PutBucketAcl, GetObjectLockConfiguration, PutObjectLockConfiguration, GetBucketLifecycleConfiguration, PutBucketLifecycleConfiguration, DeleteBucketLifecycle, GetBucketEncryption, PutBucketEncryption, DeleteBucketEncryption, GetBucketCors, PutBucketCors, DeleteBucketCors, GetBucketWebsite, PutBucketWebsite, DeleteBucketWebsite, GetPublicAccessBlock, PutPublicAccessBlock, DeletePublicAccessBlock.
 
 **Object Operations:** PutObject, GetObject (with Range header support), DeleteObject, HeadObject, CopyObject, DeleteObjects, ListObjects, ListObjectsV2, ListObjectVersions, GetObjectAcl, PutObjectAcl, GetObjectTagging, PutObjectTagging, DeleteObjectTagging, GetObjectAttributes.
 

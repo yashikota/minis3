@@ -566,3 +566,77 @@ const (
 	SSEAlgorithmAWSKMS  = "aws:kms"
 	SSEAlgorithmKMSDSSE = "aws:kms:dsse"
 )
+
+// CORSConfiguration represents bucket CORS settings.
+type CORSConfiguration struct {
+	XMLName   xml.Name   `xml:"CORSConfiguration"`
+	Xmlns     string     `xml:"xmlns,attr,omitempty"`
+	CORSRules []CORSRule `xml:"CORSRule"`
+}
+
+// CORSRule represents a single CORS rule.
+type CORSRule struct {
+	ID             string   `xml:"ID,omitempty"`
+	AllowedHeaders []string `xml:"AllowedHeader,omitempty"`
+	AllowedMethods []string `xml:"AllowedMethod"`
+	AllowedOrigins []string `xml:"AllowedOrigin"`
+	ExposeHeaders  []string `xml:"ExposeHeader,omitempty"`
+	MaxAgeSeconds  int      `xml:"MaxAgeSeconds,omitempty"`
+}
+
+// WebsiteConfiguration represents bucket static website hosting settings.
+type WebsiteConfiguration struct {
+	XMLName               xml.Name               `xml:"WebsiteConfiguration"`
+	Xmlns                 string                 `xml:"xmlns,attr,omitempty"`
+	IndexDocument         *IndexDocument         `xml:"IndexDocument,omitempty"`
+	ErrorDocument         *ErrorDocument         `xml:"ErrorDocument,omitempty"`
+	RedirectAllRequestsTo *RedirectAllRequestsTo `xml:"RedirectAllRequestsTo,omitempty"`
+	RoutingRules          []RoutingRule          `xml:"RoutingRules>RoutingRule,omitempty"`
+}
+
+// IndexDocument specifies the index document for the website.
+type IndexDocument struct {
+	Suffix string `xml:"Suffix"`
+}
+
+// ErrorDocument specifies the error document for the website.
+type ErrorDocument struct {
+	Key string `xml:"Key"`
+}
+
+// RedirectAllRequestsTo specifies redirect for all requests.
+type RedirectAllRequestsTo struct {
+	HostName string `xml:"HostName"`
+	Protocol string `xml:"Protocol,omitempty"`
+}
+
+// RoutingRule represents a single routing rule.
+type RoutingRule struct {
+	Condition *RoutingRuleCondition `xml:"Condition,omitempty"`
+	Redirect  *RoutingRuleRedirect  `xml:"Redirect"`
+}
+
+// RoutingRuleCondition specifies when a routing rule applies.
+type RoutingRuleCondition struct {
+	HttpErrorCodeReturnedEquals string `xml:"HttpErrorCodeReturnedEquals,omitempty"`
+	KeyPrefixEquals             string `xml:"KeyPrefixEquals,omitempty"`
+}
+
+// RoutingRuleRedirect specifies where to redirect.
+type RoutingRuleRedirect struct {
+	HostName             string `xml:"HostName,omitempty"`
+	HttpRedirectCode     string `xml:"HttpRedirectCode,omitempty"`
+	Protocol             string `xml:"Protocol,omitempty"`
+	ReplaceKeyPrefixWith string `xml:"ReplaceKeyPrefixWith,omitempty"`
+	ReplaceKeyWith       string `xml:"ReplaceKeyWith,omitempty"`
+}
+
+// PublicAccessBlockConfiguration represents bucket public access block settings.
+type PublicAccessBlockConfiguration struct {
+	XMLName               xml.Name `xml:"PublicAccessBlockConfiguration"`
+	Xmlns                 string   `xml:"xmlns,attr,omitempty"`
+	BlockPublicAcls       bool     `xml:"BlockPublicAcls"`
+	IgnorePublicAcls      bool     `xml:"IgnorePublicAcls"`
+	BlockPublicPolicy     bool     `xml:"BlockPublicPolicy"`
+	RestrictPublicBuckets bool     `xml:"RestrictPublicBuckets"`
+}

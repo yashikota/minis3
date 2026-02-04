@@ -31,6 +31,9 @@ type Bucket struct {
 	ObjectLockConfiguration *ObjectLockConfiguration           // Default object lock configuration
 	LifecycleConfiguration  *LifecycleConfiguration            // Lifecycle rules
 	EncryptionConfiguration *ServerSideEncryptionConfiguration // Default encryption settings
+	CORSConfiguration       *CORSConfiguration                 // CORS rules
+	WebsiteConfiguration    *WebsiteConfiguration              // Static website hosting settings
+	PublicAccessBlock       *PublicAccessBlockConfiguration    // Public access block settings
 }
 
 // ObjectVersions holds all versions of an object.
@@ -116,6 +119,15 @@ var (
 	)
 	ErrServerSideEncryptionConfigurationNotFound = errors.New(
 		"the server side encryption configuration was not found",
+	)
+	ErrNoSuchCORSConfiguration = errors.New(
+		"the CORS configuration does not exist",
+	)
+	ErrNoSuchWebsiteConfiguration = errors.New(
+		"the website configuration does not exist",
+	)
+	ErrNoSuchPublicAccessBlockConfiguration = errors.New(
+		"the public access block configuration was not found",
 	)
 )
 
