@@ -84,6 +84,32 @@ func parseExpires(value string) *time.Time {
 
 // handleObject handles object-level operations.
 func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketName, key string) {
+	// Handle Object Tagging operations
+	if r.URL.Query().Has("tagging") {
+		switch r.Method {
+		case http.MethodGet:
+			h.handleGetObjectTagging(w, r, bucketName, key)
+		case http.MethodPut:
+			h.handlePutObjectTagging(w, r, bucketName, key)
+		case http.MethodDelete:
+			h.handleDeleteObjectTagging(w, r, bucketName, key)
+		default:
+			backend.WriteError(
+				w,
+				http.StatusMethodNotAllowed,
+				"MethodNotAllowed",
+				"The specified method is not allowed against this resource.",
+			)
+		}
+		return
+	}
+
+	// Handle GetObjectAttributes operations
+	if r.URL.Query().Has("attributes") && r.Method == http.MethodGet {
+		h.handleGetObjectAttributes(w, r, bucketName, key)
+		return
+	}
+
 	// Handle ACL operations
 	if r.URL.Query().Has("acl") {
 		switch r.Method {
@@ -145,6 +171,11 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		switch r.Method {
 		case http.MethodPut:
 			if query.Has("partNumber") {
+				// Check for copy source header (UploadPartCopy)
+				if copySource := r.Header.Get("x-amz-copy-source"); copySource != "" {
+					h.handleUploadPartCopy(w, r, bucketName, key, copySource)
+					return
+				}
 				h.handleUploadPart(w, r, bucketName, key)
 				return
 			}
@@ -753,4 +784,261 @@ func (h *Handler) writePutObjectACLError(w http.ResponseWriter, err error) {
 	} else {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 	}
+}
+
+// handleGetObjectTagging handles GetObjectTagging requests.
+func (h *Handler) handleGetObjectTagging(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName, key string,
+) {
+	versionId := r.URL.Query().Get("versionId")
+	tags, actualVersionId, err := h.backend.GetObjectTagging(bucketName, key, versionId)
+	if err != nil {
+		h.writeObjectTaggingError(w, err)
+		return
+	}
+
+	// Set version ID header if applicable
+	if actualVersionId != "" && actualVersionId != backend.NullVersionId {
+		w.Header().Set("x-amz-version-id", actualVersionId)
+	}
+
+	// Build response
+	tagSet := make([]backend.Tag, 0, len(tags))
+	for k, v := range tags {
+		tagSet = append(tagSet, backend.Tag{Key: k, Value: v})
+	}
+
+	resp := backend.Tagging{
+		Xmlns:  "http://s3.amazonaws.com/doc/2006-03-01/",
+		TagSet: tagSet,
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// handlePutObjectTagging handles PutObjectTagging requests.
+func (h *Handler) handlePutObjectTagging(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName, key string,
+) {
+	versionId := r.URL.Query().Get("versionId")
+
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
+		return
+	}
+
+	var tagging backend.Tagging
+	if err := xml.Unmarshal(body, &tagging); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+
+	// Convert TagSet to map
+	tags := make(map[string]string, len(tagging.TagSet))
+	for _, tag := range tagging.TagSet {
+		tags[tag.Key] = tag.Value
+	}
+
+	actualVersionId, err := h.backend.PutObjectTagging(bucketName, key, versionId, tags)
+	if err != nil {
+		h.writeObjectTaggingError(w, err)
+		return
+	}
+
+	// Set version ID header if applicable
+	if actualVersionId != "" && actualVersionId != backend.NullVersionId {
+		w.Header().Set("x-amz-version-id", actualVersionId)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleDeleteObjectTagging handles DeleteObjectTagging requests.
+func (h *Handler) handleDeleteObjectTagging(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName, key string,
+) {
+	versionId := r.URL.Query().Get("versionId")
+	actualVersionId, err := h.backend.DeleteObjectTagging(bucketName, key, versionId)
+	if err != nil {
+		h.writeObjectTaggingError(w, err)
+		return
+	}
+
+	// Set version ID header if applicable
+	if actualVersionId != "" && actualVersionId != backend.NullVersionId {
+		w.Header().Set("x-amz-version-id", actualVersionId)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeObjectTaggingError writes the appropriate error response for Object Tagging operations.
+func (h *Handler) writeObjectTaggingError(w http.ResponseWriter, err error) {
+	if errors.Is(err, backend.ErrBucketNotFound) {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+	} else if errors.Is(err, backend.ErrObjectNotFound) {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchKey",
+			"The specified key does not exist.",
+		)
+	} else if errors.Is(err, backend.ErrVersionNotFound) {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchVersion",
+			"The specified version does not exist.",
+		)
+	} else {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+	}
+}
+
+// handleGetObjectAttributes handles GetObjectAttributes requests.
+func (h *Handler) handleGetObjectAttributes(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName, key string,
+) {
+	versionId := r.URL.Query().Get("versionId")
+
+	// Get the requested attributes from header
+	attributesHeader := r.Header.Get("x-amz-object-attributes")
+	if attributesHeader == "" {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidArgument",
+			"x-amz-object-attributes header is required.",
+		)
+		return
+	}
+
+	// Parse requested attributes
+	requestedAttrs := make(map[string]bool)
+	for _, attr := range strings.Split(attributesHeader, ",") {
+		requestedAttrs[strings.TrimSpace(attr)] = true
+	}
+
+	// Get object
+	var obj *backend.Object
+	var err error
+
+	if versionId != "" {
+		obj, err = h.backend.GetObjectVersion(bucketName, key, versionId)
+	} else {
+		obj, err = h.backend.GetObject(bucketName, key)
+	}
+
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrVersionNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchVersion",
+				"The specified version does not exist.",
+			)
+		} else {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified key does not exist.",
+			)
+		}
+		return
+	}
+
+	// Check if this is a DeleteMarker
+	if obj.IsDeleteMarker {
+		w.Header().Set("x-amz-delete-marker", "true")
+		if obj.VersionId != backend.NullVersionId {
+			w.Header().Set("x-amz-version-id", obj.VersionId)
+		}
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchKey",
+			"The specified key does not exist.",
+		)
+		return
+	}
+
+	// Build response based on requested attributes
+	resp := backend.GetObjectAttributesResponse{
+		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+	}
+
+	if requestedAttrs["ETag"] {
+		resp.ETag = obj.ETag
+	}
+
+	if requestedAttrs["Checksum"] {
+		if obj.ChecksumCRC32 != "" {
+			resp.Checksum = &backend.GetObjectAttributesChecksum{
+				ChecksumCRC32: obj.ChecksumCRC32,
+			}
+		}
+	}
+
+	if requestedAttrs["ObjectSize"] {
+		resp.ObjectSize = &obj.Size
+	}
+
+	if requestedAttrs["StorageClass"] {
+		resp.StorageClass = "STANDARD"
+	}
+
+	// Set version ID header
+	if obj.VersionId != backend.NullVersionId {
+		w.Header().Set("x-amz-version-id", obj.VersionId)
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
 }

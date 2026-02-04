@@ -49,6 +49,7 @@ type Object struct {
 	Data           []byte // nil for DeleteMarker
 	ChecksumCRC32  string
 	ACL            *AccessControlPolicy
+	Tags           map[string]string // Object tags
 	// Metadata fields
 	Metadata           map[string]string // x-amz-meta-* custom metadata
 	CacheControl       string            // Cache-Control header

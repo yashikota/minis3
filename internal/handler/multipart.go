@@ -407,3 +407,218 @@ func (h *Handler) handleListParts(
 	}
 	_, _ = w.Write(output)
 }
+
+// handleUploadPartCopy handles UploadPartCopy requests.
+func (h *Handler) handleUploadPartCopy(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName, key, copySource string,
+) {
+	query := r.URL.Query()
+	uploadId := query.Get("uploadId")
+	partNumberStr := query.Get("partNumber")
+
+	partNumber, err := strconv.Atoi(partNumberStr)
+	if err != nil || partNumber < 1 || partNumber > 10000 {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidArgument",
+			"Part number must be an integer between 1 and 10000.",
+		)
+		return
+	}
+
+	// Decode copy source
+	decodedCopySource, err := decodeAndParseCopySource(copySource)
+	if err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidArgument",
+			"Invalid x-amz-copy-source header: "+err.Error(),
+		)
+		return
+	}
+
+	// Parse byte range header
+	rangeStart, rangeEnd := int64(-1), int64(-1)
+	if rangeHeader := r.Header.Get("x-amz-copy-source-range"); rangeHeader != "" {
+		var parseErr error
+		rangeStart, rangeEnd, parseErr = parseByteRange(rangeHeader)
+		if parseErr != nil {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Invalid x-amz-copy-source-range header: "+parseErr.Error(),
+			)
+			return
+		}
+	}
+
+	part, err := h.backend.CopyPart(
+		decodedCopySource.bucket,
+		decodedCopySource.key,
+		bucketName,
+		key,
+		uploadId,
+		partNumber,
+		rangeStart,
+		rangeEnd,
+	)
+	if err != nil {
+		if errors.Is(err, backend.ErrNoSuchUpload) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchUpload",
+				"The specified upload does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrSourceBucketNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified source bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrSourceObjectNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified source key does not exist.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	copyPartResp := backend.CopyPartResult{
+		ETag:         part.ETag,
+		LastModified: part.LastModified,
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	copyPartOutput, err := xml.Marshal(copyPartResp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(copyPartOutput)
+}
+
+// copySourceInfo holds parsed copy source information.
+type copySourceInfo struct {
+	bucket string
+	key    string
+}
+
+// decodeAndParseCopySource decodes and parses x-amz-copy-source header.
+func decodeAndParseCopySource(copySource string) (*copySourceInfo, error) {
+	// URL decode
+	decoded, err := decodeURI(copySource)
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove leading slash
+	decoded = trimLeadingSlash(decoded)
+
+	// Split into bucket and key
+	idx := indexByte(decoded, '/')
+	if idx < 0 {
+		return nil, errors.New("invalid format")
+	}
+
+	return &copySourceInfo{
+		bucket: decoded[:idx],
+		key:    decoded[idx+1:],
+	}, nil
+}
+
+// decodeURI decodes a URI-encoded string.
+func decodeURI(s string) (string, error) {
+	// Simple URL decode implementation
+	result := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			hi := unhex(s[i+1])
+			lo := unhex(s[i+2])
+			if hi >= 0 && lo >= 0 {
+				result = append(result, byte(hi<<4|lo))
+				i += 2
+				continue
+			}
+		}
+		result = append(result, s[i])
+	}
+	return string(result), nil
+}
+
+func unhex(c byte) int {
+	switch {
+	case '0' <= c && c <= '9':
+		return int(c - '0')
+	case 'a' <= c && c <= 'f':
+		return int(c - 'a' + 10)
+	case 'A' <= c && c <= 'F':
+		return int(c - 'A' + 10)
+	}
+	return -1
+}
+
+func trimLeadingSlash(s string) string {
+	if len(s) > 0 && s[0] == '/' {
+		return s[1:]
+	}
+	return s
+}
+
+func indexByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+// parseByteRange parses x-amz-copy-source-range header.
+// Format: bytes=start-end
+func parseByteRange(rangeHeader string) (int64, int64, error) {
+	const prefix = "bytes="
+	if len(rangeHeader) <= len(prefix) {
+		return 0, 0, errors.New("invalid format")
+	}
+	if rangeHeader[:len(prefix)] != prefix {
+		return 0, 0, errors.New("invalid prefix")
+	}
+
+	rangeSpec := rangeHeader[len(prefix):]
+	dashIdx := indexByte(rangeSpec, '-')
+	if dashIdx < 0 {
+		return 0, 0, errors.New("missing dash")
+	}
+
+	startStr := rangeSpec[:dashIdx]
+	endStr := rangeSpec[dashIdx+1:]
+
+	start, err := strconv.ParseInt(startStr, 10, 64)
+	if err != nil {
+		return 0, 0, errors.New("invalid start")
+	}
+
+	end, err := strconv.ParseInt(endStr, 10, 64)
+	if err != nil {
+		return 0, 0, errors.New("invalid end")
+	}
+
+	if start > end {
+		return 0, 0, errors.New("start > end")
+	}
+
+	return start, end, nil
+}

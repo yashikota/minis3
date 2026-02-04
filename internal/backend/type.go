@@ -439,3 +439,34 @@ const (
 	LegalHoldStatusOn       = "ON"
 	LegalHoldStatusOff      = "OFF"
 )
+
+// CopyPartResult is the XML response for UploadPartCopy.
+type CopyPartResult struct {
+	XMLName      xml.Name `xml:"CopyPartResult"`
+	ETag         string   `xml:"ETag"`
+	LastModified string   `xml:"LastModified"`
+}
+
+// GetObjectAttributesResponse is the XML response for GetObjectAttributes.
+type GetObjectAttributesResponse struct {
+	XMLName      xml.Name                        `xml:"GetObjectAttributesResponse"`
+	Xmlns        string                          `xml:"xmlns,attr,omitempty"`
+	ETag         string                          `xml:"ETag,omitempty"`
+	Checksum     *GetObjectAttributesChecksum    `xml:"Checksum,omitempty"`
+	ObjectParts  *GetObjectAttributesObjectParts `xml:"ObjectParts,omitempty"`
+	StorageClass string                          `xml:"StorageClass,omitempty"`
+	ObjectSize   *int64                          `xml:"ObjectSize,omitempty"`
+}
+
+// GetObjectAttributesChecksum contains checksum information.
+type GetObjectAttributesChecksum struct {
+	ChecksumCRC32  string `xml:"ChecksumCRC32,omitempty"`
+	ChecksumCRC32C string `xml:"ChecksumCRC32C,omitempty"`
+	ChecksumSHA1   string `xml:"ChecksumSHA1,omitempty"`
+	ChecksumSHA256 string `xml:"ChecksumSHA256,omitempty"`
+}
+
+// GetObjectAttributesObjectParts contains multipart upload information.
+type GetObjectAttributesObjectParts struct {
+	TotalPartsCount int `xml:"TotalPartsCount,omitempty"`
+}

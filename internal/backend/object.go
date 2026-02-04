@@ -818,3 +818,137 @@ func (b *Backend) ListObjectVersions(
 
 	return result, nil
 }
+
+// GetObjectTagging retrieves tags for an object.
+// If versionId is empty, returns tags for the latest version.
+// Returns the tags, the actual versionId used, and any error.
+func (b *Backend) GetObjectTagging(
+	bucketName, key, versionId string,
+) (map[string]string, string, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return nil, "", ErrBucketNotFound
+	}
+
+	versions, ok := bucket.Objects[key]
+	if !ok || len(versions.Versions) == 0 {
+		return nil, "", ErrObjectNotFound
+	}
+
+	var obj *Object
+	if versionId == "" {
+		// Get latest version
+		obj = versions.Versions[0]
+	} else {
+		// Find specific version
+		for _, v := range versions.Versions {
+			if v.VersionId == versionId {
+				obj = v
+				break
+			}
+		}
+		if obj == nil {
+			return nil, "", ErrVersionNotFound
+		}
+	}
+
+	// Return empty map if no tags (not an error)
+	tags := obj.Tags
+	if tags == nil {
+		tags = make(map[string]string)
+	}
+
+	return tags, obj.VersionId, nil
+}
+
+// PutObjectTagging sets tags for an object (replaces existing tags).
+// If versionId is empty, sets tags on the latest version.
+// Returns the actual versionId used and any error.
+func (b *Backend) PutObjectTagging(
+	bucketName, key, versionId string,
+	tags map[string]string,
+) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return "", ErrBucketNotFound
+	}
+
+	versions, ok := bucket.Objects[key]
+	if !ok || len(versions.Versions) == 0 {
+		return "", ErrObjectNotFound
+	}
+
+	var obj *Object
+	if versionId == "" {
+		// Get latest version
+		obj = versions.Versions[0]
+	} else {
+		// Find specific version
+		for _, v := range versions.Versions {
+			if v.VersionId == versionId {
+				obj = v
+				break
+			}
+		}
+		if obj == nil {
+			return "", ErrVersionNotFound
+		}
+	}
+
+	// Cannot set tags on a delete marker
+	if obj.IsDeleteMarker {
+		return "", ErrObjectNotFound
+	}
+
+	obj.Tags = tags
+	return obj.VersionId, nil
+}
+
+// DeleteObjectTagging removes all tags from an object.
+// If versionId is empty, deletes tags from the latest version.
+// Returns the actual versionId used and any error.
+func (b *Backend) DeleteObjectTagging(bucketName, key, versionId string) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return "", ErrBucketNotFound
+	}
+
+	versions, ok := bucket.Objects[key]
+	if !ok || len(versions.Versions) == 0 {
+		return "", ErrObjectNotFound
+	}
+
+	var obj *Object
+	if versionId == "" {
+		// Get latest version
+		obj = versions.Versions[0]
+	} else {
+		// Find specific version
+		for _, v := range versions.Versions {
+			if v.VersionId == versionId {
+				obj = v
+				break
+			}
+		}
+		if obj == nil {
+			return "", ErrVersionNotFound
+		}
+	}
+
+	// Cannot delete tags from a delete marker
+	if obj.IsDeleteMarker {
+		return "", ErrObjectNotFound
+	}
+
+	obj.Tags = nil
+	return obj.VersionId, nil
+}

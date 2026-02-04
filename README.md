@@ -7,7 +7,7 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 **Legend:** ✅ = Full support | ⚠️ = Partial support (basic features only) | ⌛ = Not implemented
 
 > [!Note]
-> Minis3 is a single-region, single-owner in-memory mock server. Features like `ExpectedBucketOwner`, `BucketRegion` filter, ACLs, and multi-region support are intentionally not implemented as they are not meaningful in a mock environment.
+> Minis3 is a single-region, single-owner in-memory mock server. Features like `ExpectedBucketOwner`, `BucketRegion` filter, and multi-region support are intentionally not implemented as they are not meaningful in a mock environment.
 > Minis3 validates the `x-amz-mfa` header format but does not perform actual TOTP authentication (no secret keys). Any correctly formatted MFA header is accepted for testing purposes.
 
 ### 🪣 Bucket Operations
@@ -27,38 +27,53 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | GetBucketPolicy | ✅ | |
 | PutBucketPolicy | ✅ | |
 | DeleteBucketPolicy | ✅ | |
+| GetBucketAcl | ✅ | |
+| PutBucketAcl | ✅ | |
+| GetObjectLockConfiguration | ✅ | |
+| PutObjectLockConfiguration | ✅ | |
 
 ### 📦 Object Operations
 
 | Operation | Status | Unsupported Features |
 | --------- | ------ | -------------------- |
-| PutObject | ⚠️ | CacheControl, ContentDisposition, ContentEncoding, ContentLanguage, Expires, Metadata, StorageClass, WebsiteRedirectLocation, Tagging, ChecksumAlgorithm |
+| PutObject | ⚠️ | StorageClass, WebsiteRedirectLocation, Tagging, ChecksumAlgorithm |
 | GetObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, ResponseCacheControl, ResponseContentDisposition, ResponseContentEncoding, ResponseContentLanguage, ResponseContentType, ResponseExpires, PartNumber, ChecksumMode |
 | DeleteObject | ⚠️ | MFA Delete (API format only) |
-| DeleteObjects | ⚠️ | VersionId (per object), ChecksumAlgorithm |
-| CopyObject | ⚠️ | CacheControl, ChecksumAlgorithm, ContentDisposition, ContentEncoding, ContentLanguage, ContentType, CopySourceIfMatch, CopySourceIfModifiedSince, CopySourceIfNoneMatch, CopySourceIfUnmodifiedSince, Expires, Metadata, MetadataDirective, TaggingDirective, StorageClass, WebsiteRedirectLocation, Tagging, CopySourceVersionId |
+| DeleteObjects | ✅ | |
+| CopyObject | ⚠️ | CopySourceIfMatch, CopySourceIfModifiedSince, CopySourceIfNoneMatch, CopySourceIfUnmodifiedSince, TaggingDirective, StorageClass, WebsiteRedirectLocation, Tagging, ChecksumAlgorithm |
 | HeadObject | ⚠️ | IfMatch, IfModifiedSince, IfNoneMatch, IfUnmodifiedSince, Range, PartNumber, ChecksumMode |
 | ListObjects | ⚠️ | RequestPayer, OptionalObjectAttributes |
-| ListObjectsV2 | ⚠️ | ContinuationToken, StartAfter, FetchOwner, EncodingType, OptionalObjectAttributes |
+| ListObjectsV2 | ⚠️ | FetchOwner, OptionalObjectAttributes |
 | ListObjectVersions | ⚠️ | Owner information |
-| GetObjectAttributes | ⌛ | |
-| GetObjectTagging | ⌛ | |
-| PutObjectTagging | ⌛ | |
-| DeleteObjectTagging | ⌛ | |
-| GetObjectAcl | ⌛ | |
-| PutObjectAcl | ⌛ | |
+| GetObjectAcl | ✅ | |
+| PutObjectAcl | ✅ | |
+| GetObjectAttributes | ✅ | ObjectParts |
+| GetObjectTagging | ✅ | |
+| PutObjectTagging | ✅ | |
+| DeleteObjectTagging | ✅ | |
+
+### 🔒 Object Lock Operations
+
+| Operation | Status | Unsupported Features |
+| --------- | ------ | -------------------- |
+| GetObjectLockConfiguration | ✅ | |
+| PutObjectLockConfiguration | ✅ | |
+| GetObjectRetention | ✅ | |
+| PutObjectRetention | ✅ | |
+| GetObjectLegalHold | ✅ | |
+| PutObjectLegalHold | ✅ | |
 
 ### 📤 Multipart Upload Operations
 
 | Operation | Status | Unsupported Features |
 | --------- | ------ | -------------------- |
-| CreateMultipartUpload | ⌛ | |
-| UploadPart | ⌛ | |
-| UploadPartCopy | ⌛ | |
-| CompleteMultipartUpload | ⌛ | |
-| AbortMultipartUpload | ⌛ | |
-| ListMultipartUploads | ⌛ | |
-| ListParts | ⌛ | |
+| CreateMultipartUpload | ✅ | |
+| UploadPart | ✅ | |
+| CompleteMultipartUpload | ✅ | |
+| AbortMultipartUpload | ✅ | |
+| ListMultipartUploads | ✅ | |
+| ListParts | ✅ | |
+| UploadPartCopy | ✅ | CopySourceSSECustomerAlgorithm, CopySourceSSECustomerKey, CopySourceSSECustomerKeyMD5, SSECustomerAlgorithm, SSECustomerKey, SSECustomerKeyMD5 |
 
 ## Installation
 
