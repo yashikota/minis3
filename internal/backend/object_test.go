@@ -713,9 +713,16 @@ func TestContentTypeDefault(t *testing.T) {
 		_, _ = b.PutObject("test-bucket", "src", []byte("data"), PutObjectOptions{
 			ContentType: "image/png",
 		})
-		copied, _, err := b.CopyObject("test-bucket", "src", "", "test-bucket", "dst-replace", CopyObjectOptions{
-			MetadataDirective: "REPLACE",
-		})
+		copied, _, err := b.CopyObject(
+			"test-bucket",
+			"src",
+			"",
+			"test-bucket",
+			"dst-replace",
+			CopyObjectOptions{
+				MetadataDirective: "REPLACE",
+			},
+		)
 		if err != nil {
 			t.Fatalf("CopyObject failed: %v", err)
 		}
@@ -728,9 +735,16 @@ func TestContentTypeDefault(t *testing.T) {
 		_, _ = b.PutObject("test-bucket", "src2", []byte("data"), PutObjectOptions{
 			ContentType: "image/png",
 		})
-		copied, _, err := b.CopyObject("test-bucket", "src2", "", "test-bucket", "dst-copy", CopyObjectOptions{
-			MetadataDirective: "COPY",
-		})
+		copied, _, err := b.CopyObject(
+			"test-bucket",
+			"src2",
+			"",
+			"test-bucket",
+			"dst-copy",
+			CopyObjectOptions{
+				MetadataDirective: "COPY",
+			},
+		)
 		if err != nil {
 			t.Fatalf("CopyObject failed: %v", err)
 		}

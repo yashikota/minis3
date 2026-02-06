@@ -2,6 +2,8 @@ package backend
 
 import (
 	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"hash/crc32"
@@ -194,26 +196,60 @@ func (b *Backend) PutObject(
 	}
 
 	obj := &Object{
-		Key:                  key,
-		VersionId:            versionId,
-		IsLatest:             true,
-		IsDeleteMarker:       false,
-		LastModified:         time.Now().UTC(),
-		ETag:                 fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
-		Size:                 int64(len(data)),
-		ContentType:          contentType,
-		Data:                 data,
-		ChecksumCRC32:        base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
-		Metadata:             opts.Metadata,
-		CacheControl:         opts.CacheControl,
-		Expires:              opts.Expires,
-		ContentEncoding:      opts.ContentEncoding,
-		ContentLanguage:      opts.ContentLanguage,
-		ContentDisposition:   opts.ContentDisposition,
-		Tags:                 opts.Tags,
-		StorageClass:         storageClass,
-		ServerSideEncryption: opts.ServerSideEncryption,
-		SSEKMSKeyId:          opts.SSEKMSKeyId,
+		Key:                     key,
+		VersionId:               versionId,
+		IsLatest:                true,
+		IsDeleteMarker:          false,
+		LastModified:            time.Now().UTC(),
+		ETag:                    fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
+		Size:                    int64(len(data)),
+		ContentType:             contentType,
+		Data:                    data,
+		ChecksumCRC32:           base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
+		ChecksumAlgorithm:       opts.ChecksumAlgorithm,
+		Metadata:                opts.Metadata,
+		CacheControl:            opts.CacheControl,
+		Expires:                 opts.Expires,
+		ContentEncoding:         opts.ContentEncoding,
+		ContentLanguage:         opts.ContentLanguage,
+		ContentDisposition:      opts.ContentDisposition,
+		Tags:                    opts.Tags,
+		StorageClass:            storageClass,
+		ServerSideEncryption:    opts.ServerSideEncryption,
+		SSEKMSKeyId:             opts.SSEKMSKeyId,
+		WebsiteRedirectLocation: opts.WebsiteRedirectLocation,
+	}
+
+	// Compute or store additional checksums based on ChecksumAlgorithm
+	switch strings.ToUpper(opts.ChecksumAlgorithm) {
+	case "CRC32C":
+		if opts.ChecksumCRC32C != "" {
+			obj.ChecksumCRC32C = opts.ChecksumCRC32C
+		} else {
+			crc32cTable := crc32.MakeTable(crc32.Castagnoli)
+			crc32cHash := crc32.New(crc32cTable)
+			_, _ = crc32cHash.Write(data)
+			obj.ChecksumCRC32C = base64.StdEncoding.EncodeToString(crc32cHash.Sum(nil))
+		}
+	case "SHA1":
+		if opts.ChecksumSHA1 != "" {
+			obj.ChecksumSHA1 = opts.ChecksumSHA1
+		} else {
+			sha1Hash := sha1.Sum(data)
+			obj.ChecksumSHA1 = base64.StdEncoding.EncodeToString(sha1Hash[:])
+		}
+	case "SHA256":
+		if opts.ChecksumSHA256 != "" {
+			obj.ChecksumSHA256 = opts.ChecksumSHA256
+		} else {
+			sha256Hash := sha256.Sum256(data)
+			obj.ChecksumSHA256 = base64.StdEncoding.EncodeToString(sha256Hash[:])
+		}
+	case "CRC32":
+		if opts.ChecksumCRC32 != "" {
+			obj.ChecksumCRC32 = opts.ChecksumCRC32
+		}
+		// CRC32 is already computed above as default
 	}
 
 	// Set Object Lock fields if provided
@@ -375,6 +411,10 @@ type CopyObjectOptions struct {
 	SSEKMSKeyId          string
 	// Storage class
 	StorageClass string
+	// Website redirect
+	WebsiteRedirectLocation string
+	// Checksum
+	ChecksumAlgorithm string
 }
 
 // CopyObject copies an object from source to destination.
@@ -442,15 +482,37 @@ func (b *Backend) CopyObject(
 	}
 
 	obj := &Object{
-		Key:            dstKey,
-		VersionId:      versionId,
-		IsLatest:       true,
-		IsDeleteMarker: false,
-		LastModified:   time.Now().UTC(),
-		ETag:           srcObj.ETag,
-		Size:           srcObj.Size,
-		Data:           copiedData,
-		ChecksumCRC32:  srcObj.ChecksumCRC32,
+		Key:               dstKey,
+		VersionId:         versionId,
+		IsLatest:          true,
+		IsDeleteMarker:    false,
+		LastModified:      time.Now().UTC(),
+		ETag:              srcObj.ETag,
+		Size:              srcObj.Size,
+		Data:              copiedData,
+		ChecksumCRC32:     srcObj.ChecksumCRC32,
+		ChecksumCRC32C:    srcObj.ChecksumCRC32C,
+		ChecksumSHA1:      srcObj.ChecksumSHA1,
+		ChecksumSHA256:    srcObj.ChecksumSHA256,
+		ChecksumAlgorithm: srcObj.ChecksumAlgorithm,
+	}
+
+	// Override ChecksumAlgorithm if specified in opts and recompute
+	if opts.ChecksumAlgorithm != "" {
+		obj.ChecksumAlgorithm = opts.ChecksumAlgorithm
+		switch strings.ToUpper(opts.ChecksumAlgorithm) {
+		case "CRC32C":
+			crc32cTable := crc32.MakeTable(crc32.Castagnoli)
+			crc32cHash := crc32.New(crc32cTable)
+			_, _ = crc32cHash.Write(copiedData)
+			obj.ChecksumCRC32C = base64.StdEncoding.EncodeToString(crc32cHash.Sum(nil))
+		case "SHA1":
+			sha1Hash := sha1.Sum(copiedData)
+			obj.ChecksumSHA1 = base64.StdEncoding.EncodeToString(sha1Hash[:])
+		case "SHA256":
+			sha256Hash := sha256.Sum256(copiedData)
+			obj.ChecksumSHA256 = base64.StdEncoding.EncodeToString(sha256Hash[:])
+		}
 	}
 
 	// Handle metadata directive
@@ -516,6 +578,13 @@ func (b *Backend) CopyObject(
 			obj.RetainUntilDate = &t
 		}
 		obj.LegalHoldStatus = srcObj.LegalHoldStatus
+	}
+
+	// Handle WebsiteRedirectLocation
+	if opts.WebsiteRedirectLocation != "" {
+		obj.WebsiteRedirectLocation = opts.WebsiteRedirectLocation
+	} else {
+		obj.WebsiteRedirectLocation = srcObj.WebsiteRedirectLocation
 	}
 
 	// Handle StorageClass

@@ -43,18 +43,22 @@ type ObjectVersions struct {
 
 // Object represents an S3 object with its metadata and content
 type Object struct {
-	Key            string
-	VersionId      string // "null" for unversioned, generated ID for versioned
-	IsLatest       bool
-	IsDeleteMarker bool
-	LastModified   time.Time
-	ETag           string
-	Size           int64
-	ContentType    string
-	Data           []byte // nil for DeleteMarker
-	ChecksumCRC32  string
-	ACL            *AccessControlPolicy
-	Tags           map[string]string // Object tags
+	Key               string
+	VersionId         string // "null" for unversioned, generated ID for versioned
+	IsLatest          bool
+	IsDeleteMarker    bool
+	LastModified      time.Time
+	ETag              string
+	Size              int64
+	ContentType       string
+	Data              []byte // nil for DeleteMarker
+	ChecksumAlgorithm string // CRC32, CRC32C, SHA1, SHA256
+	ChecksumCRC32     string
+	ChecksumCRC32C    string
+	ChecksumSHA1      string
+	ChecksumSHA256    string
+	ACL               *AccessControlPolicy
+	Tags              map[string]string // Object tags
 	// Metadata fields
 	Metadata           map[string]string // x-amz-meta-* custom metadata
 	CacheControl       string            // Cache-Control header
@@ -71,24 +75,41 @@ type Object struct {
 	// Server-Side Encryption fields
 	ServerSideEncryption string // AES256, aws:kms, etc.
 	SSEKMSKeyId          string // KMS key ID (only for aws:kms)
+	// Website redirect
+	WebsiteRedirectLocation string // x-amz-website-redirect-location
+	// Multipart part info (populated after CompleteMultipartUpload)
+	Parts []ObjectPart
+}
+
+// ObjectPart represents a part of a multipart upload object.
+type ObjectPart struct {
+	PartNumber int
+	Size       int64
+	ETag       string
 }
 
 // PutObjectOptions contains options for PutObject operation.
 type PutObjectOptions struct {
-	ContentType          string
-	Metadata             map[string]string
-	CacheControl         string
-	Expires              *time.Time
-	ContentEncoding      string
-	ContentLanguage      string
-	ContentDisposition   string
-	Tags                 map[string]string // Inline tags from x-amz-tagging header
-	RetentionMode        string            // Object Lock retention mode (GOVERNANCE or COMPLIANCE)
-	RetainUntilDate      *time.Time        // Object Lock retain until date
-	LegalHoldStatus      string            // Object Lock legal hold (ON or OFF)
-	StorageClass         string            // Storage class (e.g., STANDARD)
-	ServerSideEncryption string            // Server-side encryption algorithm
-	SSEKMSKeyId          string            // KMS key ID for SSE-KMS
+	ContentType             string
+	Metadata                map[string]string
+	CacheControl            string
+	Expires                 *time.Time
+	ContentEncoding         string
+	ContentLanguage         string
+	ContentDisposition      string
+	Tags                    map[string]string // Inline tags from x-amz-tagging header
+	RetentionMode           string            // Object Lock retention mode (GOVERNANCE or COMPLIANCE)
+	RetainUntilDate         *time.Time        // Object Lock retain until date
+	LegalHoldStatus         string            // Object Lock legal hold (ON or OFF)
+	StorageClass            string            // Storage class (e.g., STANDARD)
+	ServerSideEncryption    string            // Server-side encryption algorithm
+	SSEKMSKeyId             string            // KMS key ID for SSE-KMS
+	WebsiteRedirectLocation string            // x-amz-website-redirect-location
+	ChecksumAlgorithm       string            // CRC32, CRC32C, SHA1, SHA256
+	ChecksumCRC32           string            // Client-provided CRC32 checksum
+	ChecksumCRC32C          string            // Client-provided CRC32C checksum
+	ChecksumSHA1            string            // Client-provided SHA1 checksum
+	ChecksumSHA256          string            // Client-provided SHA256 checksum
 }
 
 var (

@@ -119,12 +119,20 @@ type ListObjectsV2Result struct {
 }
 
 type ObjectInfo struct {
-	Key          string `xml:"Key"`
-	LastModified string `xml:"LastModified"`
-	ETag         string `xml:"ETag"`
-	Size         int64  `xml:"Size"`
-	StorageClass string `xml:"StorageClass"`
-	Owner        *Owner `xml:"Owner,omitempty"`
+	Key               string         `xml:"Key"`
+	LastModified      string         `xml:"LastModified"`
+	ETag              string         `xml:"ETag"`
+	Size              int64          `xml:"Size"`
+	StorageClass      string         `xml:"StorageClass"`
+	Owner             *Owner         `xml:"Owner,omitempty"`
+	ChecksumAlgorithm []string       `xml:"ChecksumAlgorithm,omitempty"`
+	RestoreStatus     *RestoreStatus `xml:"RestoreStatus,omitempty"`
+}
+
+// RestoreStatus represents the restore status of an object (for optional object attributes).
+type RestoreStatus struct {
+	IsRestoreInProgress bool   `xml:"IsRestoreInProgress"`
+	RestoreExpiryDate   string `xml:"RestoreExpiryDate,omitempty"`
 }
 
 type CommonPrefix struct {

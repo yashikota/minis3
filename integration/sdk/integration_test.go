@@ -3477,3 +3477,407 @@ func TestRequestIdHeader(t *testing.T) {
 		t.Error("expected x-amz-id-2 header to be present")
 	}
 }
+
+func TestWebsiteRedirectLocation(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.Background()
+	bucket := "redirect-test"
+	key := "test-key"
+	redirectURL := "https://example.com/redirect"
+
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// PutObject with WebsiteRedirectLocation
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:                  aws.String(bucket),
+		Key:                     aws.String(key),
+		Body:                    strings.NewReader("hello"),
+		WebsiteRedirectLocation: aws.String(redirectURL),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	// GetObject should return the redirect location
+	getResp, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket:       aws.String(bucket),
+		Key:          aws.String(key),
+		ChecksumMode: types.ChecksumModeEnabled,
+	})
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	defer getResp.Body.Close()
+	if aws.ToString(getResp.WebsiteRedirectLocation) != redirectURL {
+		t.Errorf("GetObject WebsiteRedirectLocation = %q, want %q",
+			aws.ToString(getResp.WebsiteRedirectLocation), redirectURL)
+	}
+
+	// HeadObject should also return the redirect location
+	headResp, err := client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("HeadObject failed: %v", err)
+	}
+	if aws.ToString(headResp.WebsiteRedirectLocation) != redirectURL {
+		t.Errorf("HeadObject WebsiteRedirectLocation = %q, want %q",
+			aws.ToString(headResp.WebsiteRedirectLocation), redirectURL)
+	}
+}
+
+func TestChecksumAlgorithm(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.Background()
+	bucket := "checksum-test"
+
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		algorithm types.ChecksumAlgorithm
+	}{
+		{"CRC32", types.ChecksumAlgorithmCrc32},
+		{"CRC32C", types.ChecksumAlgorithmCrc32c},
+		{"SHA1", types.ChecksumAlgorithmSha1},
+		{"SHA256", types.ChecksumAlgorithmSha256},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := "checksum-" + tt.name
+			body := "hello world checksum test"
+
+			_, err := client.PutObject(ctx, &s3.PutObjectInput{
+				Bucket:            aws.String(bucket),
+				Key:               aws.String(key),
+				Body:              strings.NewReader(body),
+				ChecksumAlgorithm: tt.algorithm,
+			})
+			if err != nil {
+				t.Fatalf("PutObject failed: %v", err)
+			}
+
+			// GetObject with ChecksumMode enabled
+			getResp, err := client.GetObject(ctx, &s3.GetObjectInput{
+				Bucket:       aws.String(bucket),
+				Key:          aws.String(key),
+				ChecksumMode: types.ChecksumModeEnabled,
+			})
+			if err != nil {
+				t.Fatalf("GetObject failed: %v", err)
+			}
+			defer getResp.Body.Close()
+
+			// Verify the appropriate checksum is returned
+			switch tt.algorithm {
+			case types.ChecksumAlgorithmCrc32:
+				if aws.ToString(getResp.ChecksumCRC32) == "" {
+					t.Error("expected ChecksumCRC32 to be set")
+				}
+			case types.ChecksumAlgorithmCrc32c:
+				if aws.ToString(getResp.ChecksumCRC32C) == "" {
+					t.Error("expected ChecksumCRC32C to be set")
+				}
+			case types.ChecksumAlgorithmSha1:
+				if aws.ToString(getResp.ChecksumSHA1) == "" {
+					t.Error("expected ChecksumSHA1 to be set")
+				}
+			case types.ChecksumAlgorithmSha256:
+				if aws.ToString(getResp.ChecksumSHA256) == "" {
+					t.Error("expected ChecksumSHA256 to be set")
+				}
+			}
+		})
+	}
+}
+
+func TestChecksumModeDisabled(t *testing.T) {
+	// Use raw HTTP to test ChecksumMode behavior, since AWS SDK v2 may
+	// send x-amz-checksum-mode: ENABLED by default in newer versions.
+	server := minis3.New()
+	if err := server.Start(); err != nil {
+		t.Fatalf("failed to start server: %v", err)
+	}
+	defer server.Close()
+
+	baseURL := "http://" + server.Addr()
+	bucket := "checksum-mode-test"
+	key := "test-key"
+
+	// Create bucket
+	req, _ := http.NewRequest(http.MethodPut, baseURL+"/"+bucket, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// PutObject with CRC32C algorithm
+	putReq, _ := http.NewRequest(
+		http.MethodPut,
+		baseURL+"/"+bucket+"/"+key,
+		strings.NewReader("data"),
+	)
+	putReq.Header.Set("x-amz-checksum-algorithm", "CRC32C")
+	resp, err = http.DefaultClient.Do(putReq)
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// GetObject WITHOUT x-amz-checksum-mode should NOT return checksum headers
+	getReq, _ := http.NewRequest(http.MethodGet, baseURL+"/"+bucket+"/"+key, nil)
+	resp, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.Header.Get("x-amz-checksum-crc32c") != "" {
+		t.Error("expected x-amz-checksum-crc32c to be absent when ChecksumMode not ENABLED")
+	}
+
+	// GetObject WITH x-amz-checksum-mode: ENABLED should return checksum headers
+	getReq2, _ := http.NewRequest(http.MethodGet, baseURL+"/"+bucket+"/"+key, nil)
+	getReq2.Header.Set("x-amz-checksum-mode", "ENABLED")
+	resp2, err := http.DefaultClient.Do(getReq2)
+	if err != nil {
+		t.Fatalf("GetObject with ChecksumMode failed: %v", err)
+	}
+	resp2.Body.Close()
+
+	if resp2.Header.Get("x-amz-checksum-crc32c") == "" {
+		t.Error("expected x-amz-checksum-crc32c to be present when ChecksumMode is ENABLED")
+	}
+}
+
+func TestPartNumber(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.Background()
+	bucket := "partnumber-test"
+
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	key := "multipart-key"
+
+	// Create multipart upload
+	createResp, err := client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload failed: %v", err)
+	}
+	uploadId := createResp.UploadId
+
+	// Upload part 1 (must be >= 5MB except for last part)
+	part1Data := strings.Repeat("a", 5*1024*1024)
+	up1, err := client.UploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String(key),
+		UploadId:   uploadId,
+		PartNumber: aws.Int32(1),
+		Body:       strings.NewReader(part1Data),
+	})
+	if err != nil {
+		t.Fatalf("UploadPart 1 failed: %v", err)
+	}
+
+	// Upload part 2
+	part2Data := "part two data"
+	up2, err := client.UploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String(key),
+		UploadId:   uploadId,
+		PartNumber: aws.Int32(2),
+		Body:       strings.NewReader(part2Data),
+	})
+	if err != nil {
+		t.Fatalf("UploadPart 2 failed: %v", err)
+	}
+
+	// Complete multipart upload
+	_, err = client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String(key),
+		UploadId: uploadId,
+		MultipartUpload: &types.CompletedMultipartUpload{
+			Parts: []types.CompletedPart{
+				{PartNumber: aws.Int32(1), ETag: up1.ETag},
+				{PartNumber: aws.Int32(2), ETag: up2.ETag},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompleteMultipartUpload failed: %v", err)
+	}
+
+	// HeadObject should show parts count
+	headResp, err := client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("HeadObject failed: %v", err)
+	}
+	if aws.ToInt32(headResp.PartsCount) != 2 {
+		t.Errorf("PartsCount = %d, want 2", aws.ToInt32(headResp.PartsCount))
+	}
+
+	// GetObject with PartNumber=2 should return only part 2 data
+	getResp, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String(key),
+		PartNumber: aws.Int32(2),
+	})
+	if err != nil {
+		t.Fatalf("GetObject with PartNumber failed: %v", err)
+	}
+	defer getResp.Body.Close()
+	bodyBytes, _ := io.ReadAll(getResp.Body)
+	if string(bodyBytes) != part2Data {
+		t.Errorf("GetObject with PartNumber=2 body = %q, want %q", string(bodyBytes), part2Data)
+	}
+}
+
+func TestListObjectsV2FetchOwner(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.Background()
+	bucket := "fetch-owner-test"
+
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("key1"),
+		Body:   strings.NewReader("data"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	// Without FetchOwner, Owner should not be present
+	listResp, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("ListObjectsV2 failed: %v", err)
+	}
+	if len(listResp.Contents) == 0 {
+		t.Fatal("expected at least one object")
+	}
+	if listResp.Contents[0].Owner != nil {
+		t.Error("expected Owner to be nil when FetchOwner is not set")
+	}
+
+	// With FetchOwner=true, Owner should be present
+	listResp2, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:     aws.String(bucket),
+		FetchOwner: aws.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("ListObjectsV2 with FetchOwner failed: %v", err)
+	}
+	if len(listResp2.Contents) == 0 {
+		t.Fatal("expected at least one object")
+	}
+	if listResp2.Contents[0].Owner == nil {
+		t.Error("expected Owner to be set when FetchOwner is true")
+	}
+}
+
+func TestListObjectVersionsOwner(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.Background()
+	bucket := "versions-owner-test"
+
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// Enable versioning
+	_, err = client.PutBucketVersioning(ctx, &s3.PutBucketVersioningInput{
+		Bucket: aws.String(bucket),
+		VersioningConfiguration: &types.VersioningConfiguration{
+			Status: types.BucketVersioningStatusEnabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutBucketVersioning failed: %v", err)
+	}
+
+	// Put an object
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("key1"),
+		Body:   strings.NewReader("v1"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	// ListObjectVersions should include Owner
+	versionsResp, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("ListObjectVersions failed: %v", err)
+	}
+	if len(versionsResp.Versions) == 0 {
+		t.Fatal("expected at least one version")
+	}
+	if versionsResp.Versions[0].Owner == nil {
+		t.Error("expected Owner to be set in ListObjectVersions response")
+	}
+	if aws.ToString(versionsResp.Versions[0].Owner.ID) == "" {
+		t.Error("expected Owner.ID to be non-empty")
+	}
+
+	// Delete the object to create a delete marker
+	_, err = client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("key1"),
+	})
+	if err != nil {
+		t.Fatalf("DeleteObject failed: %v", err)
+	}
+
+	// Check that delete markers also have Owner
+	versionsResp2, err := client.ListObjectVersions(ctx, &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("ListObjectVersions failed: %v", err)
+	}
+	if len(versionsResp2.DeleteMarkers) == 0 {
+		t.Fatal("expected at least one delete marker")
+	}
+	if versionsResp2.DeleteMarkers[0].Owner == nil {
+		t.Error("expected Owner to be set in DeleteMarker")
+	}
+}

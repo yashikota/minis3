@@ -49,23 +49,23 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 
 ### 📦 Object Operations
 
-| Operation | Status | Unsupported Features |
-| --------- | ------ | -------------------- |
-| PutObject | ⚠️ | WebsiteRedirectLocation, ChecksumAlgorithm |
-| GetObject | ⚠️ | PartNumber, ChecksumMode |
-| DeleteObject | ✅ | |
-| DeleteObjects | ✅ | |
-| CopyObject | ⚠️ | WebsiteRedirectLocation, ChecksumAlgorithm |
-| HeadObject | ⚠️ | PartNumber, ChecksumMode |
-| ListObjects | ⚠️ | RequestPayer, OptionalObjectAttributes |
-| ListObjectsV2 | ⚠️ | FetchOwner, OptionalObjectAttributes |
-| ListObjectVersions | ⚠️ | Owner information |
-| GetObjectAcl | ✅ | |
-| PutObjectAcl | ✅ | |
-| GetObjectAttributes | ✅ | ObjectParts |
-| GetObjectTagging | ✅ | |
-| PutObjectTagging | ✅ | |
-| DeleteObjectTagging | ✅ | |
+| Operation | Status |
+| --------- | ------ |
+| PutObject | ✅ |
+| GetObject | ✅ |
+| DeleteObject | ✅ |
+| DeleteObjects | ✅ |
+| CopyObject | ✅ |
+| HeadObject | ✅ |
+| ListObjects | ✅ |
+| ListObjectsV2 | ✅ |
+| ListObjectVersions | ✅ |
+| GetObjectAcl | ✅ |
+| PutObjectAcl | ✅ |
+| GetObjectAttributes | ✅ |
+| GetObjectTagging | ✅ |
+| PutObjectTagging | ✅ |
+| DeleteObjectTagging | ✅ |
 
 ### 🔒 Object Lock Operations
 

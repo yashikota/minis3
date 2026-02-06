@@ -227,6 +227,20 @@ func (b *Backend) CompleteMultipartUpload(
 		SSEKMSKeyId:          upload.SSEKMSKeyId,
 	}
 
+	// Save part information for PartNumber support in GetObject/HeadObject
+	var objectParts []ObjectPart
+	var offset int64
+	for _, p := range parts {
+		uploadedPart := upload.Parts[p.PartNumber]
+		objectParts = append(objectParts, ObjectPart{
+			PartNumber: p.PartNumber,
+			Size:       uploadedPart.Size,
+			ETag:       uploadedPart.ETag,
+		})
+		offset += uploadedPart.Size
+	}
+	obj.Parts = objectParts
+
 	// Set Object Lock fields if provided
 	if upload.RetentionMode != "" || upload.LegalHoldStatus != "" {
 		if !bucket.ObjectLockEnabled {

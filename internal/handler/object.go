@@ -114,6 +114,64 @@ func setStorageAndEncryptionHeaders(w http.ResponseWriter, obj *backend.Object) 
 	}
 }
 
+// setChecksumResponseHeaders sets checksum-related response headers based on object's checksum data.
+func setChecksumResponseHeaders(w http.ResponseWriter, obj *backend.Object) {
+	if obj.ChecksumAlgorithm != "" {
+		w.Header().Set("x-amz-checksum-algorithm", obj.ChecksumAlgorithm)
+	}
+	if obj.ChecksumCRC32C != "" {
+		w.Header().Set("x-amz-checksum-crc32c", obj.ChecksumCRC32C)
+	}
+	if obj.ChecksumSHA1 != "" {
+		w.Header().Set("x-amz-checksum-sha1", obj.ChecksumSHA1)
+	}
+	if obj.ChecksumSHA256 != "" {
+		w.Header().Set("x-amz-checksum-sha256", obj.ChecksumSHA256)
+	}
+	if obj.ChecksumCRC32 != "" {
+		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
+	}
+}
+
+// inferChecksumAlgorithmFromTrailer infers the checksum algorithm from the x-amz-trailer header value.
+// The trailer header contains the name of the trailing header, e.g. "x-amz-checksum-crc32c".
+func inferChecksumAlgorithmFromTrailer(trailer string) string {
+	trailer = strings.ToLower(strings.TrimSpace(trailer))
+	switch {
+	case strings.Contains(trailer, "checksum-crc32c"):
+		return "CRC32C"
+	case strings.Contains(trailer, "checksum-crc32"):
+		return "CRC32"
+	case strings.Contains(trailer, "checksum-sha1"):
+		return "SHA1"
+	case strings.Contains(trailer, "checksum-sha256"):
+		return "SHA256"
+	default:
+		return ""
+	}
+}
+
+// getPartData returns the data slice and size for a specific part number of a multipart object.
+// Returns (data, size, found). If the object has no parts or the part number is invalid, found is false.
+func getPartData(obj *backend.Object, partNumber int) ([]byte, int64, bool) {
+	if len(obj.Parts) == 0 {
+		return nil, 0, false
+	}
+
+	var offset int64
+	for _, p := range obj.Parts {
+		if p.PartNumber == partNumber {
+			end := offset + p.Size
+			if end > int64(len(obj.Data)) {
+				end = int64(len(obj.Data))
+			}
+			return obj.Data[offset:end], p.Size, true
+		}
+		offset += p.Size
+	}
+	return nil, 0, false
+}
+
 // parseExpires parses the Expires header value.
 func parseExpires(value string) *time.Time {
 	if value == "" {
@@ -515,6 +573,39 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.SSEKMSKeyId = sseKmsKeyId
 		}
 
+		// Extract Website Redirect Location header
+		if redirect := r.Header.Get("x-amz-website-redirect-location"); redirect != "" {
+			opts.WebsiteRedirectLocation = redirect
+		}
+
+		// Extract Checksum Algorithm and checksum values
+		// AWS SDK v2 sends x-amz-sdk-checksum-algorithm (with "sdk"), S3 API uses x-amz-checksum-algorithm
+		checksumAlgo := r.Header.Get("x-amz-checksum-algorithm")
+		if checksumAlgo == "" {
+			checksumAlgo = r.Header.Get("x-amz-sdk-checksum-algorithm")
+		}
+		// Also infer from x-amz-trailer header (e.g. "x-amz-checksum-crc32c")
+		if checksumAlgo == "" {
+			if trailer := r.Header.Get("x-amz-trailer"); trailer != "" {
+				checksumAlgo = inferChecksumAlgorithmFromTrailer(trailer)
+			}
+		}
+		if checksumAlgo != "" {
+			opts.ChecksumAlgorithm = checksumAlgo
+		}
+		if v := r.Header.Get("x-amz-checksum-crc32"); v != "" {
+			opts.ChecksumCRC32 = v
+		}
+		if v := r.Header.Get("x-amz-checksum-crc32c"); v != "" {
+			opts.ChecksumCRC32C = v
+		}
+		if v := r.Header.Get("x-amz-checksum-sha1"); v != "" {
+			opts.ChecksumSHA1 = v
+		}
+		if v := r.Header.Get("x-amz-checksum-sha256"); v != "" {
+			opts.ChecksumSHA256 = v
+		}
+
 		obj, err := h.backend.PutObject(bucketName, key, data, opts)
 		if err != nil {
 			if errors.Is(err, backend.ErrInvalidRequest) {
@@ -546,6 +637,8 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if obj.SSEKMSKeyId != "" {
 			w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", obj.SSEKMSKeyId)
 		}
+		// Return checksum headers for PutObject response
+		setChecksumResponseHeaders(w, obj)
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodGet:
@@ -617,10 +710,14 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		w.Header().Set("ETag", obj.ETag)
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
-		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
 		w.Header().Set("Accept-Ranges", "bytes")
 		if obj.VersionId != backend.NullVersionId {
 			w.Header().Set("x-amz-version-id", obj.VersionId)
+		}
+		// Return checksum headers only when ChecksumMode is ENABLED
+		checksumMode := r.Header.Get("x-amz-checksum-mode")
+		if strings.EqualFold(checksumMode, "ENABLED") {
+			setChecksumResponseHeaders(w, obj)
 		}
 		// Set optional headers if present
 		if obj.CacheControl != "" {
@@ -644,9 +741,46 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		setObjectLockHeaders(w, obj)
 		// Set StorageClass and SSE headers
 		setStorageAndEncryptionHeaders(w, obj)
+		// Set Website Redirect Location header
+		if obj.WebsiteRedirectLocation != "" {
+			w.Header().Set("x-amz-website-redirect-location", obj.WebsiteRedirectLocation)
+		}
 
 		// Apply response header overrides from query parameters
 		applyResponseOverrides(w, r)
+
+		// Set parts count header for multipart objects
+		if len(obj.Parts) > 0 {
+			w.Header().Set("x-amz-mp-parts-count", fmt.Sprintf("%d", len(obj.Parts)))
+		}
+
+		// Handle PartNumber query parameter
+		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
+			partNumber, err := strconv.Atoi(partNumberStr)
+			if err != nil || partNumber < 1 {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Part number must be a positive integer.",
+				)
+				return
+			}
+			partData, partSize, found := getPartData(obj, partNumber)
+			if !found {
+				backend.WriteError(
+					w,
+					http.StatusRequestedRangeNotSatisfiable,
+					"InvalidPartNumber",
+					"The requested partnumber is not satisfiable.",
+				)
+				return
+			}
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", partSize))
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write(partData)
+			return
+		}
 
 		// Handle Range request
 		rangeHeader := r.Header.Get("Range")
@@ -774,10 +908,14 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", obj.Size))
 		w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
-		w.Header().Set("x-amz-checksum-crc32", obj.ChecksumCRC32)
 		w.Header().Set("Accept-Ranges", "bytes")
 		if obj.VersionId != backend.NullVersionId {
 			w.Header().Set("x-amz-version-id", obj.VersionId)
+		}
+		// Return checksum headers only when ChecksumMode is ENABLED
+		checksumMode := r.Header.Get("x-amz-checksum-mode")
+		if strings.EqualFold(checksumMode, "ENABLED") {
+			setChecksumResponseHeaders(w, obj)
 		}
 		// Set optional headers if present
 		if obj.CacheControl != "" {
@@ -801,6 +939,42 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		setObjectLockHeaders(w, obj)
 		// Set StorageClass and SSE headers
 		setStorageAndEncryptionHeaders(w, obj)
+		// Set Website Redirect Location header
+		if obj.WebsiteRedirectLocation != "" {
+			w.Header().Set("x-amz-website-redirect-location", obj.WebsiteRedirectLocation)
+		}
+
+		// Set parts count header for multipart objects
+		if len(obj.Parts) > 0 {
+			w.Header().Set("x-amz-mp-parts-count", fmt.Sprintf("%d", len(obj.Parts)))
+		}
+
+		// Handle PartNumber query parameter
+		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
+			partNumber, err := strconv.Atoi(partNumberStr)
+			if err != nil || partNumber < 1 {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Part number must be a positive integer.",
+				)
+				return
+			}
+			_, partSize, found := getPartData(obj, partNumber)
+			if !found {
+				backend.WriteError(
+					w,
+					http.StatusRequestedRangeNotSatisfiable,
+					"InvalidPartNumber",
+					"The requested partnumber is not satisfiable.",
+				)
+				return
+			}
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", partSize))
+			w.WriteHeader(http.StatusPartialContent)
+			return
+		}
 
 		// Apply response header overrides from query parameters
 		applyResponseOverrides(w, r)
@@ -1006,8 +1180,14 @@ func (h *Handler) handleCopyObject(
 		}
 	}
 
+	// Extract Website Redirect Location header for copy
+	websiteRedirect := r.Header.Get("x-amz-website-redirect-location")
+
 	// Check for self-copy without REPLACE
-	if srcBucket == dstBucket && srcKey == dstKey && metadataDirective != "REPLACE" {
+	if srcBucket == dstBucket && srcKey == dstKey && metadataDirective != "REPLACE" &&
+		websiteRedirect == "" &&
+		r.Header.Get("x-amz-storage-class") == "" &&
+		r.Header.Get("x-amz-server-side-encryption") == "" {
 		backend.WriteError(
 			w,
 			http.StatusBadRequest,
@@ -1070,6 +1250,16 @@ func (h *Handler) handleCopyObject(
 	// Extract Storage Class header
 	if storageClass := r.Header.Get("x-amz-storage-class"); storageClass != "" {
 		opts.StorageClass = storageClass
+	}
+
+	// Set Website Redirect Location
+	if websiteRedirect != "" {
+		opts.WebsiteRedirectLocation = websiteRedirect
+	}
+
+	// Extract Checksum Algorithm
+	if checksumAlgo := r.Header.Get("x-amz-checksum-algorithm"); checksumAlgo != "" {
+		opts.ChecksumAlgorithm = checksumAlgo
 	}
 
 	obj, srcVersionIdUsed, err := h.backend.CopyObject(

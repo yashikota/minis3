@@ -14,6 +14,20 @@ import (
 	"github.com/yashikota/minis3/internal/backend"
 )
 
+// parseOptionalObjectAttributes parses the x-amz-optional-object-attributes header
+// and returns a map of requested attribute names.
+func parseOptionalObjectAttributes(r *http.Request) map[string]bool {
+	attrs := make(map[string]bool)
+	header := r.Header.Get("x-amz-optional-object-attributes")
+	if header == "" {
+		return attrs
+	}
+	for _, attr := range strings.Split(header, ",") {
+		attrs[strings.TrimSpace(attr)] = true
+	}
+	return attrs
+}
+
 // handleBucket handles bucket-level operations.
 func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketName string) {
 	// Handle ACL operations
@@ -269,6 +283,13 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	encodingType := query.Get("encoding-type")
 	continuationToken := query.Get("continuation-token")
 	startAfter := query.Get("start-after")
+	fetchOwner := query.Get("fetch-owner") == "true"
+	optionalAttrs := parseOptionalObjectAttributes(r)
+
+	// Handle RequestPayer - accept and acknowledge
+	if r.Header.Get("x-amz-request-payer") == "requester" {
+		w.Header().Set("x-amz-request-charged", "requester")
+	}
 
 	maxKeys := 1000
 	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
@@ -320,7 +341,10 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		resp.EncodingType = "url"
 	}
 
-	owner := backend.DefaultOwner()
+	var owner *backend.Owner
+	if fetchOwner {
+		owner = backend.DefaultOwner()
+	}
 	for _, obj := range result.Objects {
 		key := obj.Key
 		if encodingType == "url" {
@@ -330,14 +354,18 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		if storageClass == "" {
 			storageClass = "STANDARD"
 		}
-		resp.Contents = append(resp.Contents, backend.ObjectInfo{
+		info := backend.ObjectInfo{
 			Key:          key,
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
 			StorageClass: storageClass,
 			Owner:        owner,
-		})
+		}
+		if optionalAttrs["ChecksumAlgorithm"] && obj.ChecksumAlgorithm != "" {
+			info.ChecksumAlgorithm = []string{obj.ChecksumAlgorithm}
+		}
+		resp.Contents = append(resp.Contents, info)
 	}
 
 	for _, cp := range result.CommonPrefixes {
@@ -367,6 +395,12 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 	delimiter := query.Get("delimiter")
 	marker := query.Get("marker")
 	encodingType := query.Get("encoding-type")
+	optionalAttrs := parseOptionalObjectAttributes(r)
+
+	// Handle RequestPayer - accept and acknowledge
+	if r.Header.Get("x-amz-request-payer") == "requester" {
+		w.Header().Set("x-amz-request-charged", "requester")
+	}
 
 	maxKeys := 1000
 	if maxKeysStr := query.Get("max-keys"); maxKeysStr != "" {
@@ -419,14 +453,18 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 		if storageClass == "" {
 			storageClass = "STANDARD"
 		}
-		resp.Contents = append(resp.Contents, backend.ObjectInfo{
+		info := backend.ObjectInfo{
 			Key:          key,
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
 			StorageClass: storageClass,
 			Owner:        owner,
-		})
+		}
+		if optionalAttrs["ChecksumAlgorithm"] && obj.ChecksumAlgorithm != "" {
+			info.ChecksumAlgorithm = []string{obj.ChecksumAlgorithm}
+		}
+		resp.Contents = append(resp.Contents, info)
 	}
 
 	for _, cp := range result.CommonPrefixes {
@@ -529,6 +567,7 @@ func (h *Handler) handleListObjectVersions(
 			ETag:         obj.ETag,
 			Size:         obj.Size,
 			StorageClass: storageClass,
+			Owner:        backend.DefaultOwner(),
 		})
 	}
 
@@ -542,6 +581,7 @@ func (h *Handler) handleListObjectVersions(
 			VersionId:    obj.VersionId,
 			IsLatest:     obj.IsLatest,
 			LastModified: obj.LastModified.Format(time.RFC3339),
+			Owner:        backend.DefaultOwner(),
 		})
 	}
 
