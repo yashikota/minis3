@@ -2,6 +2,7 @@ package backend
 
 import (
 	"encoding/xml"
+	"time"
 )
 
 type ListAllMyBucketsResult struct {
@@ -295,13 +296,25 @@ const (
 
 // MultipartUpload represents an in-progress multipart upload.
 type MultipartUpload struct {
-	UploadId    string
-	Bucket      string
-	Key         string
-	Initiated   string // RFC3339 formatted time
-	Parts       map[int]*PartInfo
-	ContentType string
-	Metadata    map[string]string
+	UploadId             string
+	Bucket               string
+	Key                  string
+	Initiated            string // RFC3339 formatted time
+	Parts                map[int]*PartInfo
+	ContentType          string
+	Metadata             map[string]string
+	Tags                 map[string]string
+	CacheControl         string
+	Expires              *time.Time
+	ContentEncoding      string
+	ContentLanguage      string
+	ContentDisposition   string
+	RetentionMode        string
+	RetainUntilDate      *time.Time
+	LegalHoldStatus      string
+	StorageClass         string
+	ServerSideEncryption string
+	SSEKMSKeyId          string
 }
 
 // PartInfo represents an uploaded part.

@@ -66,21 +66,29 @@ type Object struct {
 	RetentionMode   string     // GOVERNANCE or COMPLIANCE
 	RetainUntilDate *time.Time // Retention until date
 	LegalHoldStatus string     // ON or OFF
+	// Storage class
+	StorageClass string // e.g., STANDARD, REDUCED_REDUNDANCY, etc.
+	// Server-Side Encryption fields
+	ServerSideEncryption string // AES256, aws:kms, etc.
+	SSEKMSKeyId          string // KMS key ID (only for aws:kms)
 }
 
 // PutObjectOptions contains options for PutObject operation.
 type PutObjectOptions struct {
-	ContentType        string
-	Metadata           map[string]string
-	CacheControl       string
-	Expires            *time.Time
-	ContentEncoding    string
-	ContentLanguage    string
-	ContentDisposition string
-	Tags               map[string]string // Inline tags from x-amz-tagging header
-	RetentionMode      string            // Object Lock retention mode (GOVERNANCE or COMPLIANCE)
-	RetainUntilDate    *time.Time        // Object Lock retain until date
-	LegalHoldStatus    string            // Object Lock legal hold (ON or OFF)
+	ContentType          string
+	Metadata             map[string]string
+	CacheControl         string
+	Expires              *time.Time
+	ContentEncoding      string
+	ContentLanguage      string
+	ContentDisposition   string
+	Tags                 map[string]string // Inline tags from x-amz-tagging header
+	RetentionMode        string            // Object Lock retention mode (GOVERNANCE or COMPLIANCE)
+	RetainUntilDate      *time.Time        // Object Lock retain until date
+	LegalHoldStatus      string            // Object Lock legal hold (ON or OFF)
+	StorageClass         string            // Storage class (e.g., STANDARD)
+	ServerSideEncryption string            // Server-side encryption algorithm
+	SSEKMSKeyId          string            // KMS key ID for SSE-KMS
 }
 
 var (

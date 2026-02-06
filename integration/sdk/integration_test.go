@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -3047,4 +3048,432 @@ func TestCopyObjectTaggingDirective(t *testing.T) {
 			)
 		}
 	})
+}
+
+func TestGetObjectReturnsObjectLockHeaders(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.TODO()
+
+	bucket := "lock-headers-bucket"
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket:                     aws.String(bucket),
+		ObjectLockEnabledForBucket: aws.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	retainUntil := time.Now().Add(24 * time.Hour).UTC()
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:                    aws.String(bucket),
+		Key:                       aws.String("locked.txt"),
+		Body:                      strings.NewReader("locked content"),
+		ObjectLockMode:            types.ObjectLockModeGovernance,
+		ObjectLockRetainUntilDate: &retainUntil,
+		ObjectLockLegalHoldStatus: types.ObjectLockLegalHoldStatusOn,
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	t.Run("GetObject returns lock headers", func(t *testing.T) {
+		resp, err := client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String("locked.txt"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.ObjectLockMode != types.ObjectLockModeGovernance {
+			t.Errorf("expected ObjectLockMode GOVERNANCE, got %v", resp.ObjectLockMode)
+		}
+		if resp.ObjectLockRetainUntilDate == nil {
+			t.Error("expected ObjectLockRetainUntilDate to be set")
+		}
+		if resp.ObjectLockLegalHoldStatus != types.ObjectLockLegalHoldStatusOn {
+			t.Errorf(
+				"expected ObjectLockLegalHoldStatus ON, got %v",
+				resp.ObjectLockLegalHoldStatus,
+			)
+		}
+	})
+
+	t.Run("HeadObject returns lock headers", func(t *testing.T) {
+		resp, err := client.HeadObject(ctx, &s3.HeadObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String("locked.txt"),
+		})
+		if err != nil {
+			t.Fatalf("HeadObject failed: %v", err)
+		}
+
+		if resp.ObjectLockMode != types.ObjectLockModeGovernance {
+			t.Errorf("expected ObjectLockMode GOVERNANCE, got %v", resp.ObjectLockMode)
+		}
+		if resp.ObjectLockRetainUntilDate == nil {
+			t.Error("expected ObjectLockRetainUntilDate to be set")
+		}
+		if resp.ObjectLockLegalHoldStatus != types.ObjectLockLegalHoldStatusOn {
+			t.Errorf(
+				"expected ObjectLockLegalHoldStatus ON, got %v",
+				resp.ObjectLockLegalHoldStatus,
+			)
+		}
+	})
+}
+
+func TestDeleteObjectWithObjectLock(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.TODO()
+
+	bucket := "delete-lock-bucket"
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket:                     aws.String(bucket),
+		ObjectLockEnabledForBucket: aws.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	retainUntil := time.Now().Add(24 * time.Hour).UTC()
+	putResp, err := client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:                    aws.String(bucket),
+		Key:                       aws.String("locked.txt"),
+		Body:                      strings.NewReader("locked content"),
+		ObjectLockMode:            types.ObjectLockModeGovernance,
+		ObjectLockRetainUntilDate: &retainUntil,
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	t.Run("delete specific version is denied", func(t *testing.T) {
+		_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket:    aws.String(bucket),
+			Key:       aws.String("locked.txt"),
+			VersionId: putResp.VersionId,
+		})
+		if err == nil {
+			t.Fatal("expected error for locked object deletion, got nil")
+		}
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			if apiErr.ErrorCode() != "AccessDenied" {
+				t.Errorf("expected AccessDenied, got %s", apiErr.ErrorCode())
+			}
+		}
+	})
+
+	t.Run("delete with bypass succeeds", func(t *testing.T) {
+		_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket:                    aws.String(bucket),
+			Key:                       aws.String("locked.txt"),
+			VersionId:                 putResp.VersionId,
+			BypassGovernanceRetention: aws.Bool(true),
+		})
+		if err != nil {
+			t.Fatalf("expected bypass delete to succeed, got %v", err)
+		}
+	})
+
+	t.Run("delete marker creation succeeds for locked object", func(t *testing.T) {
+		// Put a new locked object
+		_, err := client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket:                    aws.String(bucket),
+			Key:                       aws.String("locked2.txt"),
+			Body:                      strings.NewReader("data"),
+			ObjectLockMode:            types.ObjectLockModeCompliance,
+			ObjectLockRetainUntilDate: &retainUntil,
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+
+		// Delete without versionId creates delete marker, should succeed
+		delResp, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String("locked2.txt"),
+		})
+		if err != nil {
+			t.Fatalf("expected delete marker creation to succeed, got %v", err)
+		}
+		if delResp.DeleteMarker == nil || !*delResp.DeleteMarker {
+			t.Error("expected delete marker to be set")
+		}
+	})
+}
+
+func TestCopyObjectWithObjectLock(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.TODO()
+
+	bucket := "copy-lock-bucket"
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket:                     aws.String(bucket),
+		ObjectLockEnabledForBucket: aws.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	retainUntil := time.Now().Add(24 * time.Hour).UTC()
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:                    aws.String(bucket),
+		Key:                       aws.String("src.txt"),
+		Body:                      strings.NewReader("data"),
+		ObjectLockMode:            types.ObjectLockModeGovernance,
+		ObjectLockRetainUntilDate: &retainUntil,
+		ObjectLockLegalHoldStatus: types.ObjectLockLegalHoldStatusOn,
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	_, err = client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String("dst.txt"),
+		CopySource: aws.String(bucket + "/src.txt"),
+	})
+	if err != nil {
+		t.Fatalf("CopyObject failed: %v", err)
+	}
+
+	// Verify copied object has lock fields
+	resp, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("dst.txt"),
+	})
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.ObjectLockMode != types.ObjectLockModeGovernance {
+		t.Errorf("expected ObjectLockMode GOVERNANCE, got %v", resp.ObjectLockMode)
+	}
+	if resp.ObjectLockLegalHoldStatus != types.ObjectLockLegalHoldStatusOn {
+		t.Errorf("expected LegalHoldStatus ON, got %v", resp.ObjectLockLegalHoldStatus)
+	}
+}
+
+func TestMultipartUploadWithMetadata(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.TODO()
+
+	bucket := "mp-meta-bucket"
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// Create multipart upload with metadata
+	createResp, err := client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket:       aws.String(bucket),
+		Key:          aws.String("mp-key"),
+		CacheControl: aws.String("max-age=3600"),
+		ContentType:  aws.String("application/json"),
+		Tagging:      aws.String("Env=Test"),
+	})
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload failed: %v", err)
+	}
+
+	// Upload a part
+	partData := strings.NewReader("multipart data content")
+	uploadResp, err := client.UploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String("mp-key"),
+		UploadId:   createResp.UploadId,
+		PartNumber: aws.Int32(1),
+		Body:       partData,
+	})
+	if err != nil {
+		t.Fatalf("UploadPart failed: %v", err)
+	}
+
+	// Complete multipart upload
+	_, err = client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String("mp-key"),
+		UploadId: createResp.UploadId,
+		MultipartUpload: &types.CompletedMultipartUpload{
+			Parts: []types.CompletedPart{
+				{PartNumber: aws.Int32(1), ETag: uploadResp.ETag},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompleteMultipartUpload failed: %v", err)
+	}
+
+	// Verify object attributes
+	getResp, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("mp-key"),
+	})
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	defer getResp.Body.Close()
+
+	if getResp.CacheControl == nil || *getResp.CacheControl != "max-age=3600" {
+		t.Errorf("expected CacheControl max-age=3600, got %v", getResp.CacheControl)
+	}
+	if getResp.ContentType == nil || *getResp.ContentType != "application/json" {
+		t.Errorf("expected ContentType application/json, got %v", getResp.ContentType)
+	}
+
+	// Verify tags
+	tagResp, err := client.GetObjectTagging(ctx, &s3.GetObjectTaggingInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("mp-key"),
+	})
+	if err != nil {
+		t.Fatalf("GetObjectTagging failed: %v", err)
+	}
+	if len(tagResp.TagSet) != 1 || *tagResp.TagSet[0].Key != "Env" ||
+		*tagResp.TagSet[0].Value != "Test" {
+		t.Errorf("expected tag Env=Test, got %v", tagResp.TagSet)
+	}
+}
+
+func TestStorageClassHeader(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.TODO()
+
+	bucket := "storage-class-bucket"
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:       aws.String(bucket),
+		Key:          aws.String("glacier.txt"),
+		Body:         strings.NewReader("data"),
+		StorageClass: types.StorageClassGlacier,
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	t.Run("GetObject returns storage class", func(t *testing.T) {
+		resp, err := client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String("glacier.txt"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StorageClass != types.StorageClassGlacier {
+			t.Errorf("expected StorageClass GLACIER, got %v", resp.StorageClass)
+		}
+	})
+
+	t.Run("ListObjectsV2 returns storage class", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(bucket),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+		if len(resp.Contents) != 1 {
+			t.Fatalf("expected 1 object, got %d", len(resp.Contents))
+		}
+		if resp.Contents[0].StorageClass != types.ObjectStorageClassGlacier {
+			t.Errorf("expected StorageClass GLACIER, got %v", resp.Contents[0].StorageClass)
+		}
+	})
+}
+
+func TestServerSideEncryption(t *testing.T) {
+	client := setupTestClient(t)
+	ctx := context.TODO()
+
+	bucket := "sse-bucket"
+	_, err := client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:               aws.String(bucket),
+		Key:                  aws.String("sse.txt"),
+		Body:                 strings.NewReader("encrypted data"),
+		ServerSideEncryption: types.ServerSideEncryptionAes256,
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	t.Run("GetObject returns SSE header", func(t *testing.T) {
+		resp, err := client.GetObject(ctx, &s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String("sse.txt"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.ServerSideEncryption != types.ServerSideEncryptionAes256 {
+			t.Errorf("expected SSE AES256, got %v", resp.ServerSideEncryption)
+		}
+	})
+
+	t.Run("HeadObject returns SSE header", func(t *testing.T) {
+		resp, err := client.HeadObject(ctx, &s3.HeadObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String("sse.txt"),
+		})
+		if err != nil {
+			t.Fatalf("HeadObject failed: %v", err)
+		}
+
+		if resp.ServerSideEncryption != types.ServerSideEncryptionAes256 {
+			t.Errorf("expected SSE AES256, got %v", resp.ServerSideEncryption)
+		}
+	})
+}
+
+func TestRequestIdHeader(t *testing.T) {
+	server := minis3.New()
+	if err := server.Start(); err != nil {
+		t.Fatalf("failed to start server: %v", err)
+	}
+	t.Cleanup(func() { server.Close() })
+
+	// Make a raw HTTP request to check response headers
+	resp, err := http.Get("http://" + server.Addr() + "/")
+	if err != nil {
+		t.Fatalf("HTTP request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	requestId := resp.Header.Get("x-amz-request-id")
+	if requestId == "" {
+		t.Error("expected x-amz-request-id header to be present")
+	}
+	if len(requestId) != 16 { // 8 bytes = 16 hex chars
+		t.Errorf(
+			"expected request ID to be 16 hex chars, got %q (len %d)",
+			requestId,
+			len(requestId),
+		)
+	}
+
+	id2 := resp.Header.Get("x-amz-id-2")
+	if id2 == "" {
+		t.Error("expected x-amz-id-2 header to be present")
+	}
 }

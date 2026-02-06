@@ -87,6 +87,33 @@ func parseTaggingHeader(header string) map[string]string {
 	return tags
 }
 
+// setObjectLockHeaders sets Object Lock response headers if present on the object.
+func setObjectLockHeaders(w http.ResponseWriter, obj *backend.Object) {
+	if obj.RetentionMode != "" {
+		w.Header().Set("x-amz-object-lock-mode", obj.RetentionMode)
+	}
+	if obj.RetainUntilDate != nil {
+		w.Header().
+			Set("x-amz-object-lock-retain-until-date", obj.RetainUntilDate.Format(time.RFC3339))
+	}
+	if obj.LegalHoldStatus != "" {
+		w.Header().Set("x-amz-object-lock-legal-hold", obj.LegalHoldStatus)
+	}
+}
+
+// setStorageAndEncryptionHeaders sets StorageClass and SSE response headers.
+func setStorageAndEncryptionHeaders(w http.ResponseWriter, obj *backend.Object) {
+	if obj.StorageClass != "" && obj.StorageClass != "STANDARD" {
+		w.Header().Set("x-amz-storage-class", obj.StorageClass)
+	}
+	if obj.ServerSideEncryption != "" {
+		w.Header().Set("x-amz-server-side-encryption", obj.ServerSideEncryption)
+	}
+	if obj.SSEKMSKeyId != "" {
+		w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", obj.SSEKMSKeyId)
+	}
+}
+
 // parseExpires parses the Expires header value.
 func parseExpires(value string) *time.Time {
 	if value == "" {
@@ -475,6 +502,19 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.LegalHoldStatus = legalHold
 		}
 
+		// Extract Storage Class header
+		if storageClass := r.Header.Get("x-amz-storage-class"); storageClass != "" {
+			opts.StorageClass = storageClass
+		}
+
+		// Extract Server-Side Encryption headers
+		if sse := r.Header.Get("x-amz-server-side-encryption"); sse != "" {
+			opts.ServerSideEncryption = sse
+		}
+		if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
+			opts.SSEKMSKeyId = sseKmsKeyId
+		}
+
 		obj, err := h.backend.PutObject(bucketName, key, data, opts)
 		if err != nil {
 			if errors.Is(err, backend.ErrInvalidRequest) {
@@ -498,6 +538,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		// Add version ID header if versioning is enabled
 		if obj.VersionId != backend.NullVersionId {
 			w.Header().Set("x-amz-version-id", obj.VersionId)
+		}
+		// Return SSE headers
+		if obj.ServerSideEncryption != "" {
+			w.Header().Set("x-amz-server-side-encryption", obj.ServerSideEncryption)
+		}
+		if obj.SSEKMSKeyId != "" {
+			w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", obj.SSEKMSKeyId)
 		}
 		w.WriteHeader(http.StatusOK)
 
@@ -593,6 +640,10 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Set custom metadata headers
 		setMetadataHeaders(w, obj.Metadata)
+		// Set Object Lock headers
+		setObjectLockHeaders(w, obj)
+		// Set StorageClass and SSE headers
+		setStorageAndEncryptionHeaders(w, obj)
 
 		// Apply response header overrides from query parameters
 		applyResponseOverrides(w, r)
@@ -626,16 +677,29 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 	case http.MethodDelete:
 		versionId := r.URL.Query().Get("versionId")
+		bypassGovernance := strings.EqualFold(
+			r.Header.Get("x-amz-bypass-governance-retention"),
+			"true",
+		)
 		var result *backend.DeleteObjectVersionResult
 		var err error
 
 		if versionId != "" {
-			result, err = h.backend.DeleteObjectVersion(bucketName, key, versionId)
+			result, err = h.backend.DeleteObjectVersion(
+				bucketName,
+				key,
+				versionId,
+				bypassGovernance,
+			)
 		} else {
-			result, err = h.backend.DeleteObject(bucketName, key)
+			result, err = h.backend.DeleteObject(bucketName, key, bypassGovernance)
 		}
 
 		if err != nil {
+			if errors.Is(err, backend.ErrObjectLocked) {
+				backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+				return
+			}
 			if errors.Is(err, backend.ErrBucketNotFound) {
 				backend.WriteError(
 					w,
@@ -733,6 +797,10 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Set custom metadata headers
 		setMetadataHeaders(w, obj.Metadata)
+		// Set Object Lock headers
+		setObjectLockHeaders(w, obj)
+		// Set StorageClass and SSE headers
+		setStorageAndEncryptionHeaders(w, obj)
 
 		// Apply response header overrides from query parameters
 		applyResponseOverrides(w, r)
@@ -783,7 +851,8 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		return
 	}
 
-	results, err := h.backend.DeleteObjects(bucketName, deleteReq.Objects)
+	bypassGovernance := strings.EqualFold(r.Header.Get("x-amz-bypass-governance-retention"), "true")
+	results, err := h.backend.DeleteObjects(bucketName, deleteReq.Objects, bypassGovernance)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -800,10 +869,17 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 
 	for _, result := range results {
 		if result.Error != nil {
+			errCode := "InternalError"
+			errMsg := result.Error.Error()
+			if errors.Is(result.Error, backend.ErrObjectLocked) {
+				errCode = "AccessDenied"
+				errMsg = "Access Denied"
+			}
 			resp.Errors = append(resp.Errors, backend.DeleteError{
-				Key:     result.Key,
-				Code:    "InternalError",
-				Message: result.Error.Error(),
+				Key:       result.Key,
+				VersionId: result.VersionId,
+				Code:      errCode,
+				Message:   errMsg,
 			})
 		} else if !deleteReq.Quiet {
 			deleted := backend.DeletedObject{
@@ -969,6 +1045,33 @@ func (h *Handler) handleCopyObject(
 		opts.Tags = parseTaggingHeader(r.Header.Get("x-amz-tagging"))
 	}
 
+	// Extract Object Lock headers
+	if lockMode := r.Header.Get("x-amz-object-lock-mode"); lockMode != "" {
+		opts.RetentionMode = lockMode
+	}
+	if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
+		t, err := time.Parse(time.RFC3339, retainUntil)
+		if err == nil {
+			opts.RetainUntilDate = &t
+		}
+	}
+	if legalHold := r.Header.Get("x-amz-object-lock-legal-hold"); legalHold != "" {
+		opts.LegalHoldStatus = legalHold
+	}
+
+	// Extract Server-Side Encryption headers
+	if sse := r.Header.Get("x-amz-server-side-encryption"); sse != "" {
+		opts.ServerSideEncryption = sse
+	}
+	if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
+		opts.SSEKMSKeyId = sseKmsKeyId
+	}
+
+	// Extract Storage Class header
+	if storageClass := r.Header.Get("x-amz-storage-class"); storageClass != "" {
+		opts.StorageClass = storageClass
+	}
+
 	obj, srcVersionIdUsed, err := h.backend.CopyObject(
 		srcBucket,
 		srcKey,
@@ -990,6 +1093,13 @@ func (h *Handler) handleCopyObject(
 			backend.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
 		} else if errors.Is(err, backend.ErrVersionNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchVersion", "The specified version does not exist.")
+		} else if errors.Is(err, backend.ErrInvalidRequest) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"Bucket is missing Object Lock Configuration",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -1004,6 +1114,13 @@ func (h *Handler) handleCopyObject(
 	// Add destination version ID header if versioning is enabled
 	if obj.VersionId != backend.NullVersionId {
 		w.Header().Set("x-amz-version-id", obj.VersionId)
+	}
+	// Return SSE headers
+	if obj.ServerSideEncryption != "" {
+		w.Header().Set("x-amz-server-side-encryption", obj.ServerSideEncryption)
+	}
+	if obj.SSEKMSKeyId != "" {
+		w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", obj.SSEKMSKeyId)
 	}
 
 	resp := backend.CopyObjectResult{
@@ -1385,7 +1502,11 @@ func (h *Handler) handleGetObjectAttributes(
 	}
 
 	if requestedAttrs["StorageClass"] {
-		resp.StorageClass = "STANDARD"
+		storageClass := obj.StorageClass
+		if storageClass == "" {
+			storageClass = "STANDARD"
+		}
+		resp.StorageClass = storageClass
 	}
 
 	// Set version ID header

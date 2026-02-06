@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 
 	"github.com/yashikota/minis3/internal/backend"
@@ -16,8 +18,17 @@ func New(b *backend.Backend) *Handler {
 	return &Handler{backend: b}
 }
 
+// generateRequestId generates a random request ID (16 hex characters).
+func generateRequestId() string {
+	buf := make([]byte, 8)
+	_, _ = rand.Read(buf)
+	return hex.EncodeToString(buf)
+}
+
 // ServeHTTP implements http.Handler interface.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("x-amz-request-id", generateRequestId())
+	w.Header().Set("x-amz-id-2", generateRequestId())
 	h.handleRequest(w, r)
 }
 

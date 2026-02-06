@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
 )
@@ -17,8 +18,41 @@ func (h *Handler) handleCreateMultipartUpload(
 	bucketName, key string,
 ) {
 	opts := backend.CreateMultipartUploadOptions{
-		ContentType: r.Header.Get("Content-Type"),
-		Metadata:    extractMetadata(r),
+		ContentType:        r.Header.Get("Content-Type"),
+		Metadata:           extractMetadata(r),
+		Tags:               parseTaggingHeader(r.Header.Get("x-amz-tagging")),
+		CacheControl:       r.Header.Get("Cache-Control"),
+		Expires:            parseExpires(r.Header.Get("Expires")),
+		ContentEncoding:    r.Header.Get("Content-Encoding"),
+		ContentLanguage:    r.Header.Get("Content-Language"),
+		ContentDisposition: r.Header.Get("Content-Disposition"),
+	}
+
+	// Extract Object Lock headers
+	if lockMode := r.Header.Get("x-amz-object-lock-mode"); lockMode != "" {
+		opts.RetentionMode = lockMode
+	}
+	if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
+		t, parseErr := time.Parse(time.RFC3339, retainUntil)
+		if parseErr == nil {
+			opts.RetainUntilDate = &t
+		}
+	}
+	if legalHold := r.Header.Get("x-amz-object-lock-legal-hold"); legalHold != "" {
+		opts.LegalHoldStatus = legalHold
+	}
+
+	// Extract Storage Class header
+	if storageClass := r.Header.Get("x-amz-storage-class"); storageClass != "" {
+		opts.StorageClass = storageClass
+	}
+
+	// Extract Server-Side Encryption headers
+	if sse := r.Header.Get("x-amz-server-side-encryption"); sse != "" {
+		opts.ServerSideEncryption = sse
+	}
+	if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
+		opts.SSEKMSKeyId = sseKmsKeyId
 	}
 
 	upload, err := h.backend.CreateMultipartUpload(bucketName, key, opts)
@@ -168,6 +202,13 @@ func (h *Handler) handleCompleteMultipartUpload(
 				"NoSuchBucket",
 				"The specified bucket does not exist.",
 			)
+		} else if errors.Is(err, backend.ErrInvalidRequest) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"Bucket is missing Object Lock Configuration",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -287,12 +328,16 @@ func (h *Handler) handleListMultipartUploads(
 	}
 
 	for _, upload := range result.Uploads {
+		storageClass := upload.StorageClass
+		if storageClass == "" {
+			storageClass = "STANDARD"
+		}
 		resp.Uploads = append(resp.Uploads, backend.UploadInfo{
 			Key:          upload.Key,
 			UploadId:     upload.UploadId,
 			Initiator:    owner,
 			Owner:        owner,
-			StorageClass: "STANDARD",
+			StorageClass: storageClass,
 			Initiated:    upload.Initiated,
 		})
 	}
@@ -373,6 +418,10 @@ func (h *Handler) handleListParts(
 	}
 
 	owner := backend.DefaultOwner()
+	storageClass := upload.StorageClass
+	if storageClass == "" {
+		storageClass = "STANDARD"
+	}
 	resp := backend.ListPartsResult{
 		Xmlns:                "http://s3.amazonaws.com/doc/2006-03-01/",
 		Bucket:               bucketName,
@@ -380,14 +429,12 @@ func (h *Handler) handleListParts(
 		UploadId:             uploadId,
 		Initiator:            owner,
 		Owner:                owner,
-		StorageClass:         "STANDARD",
+		StorageClass:         storageClass,
 		PartNumberMarker:     partNumberMarker,
 		NextPartNumberMarker: result.NextPartNumberMarker,
 		MaxParts:             maxParts,
 		IsTruncated:          result.IsTruncated,
 	}
-
-	_ = upload // We have upload info if needed for future use
 
 	for _, part := range result.Parts {
 		resp.Parts = append(resp.Parts, backend.PartItem{

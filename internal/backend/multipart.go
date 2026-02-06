@@ -15,8 +15,20 @@ import (
 
 // CreateMultipartUploadOptions contains options for CreateMultipartUpload.
 type CreateMultipartUploadOptions struct {
-	ContentType string
-	Metadata    map[string]string
+	ContentType          string
+	Metadata             map[string]string
+	Tags                 map[string]string
+	CacheControl         string
+	Expires              *time.Time
+	ContentEncoding      string
+	ContentLanguage      string
+	ContentDisposition   string
+	RetentionMode        string
+	RetainUntilDate      *time.Time
+	LegalHoldStatus      string
+	StorageClass         string
+	ServerSideEncryption string
+	SSEKMSKeyId          string
 }
 
 // CreateMultipartUpload initiates a multipart upload and returns an upload ID.
@@ -33,13 +45,25 @@ func (b *Backend) CreateMultipartUpload(
 
 	uploadId := GenerateVersionId()
 	upload := &MultipartUpload{
-		UploadId:    uploadId,
-		Bucket:      bucketName,
-		Key:         key,
-		Initiated:   time.Now().UTC().Format(time.RFC3339),
-		Parts:       make(map[int]*PartInfo),
-		ContentType: opts.ContentType,
-		Metadata:    opts.Metadata,
+		UploadId:             uploadId,
+		Bucket:               bucketName,
+		Key:                  key,
+		Initiated:            time.Now().UTC().Format(time.RFC3339),
+		Parts:                make(map[int]*PartInfo),
+		ContentType:          opts.ContentType,
+		Metadata:             opts.Metadata,
+		Tags:                 opts.Tags,
+		CacheControl:         opts.CacheControl,
+		Expires:              opts.Expires,
+		ContentEncoding:      opts.ContentEncoding,
+		ContentLanguage:      opts.ContentLanguage,
+		ContentDisposition:   opts.ContentDisposition,
+		RetentionMode:        opts.RetentionMode,
+		RetainUntilDate:      opts.RetainUntilDate,
+		LegalHoldStatus:      opts.LegalHoldStatus,
+		StorageClass:         opts.StorageClass,
+		ServerSideEncryption: opts.ServerSideEncryption,
+		SSEKMSKeyId:          opts.SSEKMSKeyId,
 	}
 
 	b.uploads[uploadId] = upload
@@ -175,18 +199,42 @@ func (b *Backend) CompleteMultipartUpload(
 		contentType = "application/octet-stream"
 	}
 
+	storageClass := upload.StorageClass
+	if storageClass == "" {
+		storageClass = "STANDARD"
+	}
+
 	obj := &Object{
-		Key:            key,
-		VersionId:      versionId,
-		IsLatest:       true,
-		IsDeleteMarker: false,
-		LastModified:   time.Now().UTC(),
-		ETag:           finalETag,
-		Size:           int64(len(data)),
-		ContentType:    contentType,
-		Data:           data,
-		ChecksumCRC32:  base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
-		Metadata:       upload.Metadata,
+		Key:                  key,
+		VersionId:            versionId,
+		IsLatest:             true,
+		IsDeleteMarker:       false,
+		LastModified:         time.Now().UTC(),
+		ETag:                 finalETag,
+		Size:                 int64(len(data)),
+		ContentType:          contentType,
+		Data:                 data,
+		ChecksumCRC32:        base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
+		Metadata:             upload.Metadata,
+		Tags:                 upload.Tags,
+		CacheControl:         upload.CacheControl,
+		Expires:              upload.Expires,
+		ContentEncoding:      upload.ContentEncoding,
+		ContentLanguage:      upload.ContentLanguage,
+		ContentDisposition:   upload.ContentDisposition,
+		StorageClass:         storageClass,
+		ServerSideEncryption: upload.ServerSideEncryption,
+		SSEKMSKeyId:          upload.SSEKMSKeyId,
+	}
+
+	// Set Object Lock fields if provided
+	if upload.RetentionMode != "" || upload.LegalHoldStatus != "" {
+		if !bucket.ObjectLockEnabled {
+			return nil, ErrInvalidRequest
+		}
+		obj.RetentionMode = upload.RetentionMode
+		obj.RetainUntilDate = upload.RetainUntilDate
+		obj.LegalHoldStatus = upload.LegalHoldStatus
 	}
 
 	addVersionToObject(bucket, key, obj)

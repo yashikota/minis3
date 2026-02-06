@@ -326,12 +326,16 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		if encodingType == "url" {
 			key = url.QueryEscape(obj.Key)
 		}
+		storageClass := obj.StorageClass
+		if storageClass == "" {
+			storageClass = "STANDARD"
+		}
 		resp.Contents = append(resp.Contents, backend.ObjectInfo{
 			Key:          key,
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
-			StorageClass: "STANDARD",
+			StorageClass: storageClass,
 			Owner:        owner,
 		})
 	}
@@ -411,12 +415,16 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 		if encodingType == "url" {
 			key = url.QueryEscape(obj.Key)
 		}
+		storageClass := obj.StorageClass
+		if storageClass == "" {
+			storageClass = "STANDARD"
+		}
 		resp.Contents = append(resp.Contents, backend.ObjectInfo{
 			Key:          key,
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
-			StorageClass: "STANDARD",
+			StorageClass: storageClass,
 			Owner:        owner,
 		})
 	}
@@ -509,6 +517,10 @@ func (h *Handler) handleListObjectVersions(
 		if encodingType == "url" {
 			key = url.QueryEscape(obj.Key)
 		}
+		storageClass := obj.StorageClass
+		if storageClass == "" {
+			storageClass = "STANDARD"
+		}
 		resp.Versions = append(resp.Versions, backend.VersionInfo{
 			Key:          key,
 			VersionId:    obj.VersionId,
@@ -516,7 +528,7 @@ func (h *Handler) handleListObjectVersions(
 			LastModified: obj.LastModified.Format(time.RFC3339),
 			ETag:         obj.ETag,
 			Size:         obj.Size,
-			StorageClass: "STANDARD",
+			StorageClass: storageClass,
 		})
 	}
 

@@ -11,6 +11,22 @@ import (
 	"time"
 )
 
+// isObjectLocked checks whether an object is locked and cannot be deleted.
+func isObjectLocked(obj *Object, bypassGovernance bool) bool {
+	if obj.LegalHoldStatus == LegalHoldStatusOn {
+		return true
+	}
+	if obj.RetainUntilDate != nil && obj.RetainUntilDate.After(time.Now().UTC()) {
+		if obj.RetentionMode == RetentionModeCompliance {
+			return true
+		}
+		if obj.RetentionMode == RetentionModeGovernance && !bypassGovernance {
+			return true
+		}
+	}
+	return false
+}
+
 // getLatestVersion returns the latest non-DeleteMarker version of an object.
 // Returns nil if no such version exists.
 func (ov *ObjectVersions) getLatestVersion() *Object {
@@ -167,24 +183,32 @@ func (b *Backend) PutObject(
 		versionId = NullVersionId
 	}
 
+	storageClass := opts.StorageClass
+	if storageClass == "" {
+		storageClass = "STANDARD"
+	}
+
 	obj := &Object{
-		Key:                key,
-		VersionId:          versionId,
-		IsLatest:           true,
-		IsDeleteMarker:     false,
-		LastModified:       time.Now().UTC(),
-		ETag:               fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
-		Size:               int64(len(data)),
-		ContentType:        opts.ContentType,
-		Data:               data,
-		ChecksumCRC32:      base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
-		Metadata:           opts.Metadata,
-		CacheControl:       opts.CacheControl,
-		Expires:            opts.Expires,
-		ContentEncoding:    opts.ContentEncoding,
-		ContentLanguage:    opts.ContentLanguage,
-		ContentDisposition: opts.ContentDisposition,
-		Tags:               opts.Tags,
+		Key:                  key,
+		VersionId:            versionId,
+		IsLatest:             true,
+		IsDeleteMarker:       false,
+		LastModified:         time.Now().UTC(),
+		ETag:                 fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
+		Size:                 int64(len(data)),
+		ContentType:          opts.ContentType,
+		Data:                 data,
+		ChecksumCRC32:        base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
+		Metadata:             opts.Metadata,
+		CacheControl:         opts.CacheControl,
+		Expires:              opts.Expires,
+		ContentEncoding:      opts.ContentEncoding,
+		ContentLanguage:      opts.ContentLanguage,
+		ContentDisposition:   opts.ContentDisposition,
+		Tags:                 opts.Tags,
+		StorageClass:         storageClass,
+		ServerSideEncryption: opts.ServerSideEncryption,
+		SSEKMSKeyId:          opts.SSEKMSKeyId,
 	}
 
 	// Set Object Lock fields if provided
@@ -250,15 +274,19 @@ type DeleteObjectVersionResult struct {
 // DeleteObject removes an object from a bucket.
 // With versioning enabled, creates a DeleteMarker instead of deleting.
 // Returns information about the deletion.
-func (b *Backend) DeleteObject(bucketName, key string) (*DeleteObjectVersionResult, error) {
-	return b.DeleteObjectVersion(bucketName, key, "")
+func (b *Backend) DeleteObject(
+	bucketName, key string,
+	bypassGovernance bool,
+) (*DeleteObjectVersionResult, error) {
+	return b.DeleteObjectVersion(bucketName, key, "", bypassGovernance)
 }
 
 // DeleteObjectVersion deletes a specific version or creates a DeleteMarker.
 // If versionId is empty and versioning is enabled, creates a DeleteMarker.
 // If versionId is specified, physically deletes that version.
+// Object Lock is only checked when deleting a specific version (not when creating a delete marker).
 func (b *Backend) DeleteObjectVersion(
-	bucketName, key, versionId string,
+	bucketName, key, versionId string, bypassGovernance bool,
 ) (*DeleteObjectVersionResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -291,6 +319,11 @@ func (b *Backend) DeleteObjectVersion(
 
 		if deletedObj == nil {
 			return nil, ErrVersionNotFound
+		}
+
+		// Check Object Lock before allowing physical deletion of a specific version
+		if !deletedObj.IsDeleteMarker && isObjectLocked(deletedObj, bypassGovernance) {
+			return nil, ErrObjectLocked
 		}
 
 		versions.Versions = newVersions
@@ -328,6 +361,15 @@ type CopyObjectOptions struct {
 	ContentDisposition string
 	TaggingDirective   string            // "COPY" (default) or "REPLACE"
 	Tags               map[string]string // Used when TaggingDirective is "REPLACE"
+	// Object Lock fields (override source object's lock settings)
+	RetentionMode   string
+	RetainUntilDate *time.Time
+	LegalHoldStatus string
+	// Server-Side Encryption fields
+	ServerSideEncryption string
+	SSEKMSKeyId          string
+	// Storage class
+	StorageClass string
 }
 
 // CopyObject copies an object from source to destination.
@@ -448,6 +490,43 @@ func (b *Backend) CopyObject(
 		}
 	}
 
+	// Handle Object Lock fields
+	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
+		// Explicit override: destination bucket must have Object Lock enabled
+		if !dstBkt.ObjectLockEnabled {
+			return nil, "", ErrInvalidRequest
+		}
+		obj.RetentionMode = opts.RetentionMode
+		obj.RetainUntilDate = opts.RetainUntilDate
+		obj.LegalHoldStatus = opts.LegalHoldStatus
+	} else if dstBkt.ObjectLockEnabled {
+		// Copy from source if destination bucket has Object Lock enabled
+		obj.RetentionMode = srcObj.RetentionMode
+		if srcObj.RetainUntilDate != nil {
+			t := *srcObj.RetainUntilDate
+			obj.RetainUntilDate = &t
+		}
+		obj.LegalHoldStatus = srcObj.LegalHoldStatus
+	}
+
+	// Handle StorageClass
+	if opts.StorageClass != "" {
+		obj.StorageClass = opts.StorageClass
+	} else if srcObj.StorageClass != "" {
+		obj.StorageClass = srcObj.StorageClass
+	} else {
+		obj.StorageClass = "STANDARD"
+	}
+
+	// Handle Server-Side Encryption
+	if opts.ServerSideEncryption != "" {
+		obj.ServerSideEncryption = opts.ServerSideEncryption
+		obj.SSEKMSKeyId = opts.SSEKMSKeyId
+	} else {
+		obj.ServerSideEncryption = srcObj.ServerSideEncryption
+		obj.SSEKMSKeyId = srcObj.SSEKMSKeyId
+	}
+
 	addVersionToObject(dstBkt, dstKey, obj)
 
 	return obj, actualVersionId, nil
@@ -462,6 +541,7 @@ func (b *Backend) CopyObject(
 func (b *Backend) DeleteObjects(
 	bucketName string,
 	objects []ObjectIdentifier,
+	bypassGovernance bool,
 ) ([]DeleteObjectsResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -489,10 +569,12 @@ func (b *Backend) DeleteObjects(
 
 			// Find and remove the version
 			found := false
+			var foundObj *Object
 			newVersions := make([]*Object, 0, len(versions.Versions))
 			for _, v := range versions.Versions {
 				if v.VersionId == obj.VersionId {
 					found = true
+					foundObj = v
 					result.DeleteMarker = v.IsDeleteMarker
 				} else {
 					newVersions = append(newVersions, v)
@@ -501,6 +583,14 @@ func (b *Backend) DeleteObjects(
 
 			if !found {
 				// Version not found, but S3 returns success
+				results = append(results, result)
+				continue
+			}
+
+			// Check Object Lock before allowing physical deletion
+			if foundObj != nil && !foundObj.IsDeleteMarker &&
+				isObjectLocked(foundObj, bypassGovernance) {
+				result.Error = ErrObjectLocked
 				results = append(results, result)
 				continue
 			}

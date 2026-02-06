@@ -318,6 +318,371 @@ func TestPutObjectWithObjectLock(t *testing.T) {
 	})
 }
 
+func TestDeleteObjectRespectsObjectLock(t *testing.T) {
+	b := New()
+	_ = b.CreateBucketWithObjectLock("lock-bucket")
+	_ = b.SetBucketVersioning("lock-bucket", VersioningEnabled, MFADeleteDisabled)
+
+	future := time.Now().Add(24 * time.Hour).UTC()
+	past := time.Now().Add(-24 * time.Hour).UTC()
+
+	t.Run("COMPLIANCE mode blocks deletion", func(t *testing.T) {
+		obj, _ := b.PutObject("lock-bucket", "compliance-key", []byte("data"), PutObjectOptions{
+			RetentionMode:   RetentionModeCompliance,
+			RetainUntilDate: &future,
+		})
+		_, err := b.DeleteObjectVersion("lock-bucket", "compliance-key", obj.VersionId, false)
+		if !errors.Is(err, ErrObjectLocked) {
+			t.Errorf("expected ErrObjectLocked, got %v", err)
+		}
+		// bypass does not help with COMPLIANCE
+		_, err = b.DeleteObjectVersion("lock-bucket", "compliance-key", obj.VersionId, true)
+		if !errors.Is(err, ErrObjectLocked) {
+			t.Errorf("expected ErrObjectLocked even with bypass for COMPLIANCE, got %v", err)
+		}
+	})
+
+	t.Run("GOVERNANCE mode blocks without bypass", func(t *testing.T) {
+		obj, _ := b.PutObject("lock-bucket", "gov-key", []byte("data"), PutObjectOptions{
+			RetentionMode:   RetentionModeGovernance,
+			RetainUntilDate: &future,
+		})
+		_, err := b.DeleteObjectVersion("lock-bucket", "gov-key", obj.VersionId, false)
+		if !errors.Is(err, ErrObjectLocked) {
+			t.Errorf("expected ErrObjectLocked, got %v", err)
+		}
+		// bypass allows deletion
+		_, err = b.DeleteObjectVersion("lock-bucket", "gov-key", obj.VersionId, true)
+		if err != nil {
+			t.Errorf("expected success with bypass for GOVERNANCE, got %v", err)
+		}
+	})
+
+	t.Run("LegalHold blocks deletion", func(t *testing.T) {
+		obj, _ := b.PutObject("lock-bucket", "legal-key", []byte("data"), PutObjectOptions{
+			LegalHoldStatus: LegalHoldStatusOn,
+		})
+		_, err := b.DeleteObjectVersion("lock-bucket", "legal-key", obj.VersionId, true)
+		if !errors.Is(err, ErrObjectLocked) {
+			t.Errorf("expected ErrObjectLocked for legal hold even with bypass, got %v", err)
+		}
+	})
+
+	t.Run("expired retention allows deletion", func(t *testing.T) {
+		obj, _ := b.PutObject("lock-bucket", "expired-key", []byte("data"), PutObjectOptions{
+			RetentionMode:   RetentionModeCompliance,
+			RetainUntilDate: &past,
+		})
+		_, err := b.DeleteObjectVersion("lock-bucket", "expired-key", obj.VersionId, false)
+		if err != nil {
+			t.Errorf("expected success for expired retention, got %v", err)
+		}
+	})
+
+	t.Run("delete marker creation always succeeds", func(t *testing.T) {
+		_, _ = b.PutObject("lock-bucket", "marker-key", []byte("data"), PutObjectOptions{
+			RetentionMode:   RetentionModeCompliance,
+			RetainUntilDate: &future,
+			LegalHoldStatus: LegalHoldStatusOn,
+		})
+		// DeleteObject without versionId creates a delete marker, should succeed
+		result, err := b.DeleteObject("lock-bucket", "marker-key", false)
+		if err != nil {
+			t.Errorf("expected delete marker creation to succeed, got %v", err)
+		}
+		if !result.IsDeleteMarker {
+			t.Errorf("expected result to be a delete marker")
+		}
+	})
+}
+
+func TestDeleteObjectsRespectsObjectLock(t *testing.T) {
+	b := New()
+	_ = b.CreateBucketWithObjectLock("lock-bucket")
+	_ = b.SetBucketVersioning("lock-bucket", VersioningEnabled, MFADeleteDisabled)
+
+	future := time.Now().Add(24 * time.Hour).UTC()
+
+	obj, _ := b.PutObject("lock-bucket", "locked-key", []byte("data"), PutObjectOptions{
+		RetentionMode:   RetentionModeCompliance,
+		RetainUntilDate: &future,
+	})
+	unlocked, _ := b.PutObject("lock-bucket", "unlocked-key", []byte("data"), PutObjectOptions{})
+
+	results, err := b.DeleteObjects("lock-bucket", []ObjectIdentifier{
+		{Key: "locked-key", VersionId: obj.VersionId},
+		{Key: "unlocked-key", VersionId: unlocked.VersionId},
+	}, false)
+	if err != nil {
+		t.Fatalf("DeleteObjects failed: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// locked-key should have an error
+	if !errors.Is(results[0].Error, ErrObjectLocked) {
+		t.Errorf("expected ErrObjectLocked for locked-key, got %v", results[0].Error)
+	}
+	// unlocked-key should succeed
+	if results[1].Error != nil {
+		t.Errorf("expected success for unlocked-key, got %v", results[1].Error)
+	}
+}
+
+func TestCopyObjectCopiesObjectLock(t *testing.T) {
+	b := New()
+	_ = b.CreateBucketWithObjectLock("lock-bucket")
+	_ = b.CreateBucket("normal-bucket")
+
+	future := time.Now().Add(24 * time.Hour).UTC()
+
+	// Source object with lock
+	_, _ = b.PutObject("lock-bucket", "src-key", []byte("data"), PutObjectOptions{
+		RetentionMode:   RetentionModeGovernance,
+		RetainUntilDate: &future,
+		LegalHoldStatus: LegalHoldStatusOn,
+	})
+
+	t.Run("copies lock fields to lock-enabled bucket", func(t *testing.T) {
+		copied, _, err := b.CopyObject(
+			"lock-bucket",
+			"src-key",
+			"",
+			"lock-bucket",
+			"dst-key",
+			CopyObjectOptions{},
+		)
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+		if copied.RetentionMode != RetentionModeGovernance {
+			t.Errorf(
+				"expected RetentionMode %q, got %q",
+				RetentionModeGovernance,
+				copied.RetentionMode,
+			)
+		}
+		if copied.LegalHoldStatus != LegalHoldStatusOn {
+			t.Errorf(
+				"expected LegalHoldStatus %q, got %q",
+				LegalHoldStatusOn,
+				copied.LegalHoldStatus,
+			)
+		}
+		if copied.RetainUntilDate == nil {
+			t.Error("expected RetainUntilDate to be set")
+		}
+	})
+
+	t.Run("explicit override", func(t *testing.T) {
+		newFuture := time.Now().Add(48 * time.Hour).UTC()
+		copied, _, err := b.CopyObject(
+			"lock-bucket",
+			"src-key",
+			"",
+			"lock-bucket",
+			"dst-override",
+			CopyObjectOptions{
+				RetentionMode:   RetentionModeCompliance,
+				RetainUntilDate: &newFuture,
+				LegalHoldStatus: LegalHoldStatusOff,
+			},
+		)
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+		if copied.RetentionMode != RetentionModeCompliance {
+			t.Errorf(
+				"expected RetentionMode %q, got %q",
+				RetentionModeCompliance,
+				copied.RetentionMode,
+			)
+		}
+		if copied.LegalHoldStatus != LegalHoldStatusOff {
+			t.Errorf(
+				"expected LegalHoldStatus %q, got %q",
+				LegalHoldStatusOff,
+				copied.LegalHoldStatus,
+			)
+		}
+	})
+
+	t.Run("lock override to non-lock bucket fails", func(t *testing.T) {
+		_, _, err := b.CopyObject(
+			"lock-bucket",
+			"src-key",
+			"",
+			"normal-bucket",
+			"dst-key",
+			CopyObjectOptions{
+				RetentionMode: RetentionModeGovernance,
+			},
+		)
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("expected ErrInvalidRequest, got %v", err)
+		}
+	})
+
+	t.Run("copy to non-lock bucket omits lock fields", func(t *testing.T) {
+		copied, _, err := b.CopyObject(
+			"lock-bucket",
+			"src-key",
+			"",
+			"normal-bucket",
+			"dst-key",
+			CopyObjectOptions{},
+		)
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+		if copied.RetentionMode != "" {
+			t.Errorf(
+				"expected empty RetentionMode for non-lock bucket, got %q",
+				copied.RetentionMode,
+			)
+		}
+	})
+}
+
+func TestCompleteMultipartUploadAppliesAttributes(t *testing.T) {
+	b := New()
+	_ = b.CreateBucketWithObjectLock("mp-bucket")
+
+	future := time.Now().Add(24 * time.Hour).UTC()
+	expires := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	upload, err := b.CreateMultipartUpload("mp-bucket", "mp-key", CreateMultipartUploadOptions{
+		ContentType:          "application/json",
+		Tags:                 map[string]string{"Env": "Test"},
+		CacheControl:         "max-age=3600",
+		Expires:              &expires,
+		ContentEncoding:      "gzip",
+		ContentLanguage:      "en",
+		ContentDisposition:   "attachment",
+		RetentionMode:        RetentionModeGovernance,
+		RetainUntilDate:      &future,
+		LegalHoldStatus:      LegalHoldStatusOn,
+		StorageClass:         "GLACIER",
+		ServerSideEncryption: "AES256",
+	})
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload failed: %v", err)
+	}
+
+	// Upload a part (>5MB not required for single part which is also last)
+	data := make([]byte, 1024)
+	part, err := b.UploadPart("mp-bucket", "mp-key", upload.UploadId, 1, data)
+	if err != nil {
+		t.Fatalf("UploadPart failed: %v", err)
+	}
+
+	obj, err := b.CompleteMultipartUpload("mp-bucket", "mp-key", upload.UploadId, []CompletePart{
+		{PartNumber: 1, ETag: part.ETag},
+	})
+	if err != nil {
+		t.Fatalf("CompleteMultipartUpload failed: %v", err)
+	}
+
+	if obj.ContentType != "application/json" {
+		t.Errorf("expected ContentType application/json, got %q", obj.ContentType)
+	}
+	if obj.CacheControl != "max-age=3600" {
+		t.Errorf("expected CacheControl max-age=3600, got %q", obj.CacheControl)
+	}
+	if obj.ContentEncoding != "gzip" {
+		t.Errorf("expected ContentEncoding gzip, got %q", obj.ContentEncoding)
+	}
+	if obj.ContentLanguage != "en" {
+		t.Errorf("expected ContentLanguage en, got %q", obj.ContentLanguage)
+	}
+	if obj.ContentDisposition != "attachment" {
+		t.Errorf("expected ContentDisposition attachment, got %q", obj.ContentDisposition)
+	}
+	if obj.StorageClass != "GLACIER" {
+		t.Errorf("expected StorageClass GLACIER, got %q", obj.StorageClass)
+	}
+	if obj.ServerSideEncryption != "AES256" {
+		t.Errorf("expected ServerSideEncryption AES256, got %q", obj.ServerSideEncryption)
+	}
+	if obj.RetentionMode != RetentionModeGovernance {
+		t.Errorf("expected RetentionMode %q, got %q", RetentionModeGovernance, obj.RetentionMode)
+	}
+	if obj.LegalHoldStatus != LegalHoldStatusOn {
+		t.Errorf("expected LegalHoldStatus %q, got %q", LegalHoldStatusOn, obj.LegalHoldStatus)
+	}
+
+	// Tags
+	tags, _, err := b.GetObjectTagging("mp-bucket", "mp-key", "")
+	if err != nil {
+		t.Fatalf("GetObjectTagging failed: %v", err)
+	}
+	if tags["Env"] != "Test" {
+		t.Errorf("expected tag Env=Test, got %v", tags)
+	}
+}
+
+func TestStorageClass(t *testing.T) {
+	b := New()
+	_ = b.CreateBucket("test-bucket")
+
+	t.Run("default STANDARD", func(t *testing.T) {
+		obj, err := b.PutObject("test-bucket", "default-key", []byte("data"), PutObjectOptions{})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+		if obj.StorageClass != "STANDARD" {
+			t.Errorf("expected StorageClass STANDARD, got %q", obj.StorageClass)
+		}
+	})
+
+	t.Run("explicit storage class", func(t *testing.T) {
+		obj, err := b.PutObject("test-bucket", "glacier-key", []byte("data"), PutObjectOptions{
+			StorageClass: "GLACIER",
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+		if obj.StorageClass != "GLACIER" {
+			t.Errorf("expected StorageClass GLACIER, got %q", obj.StorageClass)
+		}
+	})
+}
+
+func TestServerSideEncryptionFields(t *testing.T) {
+	b := New()
+	_ = b.CreateBucket("test-bucket")
+
+	t.Run("AES256", func(t *testing.T) {
+		obj, err := b.PutObject("test-bucket", "sse-key", []byte("data"), PutObjectOptions{
+			ServerSideEncryption: "AES256",
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+		if obj.ServerSideEncryption != "AES256" {
+			t.Errorf("expected SSE AES256, got %q", obj.ServerSideEncryption)
+		}
+	})
+
+	t.Run("aws:kms with key", func(t *testing.T) {
+		obj, err := b.PutObject("test-bucket", "kms-key", []byte("data"), PutObjectOptions{
+			ServerSideEncryption: "aws:kms",
+			SSEKMSKeyId:          "arn:aws:kms:us-east-1:123456789:key/test-key-id",
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+		if obj.ServerSideEncryption != "aws:kms" {
+			t.Errorf("expected SSE aws:kms, got %q", obj.ServerSideEncryption)
+		}
+		if obj.SSEKMSKeyId != "arn:aws:kms:us-east-1:123456789:key/test-key-id" {
+			t.Errorf("expected KMS key ID, got %q", obj.SSEKMSKeyId)
+		}
+	})
+}
+
 func TestCopyObjectWithTaggingDirective(t *testing.T) {
 	b := New()
 	_ = b.CreateBucket("bucket")
