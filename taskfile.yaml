@@ -34,7 +34,13 @@ tasks:
     desc: "ceph/s3-tests test"
     dir: integration/s3-test
     cmds:
+      - task: s3-test-setup
       - docker compose up --build --abort-on-container-exit 2>&1 | tee s3-test.log
+
+  s3-test-setup:
+    desc: "Fetch s3-tests submodule (required for s3-test)"
+    cmds:
+      - git submodule update --init --recursive
 
   s3-test-summary:
     desc: "Show s3-test results summary"
