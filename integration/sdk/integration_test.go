@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -2613,6 +2614,437 @@ func TestPublicAccessBlock(t *testing.T) {
 		if !errors.As(err, &apiErr) ||
 			apiErr.ErrorCode() != "NoSuchPublicAccessBlockConfiguration" {
 			t.Errorf("Expected NoSuchPublicAccessBlockConfiguration after deletion, got: %v", err)
+		}
+	})
+}
+
+func TestPutObjectWithTagging(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "inline-tagging-test"
+	key := "tagged.txt"
+
+	t.Cleanup(func() {
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// PutObject with inline tagging
+	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket:  aws.String(bucketName),
+		Key:     aws.String(key),
+		Body:    strings.NewReader("tagged content"),
+		Tagging: aws.String("Project=Test&Environment=Dev"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject with tagging failed: %v", err)
+	}
+
+	// Verify tags via GetObjectTagging
+	resp, err := client.GetObjectTagging(context.TODO(), &s3.GetObjectTaggingInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("GetObjectTagging failed: %v", err)
+	}
+
+	if len(resp.TagSet) != 2 {
+		t.Fatalf("Expected 2 tags, got %d", len(resp.TagSet))
+	}
+
+	tagMap := make(map[string]string)
+	for _, tag := range resp.TagSet {
+		tagMap[*tag.Key] = *tag.Value
+	}
+	if tagMap["Project"] != "Test" {
+		t.Errorf("Expected Project=Test, got %q", tagMap["Project"])
+	}
+	if tagMap["Environment"] != "Dev" {
+		t.Errorf("Expected Environment=Dev, got %q", tagMap["Environment"])
+	}
+}
+
+func TestPutObjectWithObjectLock(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "object-lock-inline-test"
+	key := "locked.txt"
+
+	t.Cleanup(func() {
+		// Remove legal hold first so we can delete
+		client.PutObjectLegalHold(context.TODO(), &s3.PutObjectLegalHoldInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(key),
+			LegalHold: &types.ObjectLockLegalHold{
+				Status: types.ObjectLockLegalHoldStatusOff,
+			},
+		})
+		// Remove retention
+		client.PutObjectRetention(context.TODO(), &s3.PutObjectRetentionInput{
+			Bucket:                    aws.String(bucketName),
+			Key:                       aws.String(key),
+			BypassGovernanceRetention: aws.Bool(true),
+			Retention: &types.ObjectLockRetention{
+				Mode:            types.ObjectLockRetentionModeGovernance,
+				RetainUntilDate: aws.Time(time.Now().Add(-1 * time.Hour)),
+			},
+		})
+		// Clean up versioned objects
+		versResp, err := client.ListObjectVersions(context.TODO(), &s3.ListObjectVersionsInput{
+			Bucket: aws.String(bucketName),
+		})
+		if err == nil {
+			for _, v := range versResp.Versions {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket:    aws.String(bucketName),
+					Key:       v.Key,
+					VersionId: v.VersionId,
+				})
+			}
+			for _, dm := range versResp.DeleteMarkers {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket:    aws.String(bucketName),
+					Key:       dm.Key,
+					VersionId: dm.VersionId,
+				})
+			}
+		}
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	// Create bucket with object lock enabled
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket:                     aws.String(bucketName),
+		ObjectLockEnabledForBucket: aws.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	retainUntil := time.Now().Add(24 * time.Hour).UTC()
+	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket:                    aws.String(bucketName),
+		Key:                       aws.String(key),
+		Body:                      strings.NewReader("locked content"),
+		ObjectLockMode:            types.ObjectLockModeGovernance,
+		ObjectLockRetainUntilDate: aws.Time(retainUntil),
+		ObjectLockLegalHoldStatus: types.ObjectLockLegalHoldStatusOn,
+	})
+	if err != nil {
+		t.Fatalf("PutObject with object lock failed: %v", err)
+	}
+
+	// Verify retention
+	retentionResp, err := client.GetObjectRetention(context.TODO(), &s3.GetObjectRetentionInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("GetObjectRetention failed: %v", err)
+	}
+	if retentionResp.Retention.Mode != types.ObjectLockRetentionModeGovernance {
+		t.Errorf("Expected GOVERNANCE mode, got %v", retentionResp.Retention.Mode)
+	}
+
+	// Verify legal hold
+	legalHoldResp, err := client.GetObjectLegalHold(context.TODO(), &s3.GetObjectLegalHoldInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatalf("GetObjectLegalHold failed: %v", err)
+	}
+	if legalHoldResp.LegalHold.Status != types.ObjectLockLegalHoldStatusOn {
+		t.Errorf("Expected legal hold ON, got %v", legalHoldResp.LegalHold.Status)
+	}
+}
+
+func TestCopyObjectConditionalHeaders(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "copy-conditional-test"
+	srcKey := "source.txt"
+	dstKey := "destination.txt"
+
+	t.Cleanup(func() {
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName), Key: aws.String(srcKey),
+		})
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName), Key: aws.String(dstKey),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	putResp, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(srcKey),
+		Body:   strings.NewReader("source content"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+	etag := *putResp.ETag
+
+	t.Run("CopySourceIfMatch_Success", func(t *testing.T) {
+		_, err := client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+			Bucket:            aws.String(bucketName),
+			Key:               aws.String(dstKey),
+			CopySource:        aws.String(bucketName + "/" + srcKey),
+			CopySourceIfMatch: aws.String(etag),
+		})
+		if err != nil {
+			t.Fatalf("CopyObject with matching If-Match should succeed: %v", err)
+		}
+	})
+
+	t.Run("CopySourceIfMatch_Failure", func(t *testing.T) {
+		_, err := client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+			Bucket:            aws.String(bucketName),
+			Key:               aws.String(dstKey),
+			CopySource:        aws.String(bucketName + "/" + srcKey),
+			CopySourceIfMatch: aws.String("\"wrongetag\""),
+		})
+		if err == nil {
+			t.Fatal("Expected error for non-matching CopySourceIfMatch")
+		}
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "PreconditionFailed" {
+			t.Errorf("Expected PreconditionFailed, got: %v", err)
+		}
+	})
+
+	t.Run("CopySourceIfNoneMatch_Failure", func(t *testing.T) {
+		_, err := client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+			Bucket:                aws.String(bucketName),
+			Key:                   aws.String(dstKey),
+			CopySource:            aws.String(bucketName + "/" + srcKey),
+			CopySourceIfNoneMatch: aws.String(etag),
+		})
+		if err == nil {
+			t.Fatal("Expected error for matching CopySourceIfNoneMatch")
+		}
+		var apiErr smithy.APIError
+		if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "PreconditionFailed" {
+			t.Errorf("Expected PreconditionFailed, got: %v", err)
+		}
+	})
+
+	t.Run("CopySourceIfNoneMatch_Success", func(t *testing.T) {
+		_, err := client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+			Bucket:                aws.String(bucketName),
+			Key:                   aws.String(dstKey),
+			CopySource:            aws.String(bucketName + "/" + srcKey),
+			CopySourceIfNoneMatch: aws.String("\"differentetag\""),
+		})
+		if err != nil {
+			t.Fatalf("CopyObject with non-matching If-None-Match should succeed: %v", err)
+		}
+	})
+}
+
+func TestGetObjectResponseOverrides(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "response-override-test"
+	key := "test.txt"
+
+	t.Cleanup(func() {
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName), Key: aws.String(key),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(key),
+		Body:        strings.NewReader("test content"),
+		ContentType: aws.String("text/plain"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	t.Run("OverrideContentType", func(t *testing.T) {
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:              aws.String(bucketName),
+			Key:                 aws.String(key),
+			ResponseContentType: aws.String("application/octet-stream"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with response override failed: %v", err)
+		}
+		resp.Body.Close()
+
+		if resp.ContentType == nil || *resp.ContentType != "application/octet-stream" {
+			t.Errorf("Expected Content-Type 'application/octet-stream', got %v", resp.ContentType)
+		}
+	})
+
+	t.Run("OverrideContentDisposition", func(t *testing.T) {
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:                     aws.String(bucketName),
+			Key:                        aws.String(key),
+			ResponseContentDisposition: aws.String("attachment; filename=\"download.txt\""),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with response override failed: %v", err)
+		}
+		resp.Body.Close()
+
+		if resp.ContentDisposition == nil ||
+			*resp.ContentDisposition != "attachment; filename=\"download.txt\"" {
+			t.Errorf("Expected Content-Disposition override, got %v", resp.ContentDisposition)
+		}
+	})
+
+	t.Run("OverrideCacheControl", func(t *testing.T) {
+		resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket:               aws.String(bucketName),
+			Key:                  aws.String(key),
+			ResponseCacheControl: aws.String("no-cache"),
+		})
+		if err != nil {
+			t.Fatalf("GetObject with response override failed: %v", err)
+		}
+		resp.Body.Close()
+
+		if resp.CacheControl == nil || *resp.CacheControl != "no-cache" {
+			t.Errorf("Expected Cache-Control 'no-cache', got %v", resp.CacheControl)
+		}
+	})
+}
+
+func TestCopyObjectTaggingDirective(t *testing.T) {
+	client := setupTestClient(t)
+
+	bucketName := "copy-tagging-directive-test"
+	srcKey := "source.txt"
+	dstKey := "destination.txt"
+
+	t.Cleanup(func() {
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName), Key: aws.String(srcKey),
+		})
+		client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+			Bucket: aws.String(bucketName), Key: aws.String(dstKey),
+		})
+		client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+	})
+
+	_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	// Put source with inline tags
+	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket:  aws.String(bucketName),
+		Key:     aws.String(srcKey),
+		Body:    strings.NewReader("source content"),
+		Tagging: aws.String("Env=Prod&Team=Backend"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject with tagging failed: %v", err)
+	}
+
+	t.Run("DefaultCopiesTags", func(t *testing.T) {
+		_, err := client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+			Bucket:     aws.String(bucketName),
+			Key:        aws.String(dstKey),
+			CopySource: aws.String(bucketName + "/" + srcKey),
+		})
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+
+		resp, err := client.GetObjectTagging(context.TODO(), &s3.GetObjectTaggingInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(dstKey),
+		})
+		if err != nil {
+			t.Fatalf("GetObjectTagging failed: %v", err)
+		}
+
+		tagMap := make(map[string]string)
+		for _, tag := range resp.TagSet {
+			tagMap[*tag.Key] = *tag.Value
+		}
+		if tagMap["Env"] != "Prod" {
+			t.Errorf("Expected Env=Prod, got %q", tagMap["Env"])
+		}
+		if tagMap["Team"] != "Backend" {
+			t.Errorf("Expected Team=Backend, got %q", tagMap["Team"])
+		}
+	})
+
+	t.Run("ReplaceDirective", func(t *testing.T) {
+		_, err := client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+			Bucket:           aws.String(bucketName),
+			Key:              aws.String(dstKey),
+			CopySource:       aws.String(bucketName + "/" + srcKey),
+			TaggingDirective: types.TaggingDirectiveReplace,
+			Tagging:          aws.String("NewTag=NewValue"),
+		})
+		if err != nil {
+			t.Fatalf("CopyObject with REPLACE tagging directive failed: %v", err)
+		}
+
+		resp, err := client.GetObjectTagging(context.TODO(), &s3.GetObjectTaggingInput{
+			Bucket: aws.String(bucketName),
+			Key:    aws.String(dstKey),
+		})
+		if err != nil {
+			t.Fatalf("GetObjectTagging failed: %v", err)
+		}
+
+		if len(resp.TagSet) != 1 {
+			t.Fatalf("Expected 1 tag, got %d", len(resp.TagSet))
+		}
+		if *resp.TagSet[0].Key != "NewTag" || *resp.TagSet[0].Value != "NewValue" {
+			t.Errorf(
+				"Expected NewTag=NewValue, got %s=%s",
+				*resp.TagSet[0].Key,
+				*resp.TagSet[0].Value,
+			)
 		}
 	})
 }

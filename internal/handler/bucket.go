@@ -166,7 +166,13 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			}
 		}
 
-		err := h.backend.CreateBucket(bucketName)
+		// Check if Object Lock is requested
+		var err error
+		if r.Header.Get("x-amz-bucket-object-lock-enabled") == "true" {
+			err = h.backend.CreateBucketWithObjectLock(bucketName)
+		} else {
+			err = h.backend.CreateBucket(bucketName)
+		}
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketAlreadyOwnedByYou) {
 				// S3 returns 409 BucketAlreadyOwnedByYou when the bucket exists and is owned by you

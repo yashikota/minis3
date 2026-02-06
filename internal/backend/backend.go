@@ -77,6 +77,10 @@ type PutObjectOptions struct {
 	ContentEncoding    string
 	ContentLanguage    string
 	ContentDisposition string
+	Tags               map[string]string // Inline tags from x-amz-tagging header
+	RetentionMode      string            // Object Lock retention mode (GOVERNANCE or COMPLIANCE)
+	RetainUntilDate    *time.Time        // Object Lock retain until date
+	LegalHoldStatus    string            // Object Lock legal hold (ON or OFF)
 }
 
 var (

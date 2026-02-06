@@ -184,6 +184,17 @@ func (b *Backend) PutObject(
 		ContentEncoding:    opts.ContentEncoding,
 		ContentLanguage:    opts.ContentLanguage,
 		ContentDisposition: opts.ContentDisposition,
+		Tags:               opts.Tags,
+	}
+
+	// Set Object Lock fields if provided
+	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
+		if !bucket.ObjectLockEnabled {
+			return nil, ErrInvalidRequest
+		}
+		obj.RetentionMode = opts.RetentionMode
+		obj.RetainUntilDate = opts.RetainUntilDate
+		obj.LegalHoldStatus = opts.LegalHoldStatus
 	}
 
 	addVersionToObject(bucket, key, obj)
@@ -315,6 +326,8 @@ type CopyObjectOptions struct {
 	ContentEncoding    string
 	ContentLanguage    string
 	ContentDisposition string
+	TaggingDirective   string            // "COPY" (default) or "REPLACE"
+	Tags               map[string]string // Used when TaggingDirective is "REPLACE"
 }
 
 // CopyObject copies an object from source to destination.
@@ -418,6 +431,19 @@ func (b *Backend) CopyObject(
 			obj.Metadata = make(map[string]string, len(srcObj.Metadata))
 			for k, v := range srcObj.Metadata {
 				obj.Metadata[k] = v
+			}
+		}
+	}
+
+	// Handle tagging directive
+	if opts.TaggingDirective == "REPLACE" {
+		obj.Tags = opts.Tags
+	} else {
+		// Default: COPY - copy tags from source
+		if srcObj.Tags != nil {
+			obj.Tags = make(map[string]string, len(srcObj.Tags))
+			for k, v := range srcObj.Tags {
+				obj.Tags[k] = v
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package backend
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestObjectTagging(t *testing.T) {
@@ -256,6 +257,126 @@ func TestCopyPart(t *testing.T) {
 		)
 		if !errors.Is(err, ErrNoSuchUpload) {
 			t.Errorf("expected ErrNoSuchUpload, got %v", err)
+		}
+	})
+}
+
+func TestPutObjectWithTags(t *testing.T) {
+	b := New()
+	_ = b.CreateBucket("test-bucket")
+
+	tags := map[string]string{"Project": "Test", "Environment": "Dev"}
+	_, err := b.PutObject("test-bucket", "test-key", []byte("data"), PutObjectOptions{
+		Tags: tags,
+	})
+	if err != nil {
+		t.Fatalf("PutObject with tags failed: %v", err)
+	}
+
+	result, _, err := b.GetObjectTagging("test-bucket", "test-key", "")
+	if err != nil {
+		t.Fatalf("GetObjectTagging failed: %v", err)
+	}
+
+	if result["Project"] != "Test" || result["Environment"] != "Dev" {
+		t.Errorf("tags mismatch: got %v", result)
+	}
+}
+
+func TestPutObjectWithObjectLock(t *testing.T) {
+	b := New()
+	_ = b.CreateBucketWithObjectLock("lock-bucket")
+
+	retainUntil := time.Now().Add(24 * time.Hour).UTC()
+	obj, err := b.PutObject("lock-bucket", "locked-key", []byte("data"), PutObjectOptions{
+		RetentionMode:   RetentionModeGovernance,
+		RetainUntilDate: &retainUntil,
+		LegalHoldStatus: LegalHoldStatusOn,
+	})
+	if err != nil {
+		t.Fatalf("PutObject with object lock failed: %v", err)
+	}
+
+	if obj.RetentionMode != RetentionModeGovernance {
+		t.Errorf("expected retention mode %q, got %q", RetentionModeGovernance, obj.RetentionMode)
+	}
+	if obj.RetainUntilDate == nil || !obj.RetainUntilDate.Equal(retainUntil) {
+		t.Errorf("expected retain until date %v, got %v", retainUntil, obj.RetainUntilDate)
+	}
+	if obj.LegalHoldStatus != LegalHoldStatusOn {
+		t.Errorf("expected legal hold %q, got %q", LegalHoldStatusOn, obj.LegalHoldStatus)
+	}
+
+	t.Run("fails without object lock enabled", func(t *testing.T) {
+		_ = b.CreateBucket("normal-bucket")
+		_, err := b.PutObject("normal-bucket", "key", []byte("data"), PutObjectOptions{
+			RetentionMode: RetentionModeGovernance,
+		})
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("expected ErrInvalidRequest, got %v", err)
+		}
+	})
+}
+
+func TestCopyObjectWithTaggingDirective(t *testing.T) {
+	b := New()
+	_ = b.CreateBucket("bucket")
+
+	// Create source object with tags
+	_, _ = b.PutObject("bucket", "src", []byte("data"), PutObjectOptions{
+		Tags: map[string]string{"Env": "Prod"},
+	})
+
+	t.Run("COPY directive copies tags", func(t *testing.T) {
+		_, _, err := b.CopyObject("bucket", "src", "", "bucket", "dst-copy", CopyObjectOptions{
+			TaggingDirective: "COPY",
+		})
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+
+		tags, _, err := b.GetObjectTagging("bucket", "dst-copy", "")
+		if err != nil {
+			t.Fatalf("GetObjectTagging failed: %v", err)
+		}
+		if tags["Env"] != "Prod" {
+			t.Errorf("expected tag Env=Prod, got %v", tags)
+		}
+	})
+
+	t.Run("REPLACE directive uses new tags", func(t *testing.T) {
+		_, _, err := b.CopyObject("bucket", "src", "", "bucket", "dst-replace", CopyObjectOptions{
+			TaggingDirective: "REPLACE",
+			Tags:             map[string]string{"NewTag": "NewVal"},
+		})
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+
+		tags, _, err := b.GetObjectTagging("bucket", "dst-replace", "")
+		if err != nil {
+			t.Fatalf("GetObjectTagging failed: %v", err)
+		}
+		if tags["NewTag"] != "NewVal" {
+			t.Errorf("expected tag NewTag=NewVal, got %v", tags)
+		}
+		if _, ok := tags["Env"]; ok {
+			t.Errorf("expected Env tag to not be present, got %v", tags)
+		}
+	})
+
+	t.Run("default copies tags", func(t *testing.T) {
+		_, _, err := b.CopyObject("bucket", "src", "", "bucket", "dst-default", CopyObjectOptions{})
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+
+		tags, _, err := b.GetObjectTagging("bucket", "dst-default", "")
+		if err != nil {
+			t.Fatalf("GetObjectTagging failed: %v", err)
+		}
+		if tags["Env"] != "Prod" {
+			t.Errorf("expected tag Env=Prod (default COPY), got %v", tags)
 		}
 	})
 }

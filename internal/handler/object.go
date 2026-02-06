@@ -65,6 +65,28 @@ func setMetadataHeaders(w http.ResponseWriter, metadata map[string]string) {
 	}
 }
 
+// parseTaggingHeader parses the x-amz-tagging header value.
+// Format: key1=value1&key2=value2 (URL-encoded)
+func parseTaggingHeader(header string) map[string]string {
+	if header == "" {
+		return nil
+	}
+	values, err := url.ParseQuery(header)
+	if err != nil {
+		return nil
+	}
+	tags := make(map[string]string, len(values))
+	for k, v := range values {
+		if len(v) > 0 {
+			tags[k] = v[0]
+		}
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	return tags
+}
+
 // parseExpires parses the Expires header value.
 func parseExpires(value string) *time.Time {
 	if value == "" {
@@ -130,6 +152,46 @@ func evaluateConditionalHeaders(r *http.Request, obj *backend.Object) Conditiona
 	return ConditionalResult{false, 0}
 }
 
+// evaluateCopySourceConditionals evaluates copy source conditional headers.
+// Unlike GET/HEAD, CopyObject returns 412 Precondition Failed for all failures (never 304).
+func evaluateCopySourceConditionals(r *http.Request, srcObj *backend.Object) ConditionalResult {
+	// x-amz-copy-source-if-match: 412 if ETag doesn't match
+	ifMatch := r.Header.Get("x-amz-copy-source-if-match")
+	if ifMatch != "" {
+		if !matchesETag(ifMatch, srcObj.ETag) {
+			return ConditionalResult{true, http.StatusPreconditionFailed}
+		}
+	}
+
+	// x-amz-copy-source-if-unmodified-since: 412 if modified after the given date
+	ifUnmodifiedSince := r.Header.Get("x-amz-copy-source-if-unmodified-since")
+	if ifUnmodifiedSince != "" {
+		t, err := time.Parse(http.TimeFormat, ifUnmodifiedSince)
+		if err == nil && srcObj.LastModified.After(t) {
+			return ConditionalResult{true, http.StatusPreconditionFailed}
+		}
+	}
+
+	// x-amz-copy-source-if-none-match: 412 if ETag matches (not 304 for CopyObject)
+	ifNoneMatch := r.Header.Get("x-amz-copy-source-if-none-match")
+	if ifNoneMatch != "" {
+		if matchesETag(ifNoneMatch, srcObj.ETag) {
+			return ConditionalResult{true, http.StatusPreconditionFailed}
+		}
+	}
+
+	// x-amz-copy-source-if-modified-since: 412 if not modified (not 304 for CopyObject)
+	ifModifiedSince := r.Header.Get("x-amz-copy-source-if-modified-since")
+	if ifModifiedSince != "" {
+		t, err := time.Parse(http.TimeFormat, ifModifiedSince)
+		if err == nil && !srcObj.LastModified.After(t) {
+			return ConditionalResult{true, http.StatusPreconditionFailed}
+		}
+	}
+
+	return ConditionalResult{false, 0}
+}
+
 // matchesETag checks if the given header value matches the object's ETag.
 // Supports wildcard "*" and comma-separated ETags.
 func matchesETag(header, etag string) bool {
@@ -158,6 +220,25 @@ func matchesETag(header, etag string) bool {
 	}
 
 	return false
+}
+
+// applyResponseOverrides applies response header overrides from query parameters.
+// Supported: response-content-type, response-content-disposition, response-content-language,
+// response-expires, response-cache-control, response-content-encoding.
+func applyResponseOverrides(w http.ResponseWriter, r *http.Request) {
+	overrides := map[string]string{
+		"response-content-type":        "Content-Type",
+		"response-content-disposition": "Content-Disposition",
+		"response-content-language":    "Content-Language",
+		"response-expires":             "Expires",
+		"response-cache-control":       "Cache-Control",
+		"response-content-encoding":    "Content-Encoding",
+	}
+	for param, header := range overrides {
+		if val := r.URL.Query().Get(param); val != "" {
+			w.Header().Set(header, val)
+		}
+	}
 }
 
 // parseRangeHeader parses a Range header value and returns start and end positions.
@@ -377,10 +458,34 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			ContentEncoding:    storedContentEncoding,
 			ContentLanguage:    r.Header.Get("Content-Language"),
 			ContentDisposition: r.Header.Get("Content-Disposition"),
+			Tags:               parseTaggingHeader(r.Header.Get("x-amz-tagging")),
+		}
+
+		// Extract Object Lock headers
+		if lockMode := r.Header.Get("x-amz-object-lock-mode"); lockMode != "" {
+			opts.RetentionMode = lockMode
+		}
+		if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
+			t, err := time.Parse(time.RFC3339, retainUntil)
+			if err == nil {
+				opts.RetainUntilDate = &t
+			}
+		}
+		if legalHold := r.Header.Get("x-amz-object-lock-legal-hold"); legalHold != "" {
+			opts.LegalHoldStatus = legalHold
 		}
 
 		obj, err := h.backend.PutObject(bucketName, key, data, opts)
 		if err != nil {
+			if errors.Is(err, backend.ErrInvalidRequest) {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidRequest",
+					"Bucket is missing Object Lock Configuration",
+				)
+				return
+			}
 			backend.WriteError(
 				w,
 				http.StatusNotFound,
@@ -488,6 +593,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Set custom metadata headers
 		setMetadataHeaders(w, obj.Metadata)
+
+		// Apply response header overrides from query parameters
+		applyResponseOverrides(w, r)
 
 		// Handle Range request
 		rangeHeader := r.Header.Get("Range")
@@ -625,6 +733,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Set custom metadata headers
 		setMetadataHeaders(w, obj.Metadata)
+
+		// Apply response header overrides from query parameters
+		applyResponseOverrides(w, r)
 		w.WriteHeader(http.StatusOK)
 
 	default:
@@ -770,6 +881,55 @@ func (h *Handler) handleCopyObject(
 		metadataDirective = "COPY"
 	}
 
+	// Evaluate copy source conditional headers if any are present
+	if r.Header.Get("x-amz-copy-source-if-match") != "" ||
+		r.Header.Get("x-amz-copy-source-if-none-match") != "" ||
+		r.Header.Get("x-amz-copy-source-if-modified-since") != "" ||
+		r.Header.Get("x-amz-copy-source-if-unmodified-since") != "" {
+		var srcObj *backend.Object
+		var err error
+		if srcVersionId != "" {
+			srcObj, err = h.backend.GetObjectVersion(srcBucket, srcKey, srcVersionId)
+		} else {
+			srcObj, err = h.backend.GetObject(srcBucket, srcKey)
+		}
+		if err != nil {
+			if errors.Is(err, backend.ErrBucketNotFound) {
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchBucket",
+					"The specified bucket does not exist.",
+				)
+			} else if errors.Is(err, backend.ErrVersionNotFound) {
+				backend.WriteError(w, http.StatusNotFound, "NoSuchVersion", "The specified version does not exist.")
+			} else {
+				backend.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+			}
+			return
+		}
+		if srcObj.IsDeleteMarker {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified key does not exist.",
+			)
+			return
+		}
+
+		condResult := evaluateCopySourceConditionals(r, srcObj)
+		if condResult.ShouldReturn {
+			backend.WriteError(
+				w,
+				condResult.StatusCode,
+				"PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold",
+			)
+			return
+		}
+	}
+
 	// Check for self-copy without REPLACE
 	if srcBucket == dstBucket && srcKey == dstKey && metadataDirective != "REPLACE" {
 		backend.WriteError(
@@ -781,9 +941,16 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
+	// Get tagging directive
+	taggingDirective := r.Header.Get("x-amz-tagging-directive")
+	if taggingDirective == "" {
+		taggingDirective = "COPY"
+	}
+
 	// Build copy options
 	opts := backend.CopyObjectOptions{
 		MetadataDirective: metadataDirective,
+		TaggingDirective:  taggingDirective,
 	}
 
 	// If REPLACE, extract new metadata from request headers
@@ -795,6 +962,11 @@ func (h *Handler) handleCopyObject(
 		opts.ContentEncoding = r.Header.Get("Content-Encoding")
 		opts.ContentLanguage = r.Header.Get("Content-Language")
 		opts.ContentDisposition = r.Header.Get("Content-Disposition")
+	}
+
+	// If tagging directive is REPLACE, extract new tags from request header
+	if taggingDirective == "REPLACE" {
+		opts.Tags = parseTaggingHeader(r.Header.Get("x-amz-tagging"))
 	}
 
 	obj, srcVersionIdUsed, err := h.backend.CopyObject(
