@@ -376,7 +376,7 @@ func DefaultOwner() *Owner {
 func NewDefaultACL() *AccessControlPolicy {
 	owner := DefaultOwner()
 	return &AccessControlPolicy{
-		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns: S3Xmlns,
 		Owner: owner,
 		AccessControlList: AccessControlList{
 			Grants: []Grant{
@@ -410,7 +410,7 @@ func newGroupGrant(uri, permission string) Grant {
 func CannedACLToPolicy(cannedACL string) *AccessControlPolicy {
 	owner := DefaultOwner()
 	acl := &AccessControlPolicy{
-		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns: S3Xmlns,
 		Owner: owner,
 		AccessControlList: AccessControlList{
 			Grants: []Grant{

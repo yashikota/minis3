@@ -37,7 +37,7 @@ func (h *Handler) handleGetObjectLockConfiguration(
 		return
 	}
 
-	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(config)
@@ -138,7 +138,7 @@ func (h *Handler) handleGetObjectRetention(
 		return
 	}
 
-	retention.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	retention.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(retention)
@@ -270,7 +270,7 @@ func (h *Handler) handleGetObjectLegalHold(
 		return
 	}
 
-	legalHold.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	legalHold.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(legalHold)

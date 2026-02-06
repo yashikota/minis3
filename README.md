@@ -51,11 +51,11 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 
 | Operation | Status | Unsupported Features |
 | --------- | ------ | -------------------- |
-| PutObject | ⚠️ | StorageClass, WebsiteRedirectLocation, Tagging, ChecksumAlgorithm |
-| GetObject | ⚠️ | ResponseCacheControl, ResponseContentDisposition, ResponseContentEncoding, ResponseContentLanguage, ResponseContentType, ResponseExpires, PartNumber, ChecksumMode |
-| DeleteObject | ⚠️ | MFA Delete (API format only) |
+| PutObject | ⚠️ | WebsiteRedirectLocation, ChecksumAlgorithm |
+| GetObject | ⚠️ | PartNumber, ChecksumMode |
+| DeleteObject | ✅ | |
 | DeleteObjects | ✅ | |
-| CopyObject | ⚠️ | CopySourceIfMatch, CopySourceIfModifiedSince, CopySourceIfNoneMatch, CopySourceIfUnmodifiedSince, TaggingDirective, StorageClass, WebsiteRedirectLocation, Tagging, ChecksumAlgorithm |
+| CopyObject | ⚠️ | WebsiteRedirectLocation, ChecksumAlgorithm |
 | HeadObject | ⚠️ | PartNumber, ChecksumMode |
 | ListObjects | ⚠️ | RequestPayer, OptionalObjectAttributes |
 | ListObjectsV2 | ⚠️ | FetchOwner, OptionalObjectAttributes |
@@ -89,6 +89,20 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 | ListMultipartUploads | ✅ | |
 | ListParts | ✅ | |
 | UploadPartCopy | ✅ | CopySourceSSECustomerAlgorithm, CopySourceSSECustomerKey, CopySourceSSECustomerKeyMD5, SSECustomerAlgorithm, SSECustomerKey, SSECustomerKeyMD5 |
+
+### Additional Features
+
+- **Conditional Headers:** If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since (for GetObject/HeadObject)
+- **Presigned URLs:** SigV4 and SigV2 presigned URL verification
+- **AWS Chunked Encoding:** Transparent decoding of `aws-chunked` transfer encoding
+- **Response Header Overrides:** GetObject query parameters (`response-content-type`, `response-content-disposition`, etc.)
+- **Copy Source Conditionals:** `x-amz-copy-source-if-match`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-unmodified-since`
+- **Object Lock Enforcement:** Delete-time retention/legal hold checks with `x-amz-bypass-governance-retention` support
+- **StorageClass:** Supported on PutObject, CopyObject, and multipart uploads
+- **SSE Headers:** Server-side encryption headers are stored and returned (mock only, no actual encryption)
+- **Request IDs:** `x-amz-request-id` and `x-amz-id-2` headers on every response
+- **Metadata/Tagging Directives:** `x-amz-metadata-directive` and `x-amz-tagging-directive` for CopyObject
+- **Content-Type Default:** Defaults to `application/octet-stream` when not specified
 
 ## Installation
 

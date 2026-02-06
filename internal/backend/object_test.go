@@ -683,6 +683,63 @@ func TestServerSideEncryptionFields(t *testing.T) {
 	})
 }
 
+func TestContentTypeDefault(t *testing.T) {
+	b := New()
+	_ = b.CreateBucket("test-bucket")
+
+	t.Run("default application/octet-stream when not specified", func(t *testing.T) {
+		obj, err := b.PutObject("test-bucket", "no-ct", []byte("data"), PutObjectOptions{})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+		if obj.ContentType != "application/octet-stream" {
+			t.Errorf("expected application/octet-stream, got %q", obj.ContentType)
+		}
+	})
+
+	t.Run("explicit content-type is preserved", func(t *testing.T) {
+		obj, err := b.PutObject("test-bucket", "with-ct", []byte("data"), PutObjectOptions{
+			ContentType: "text/plain",
+		})
+		if err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+		if obj.ContentType != "text/plain" {
+			t.Errorf("expected text/plain, got %q", obj.ContentType)
+		}
+	})
+
+	t.Run("CopyObject REPLACE without content-type defaults", func(t *testing.T) {
+		_, _ = b.PutObject("test-bucket", "src", []byte("data"), PutObjectOptions{
+			ContentType: "image/png",
+		})
+		copied, _, err := b.CopyObject("test-bucket", "src", "", "test-bucket", "dst-replace", CopyObjectOptions{
+			MetadataDirective: "REPLACE",
+		})
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+		if copied.ContentType != "application/octet-stream" {
+			t.Errorf("expected application/octet-stream, got %q", copied.ContentType)
+		}
+	})
+
+	t.Run("CopyObject COPY preserves source content-type", func(t *testing.T) {
+		_, _ = b.PutObject("test-bucket", "src2", []byte("data"), PutObjectOptions{
+			ContentType: "image/png",
+		})
+		copied, _, err := b.CopyObject("test-bucket", "src2", "", "test-bucket", "dst-copy", CopyObjectOptions{
+			MetadataDirective: "COPY",
+		})
+		if err != nil {
+			t.Fatalf("CopyObject failed: %v", err)
+		}
+		if copied.ContentType != "image/png" {
+			t.Errorf("expected image/png, got %q", copied.ContentType)
+		}
+	})
+}
+
 func TestCopyObjectWithTaggingDirective(t *testing.T) {
 	b := New()
 	_ = b.CreateBucket("bucket")

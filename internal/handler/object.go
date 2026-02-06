@@ -864,7 +864,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	resp := backend.DeleteResult{
-		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns: backend.S3Xmlns,
 	}
 
 	for _, result := range results {
@@ -1289,7 +1289,7 @@ func (h *Handler) handleGetObjectTagging(
 	}
 
 	resp := backend.Tagging{
-		Xmlns:  "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:  backend.S3Xmlns,
 		TagSet: tagSet,
 	}
 
@@ -1482,7 +1482,7 @@ func (h *Handler) handleGetObjectAttributes(
 
 	// Build response based on requested attributes
 	resp := backend.GetObjectAttributesResponse{
-		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns: backend.S3Xmlns,
 	}
 
 	if requestedAttrs["ETag"] {

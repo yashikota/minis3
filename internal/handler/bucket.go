@@ -304,7 +304,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	resp := backend.ListBucketV2Result{
-		Xmlns:                 "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:                 backend.S3Xmlns,
 		Name:                  bucketName,
 		Prefix:                prefix,
 		Delimiter:             delimiter,
@@ -395,7 +395,7 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	resp := backend.ListBucketV1Result{
-		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:       backend.S3Xmlns,
 		Name:        bucketName,
 		Prefix:      prefix,
 		Marker:      marker,
@@ -496,7 +496,7 @@ func (h *Handler) handleListObjectVersions(
 	}
 
 	resp := backend.ListVersionsResult{
-		Xmlns:               "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:               backend.S3Xmlns,
 		IsTruncated:         result.IsTruncated,
 		KeyMarker:           keyMarker,
 		VersionIdMarker:     versionIdMarker,
@@ -583,7 +583,7 @@ func (h *Handler) handleGetBucketVersioning(
 	}
 
 	resp := backend.VersioningConfiguration{
-		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns: backend.S3Xmlns,
 	}
 
 	// Only include Status if versioning has been configured
@@ -751,7 +751,7 @@ func (h *Handler) handleGetBucketLocation(
 	}
 
 	resp := backend.LocationConstraint{
-		Xmlns:              "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:              backend.S3Xmlns,
 		LocationConstraint: location,
 	}
 
@@ -794,7 +794,7 @@ func (h *Handler) handleGetBucketTagging(
 	}
 
 	resp := backend.Tagging{
-		Xmlns: "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns: backend.S3Xmlns,
 	}
 	// Sort keys for deterministic output
 	keys := make([]string, 0, len(tags))
@@ -1129,7 +1129,7 @@ func (h *Handler) handleGetBucketLifecycleConfiguration(
 		return
 	}
 
-	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(config)
@@ -1238,7 +1238,7 @@ func (h *Handler) handleGetBucketEncryption(
 		return
 	}
 
-	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(config)
@@ -1347,7 +1347,7 @@ func (h *Handler) handleGetBucketCORS(
 		return
 	}
 
-	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(config)
@@ -1456,7 +1456,7 @@ func (h *Handler) handleGetBucketWebsite(
 		return
 	}
 
-	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(config)
@@ -1565,7 +1565,7 @@ func (h *Handler) handleGetPublicAccessBlock(
 		return
 	}
 
-	config.Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xml.Marshal(config)

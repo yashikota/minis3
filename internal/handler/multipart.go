@@ -71,7 +71,7 @@ func (h *Handler) handleCreateMultipartUpload(
 	}
 
 	resp := backend.InitiateMultipartUploadResult{
-		Xmlns:    "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:    backend.S3Xmlns,
 		Bucket:   bucketName,
 		Key:      key,
 		UploadId: upload.UploadId,
@@ -219,7 +219,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 	location := "http://" + r.Host + "/" + bucketName + "/" + key
 
 	resp := backend.CompleteMultipartUploadResult{
-		Xmlns:    "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:    backend.S3Xmlns,
 		Location: location,
 		Bucket:   bucketName,
 		Key:      key,
@@ -315,7 +315,7 @@ func (h *Handler) handleListMultipartUploads(
 
 	owner := backend.DefaultOwner()
 	resp := backend.ListMultipartUploadsResult{
-		Xmlns:              "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:              backend.S3Xmlns,
 		Bucket:             bucketName,
 		KeyMarker:          opts.KeyMarker,
 		UploadIdMarker:     opts.UploadIdMarker,
@@ -423,7 +423,7 @@ func (h *Handler) handleListParts(
 		storageClass = "STANDARD"
 	}
 	resp := backend.ListPartsResult{
-		Xmlns:                "http://s3.amazonaws.com/doc/2006-03-01/",
+		Xmlns:                backend.S3Xmlns,
 		Bucket:               bucketName,
 		Key:                  key,
 		UploadId:             uploadId,

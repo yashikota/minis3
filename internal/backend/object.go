@@ -183,6 +183,11 @@ func (b *Backend) PutObject(
 		versionId = NullVersionId
 	}
 
+	contentType := opts.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
 	storageClass := opts.StorageClass
 	if storageClass == "" {
 		storageClass = "STANDARD"
@@ -196,7 +201,7 @@ func (b *Backend) PutObject(
 		LastModified:         time.Now().UTC(),
 		ETag:                 fmt.Sprintf("\"%x\"", md5Hash.Sum(nil)),
 		Size:                 int64(len(data)),
-		ContentType:          opts.ContentType,
+		ContentType:          contentType,
 		Data:                 data,
 		ChecksumCRC32:        base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
 		Metadata:             opts.Metadata,
@@ -451,7 +456,11 @@ func (b *Backend) CopyObject(
 	// Handle metadata directive
 	if opts.MetadataDirective == "REPLACE" {
 		// Use new metadata from options
-		obj.ContentType = opts.ContentType
+		contentType := opts.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		obj.ContentType = contentType
 		obj.Metadata = opts.Metadata
 		obj.CacheControl = opts.CacheControl
 		obj.Expires = opts.Expires

@@ -54,3 +54,16 @@ Must use `UsePathStyle = true` in AWS SDK client options (virtual-hosted style n
 **Object Lock Operations:** GetObjectLockConfiguration, PutObjectLockConfiguration, GetObjectRetention, PutObjectRetention, GetObjectLegalHold, PutObjectLegalHold.
 
 **Multipart Upload Operations:** CreateMultipartUpload, UploadPart, UploadPartCopy, CompleteMultipartUpload, AbortMultipartUpload, ListMultipartUploads, ListParts.
+
+**Presigned URLs:** SigV4 / SigV2 presigned URL verification.
+
+**Additional Features:**
+- AWS chunked encoding
+- Response header overrides (GetObject query params)
+- Copy source conditional headers (x-amz-copy-source-if-match, etc.)
+- Object Lock enforcement on delete (bypass-governance-retention)
+- StorageClass support
+- SSE header support (mock: store and return, no actual encryption)
+- x-amz-request-id / x-amz-id-2 headers
+- Metadata/Tagging directives in CopyObject
+- Content-Type default to application/octet-stream

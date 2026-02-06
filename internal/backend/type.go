@@ -445,6 +445,9 @@ type ObjectLockLegalHold struct {
 	Status  string   `xml:"Status"` // ON or OFF
 }
 
+// S3Xmlns is the standard S3 XML namespace used in API responses.
+const S3Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
+
 // Object Lock mode constants.
 const (
 	RetentionModeGovernance = "GOVERNANCE"
