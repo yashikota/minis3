@@ -17,13 +17,24 @@ func TestObjectDeleteObjectsHandler(t *testing.T) {
 	mustPutObject(t, b, "obj-bucket", "a.txt", "A")
 
 	t.Run("malformed xml", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodPost, "http://example.test/obj-bucket?delete", "<bad", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodPost, "http://example.test/obj-bucket?delete", "<bad", nil),
+		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "MalformedXML")
 	})
 
 	t.Run("empty objects", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodPost, "http://example.test/obj-bucket?delete", `<Delete></Delete>`, nil))
+		w := doRequest(
+			h,
+			newRequest(
+				http.MethodPost,
+				"http://example.test/obj-bucket?delete",
+				`<Delete></Delete>`,
+				nil,
+			),
+		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "MalformedXML")
 	})
@@ -35,7 +46,10 @@ func TestObjectDeleteObjectsHandler(t *testing.T) {
 			sb.WriteString(`<Object><Key>k</Key></Object>`)
 		}
 		sb.WriteString(`</Delete>`)
-		w := doRequest(h, newRequest(http.MethodPost, "http://example.test/obj-bucket?delete", sb.String(), nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodPost, "http://example.test/obj-bucket?delete", sb.String(), nil),
+		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "MalformedXML")
 	})
@@ -49,7 +63,10 @@ func TestObjectDeleteObjectsHandler(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		body := `<Delete><Object><Key>a.txt</Key></Object></Delete>`
-		w := doRequest(h, newRequest(http.MethodPost, "http://example.test/obj-bucket?delete", body, nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodPost, "http://example.test/obj-bucket?delete", body, nil),
+		)
 		requireStatus(t, w, http.StatusOK)
 	})
 }
@@ -124,7 +141,7 @@ func TestObjectCopyHandler(t *testing.T) {
 				"http://example.test/dst/copied",
 				"",
 				map[string]string{
-					"x-amz-copy-source":       "/src/key",
+					"x-amz-copy-source":        "/src/key",
 					"x-amz-metadata-directive": "REPLACE",
 					"Content-Type":             "text/plain",
 				},
@@ -182,13 +199,19 @@ func TestObjectACLAndTaggingHandlers(t *testing.T) {
 	})
 
 	t.Run("tagging get not found", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/obj/missing?tagging", "", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/obj/missing?tagging", "", nil),
+		)
 		requireStatus(t, w, http.StatusNotFound)
 		requireS3ErrorCode(t, w, "NoSuchKey")
 	})
 
 	t.Run("tagging put malformed xml", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodPut, "http://example.test/obj/k?tagging", "<bad", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/obj/k?tagging", "<bad", nil),
+		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "MalformedXML")
 	})
@@ -200,18 +223,30 @@ func TestObjectACLAndTaggingHandlers(t *testing.T) {
 			sb.WriteString(fmt.Sprintf(`<Tag><Key>k%d</Key><Value>v</Value></Tag>`, i))
 		}
 		sb.WriteString(`</TagSet></Tagging>`)
-		w := doRequest(h, newRequest(http.MethodPut, "http://example.test/obj/k?tagging", sb.String(), nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/obj/k?tagging", sb.String(), nil),
+		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "InvalidTag")
 	})
 
 	t.Run("tagging put/get/delete success", func(t *testing.T) {
 		payload := `<Tagging><TagSet><Tag><Key>a</Key><Value>b</Value></Tag></TagSet></Tagging>`
-		wPut := doRequest(h, newRequest(http.MethodPut, "http://example.test/obj/k?tagging", payload, nil))
+		wPut := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/obj/k?tagging", payload, nil),
+		)
 		requireStatus(t, wPut, http.StatusOK)
-		wGet := doRequest(h, newRequest(http.MethodGet, "http://example.test/obj/k?tagging", "", nil))
+		wGet := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/obj/k?tagging", "", nil),
+		)
 		requireStatus(t, wGet, http.StatusOK)
-		wDel := doRequest(h, newRequest(http.MethodDelete, "http://example.test/obj/k?tagging", "", nil))
+		wDel := doRequest(
+			h,
+			newRequest(http.MethodDelete, "http://example.test/obj/k?tagging", "", nil),
+		)
 		requireStatus(t, wDel, http.StatusNoContent)
 	})
 
@@ -231,7 +266,10 @@ func TestGetObjectAttributesHandler(t *testing.T) {
 	mustPutObject(t, b, "attrs", "obj", "data")
 
 	t.Run("missing attributes header", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/attrs/obj?attributes", "", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/attrs/obj?attributes", "", nil),
+		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "InvalidArgument")
 	})

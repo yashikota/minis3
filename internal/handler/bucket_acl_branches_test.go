@@ -15,26 +15,43 @@ func TestHandlePutBucketACLBranches(t *testing.T) {
 	t.Run("access denied for non-owner", func(t *testing.T) {
 		w := doRequest(
 			h,
-			newRequest(http.MethodPut, "http://example.test/acl-bucket?acl", "", map[string]string{"x-amz-acl": "private"}),
+			newRequest(
+				http.MethodPut,
+				"http://example.test/acl-bucket?acl",
+				"",
+				map[string]string{"x-amz-acl": "private"},
+			),
 		)
 		requireStatus(t, w, http.StatusForbidden)
 		requireS3ErrorCode(t, w, "AccessDenied")
 	})
 
-	headers := map[string]string{"Authorization": "AWS minis3-access-key:sig", "x-amz-acl": "private"}
+	headers := map[string]string{
+		"Authorization": "AWS minis3-access-key:sig",
+		"x-amz-acl":     "private",
+	}
 	t.Run("canned acl success", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodPut, "http://example.test/acl-bucket?acl", "", headers))
+		w := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/acl-bucket?acl", "", headers),
+		)
 		requireStatus(t, w, http.StatusOK)
 	})
 
 	t.Run("canned acl no such bucket", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodPut, "http://example.test/missing?acl", "", headers))
+		w := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/missing?acl", "", headers),
+		)
 		requireStatus(t, w, http.StatusNotFound)
 		requireS3ErrorCode(t, w, "NoSuchBucket")
 	})
 
 	t.Run("block public acls canned", func(t *testing.T) {
-		if err := b.PutPublicAccessBlock("acl-bucket", &backend.PublicAccessBlockConfiguration{BlockPublicAcls: true}); err != nil {
+		if err := b.PutPublicAccessBlock(
+			"acl-bucket",
+			&backend.PublicAccessBlockConfiguration{BlockPublicAcls: true},
+		); err != nil {
 			t.Fatalf("PutPublicAccessBlock failed: %v", err)
 		}
 		w := doRequest(
@@ -43,7 +60,10 @@ func TestHandlePutBucketACLBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/acl-bucket?acl",
 				"",
-				map[string]string{"Authorization": "AWS minis3-access-key:sig", "x-amz-acl": "public-read"},
+				map[string]string{
+					"Authorization": "AWS minis3-access-key:sig",
+					"x-amz-acl":     "public-read",
+				},
 			),
 		)
 		requireStatus(t, w, http.StatusForbidden)
@@ -51,7 +71,12 @@ func TestHandlePutBucketACLBranches(t *testing.T) {
 	})
 
 	t.Run("block public acls xml body", func(t *testing.T) {
-		payload := `<AccessControlPolicy><Owner><ID>0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</ID></Owner><AccessControlList><Grant><Grantee xsi:type="Group" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><URI>` + backend.AllUsersURI + `</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>`
+		payload := `<AccessControlPolicy><Owner><ID>` +
+			`0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</ID></Owner>` +
+			`<AccessControlList><Grant><Grantee xsi:type="Group" ` +
+			`xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><URI>` +
+			backend.AllUsersURI +
+			`</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>`
 		w := doRequest(
 			h,
 			newRequest(

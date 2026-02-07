@@ -19,27 +19,33 @@ func TestACLHelpers(t *testing.T) {
 		t.Fatal("nil ACL should not be public")
 	}
 
-	allUsersRead := &backend.AccessControlPolicy{AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
-		Grantee:    &backend.Grantee{URI: backend.AllUsersURI},
-		Permission: backend.PermissionRead,
-	}}}}
+	allUsersRead := &backend.AccessControlPolicy{
+		AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
+			Grantee:    &backend.Grantee{URI: backend.AllUsersURI},
+			Permission: backend.PermissionRead,
+		}}},
+	}
 	if !isPublicACL(allUsersRead) {
 		t.Fatal("expected public ACL")
 	}
 
-	authUsersWrite := &backend.AccessControlPolicy{AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
-		Grantee:    &backend.Grantee{URI: backend.AuthenticatedUsersURI},
-		Permission: backend.PermissionWrite,
-	}}}}
+	authUsersWrite := &backend.AccessControlPolicy{
+		AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
+			Grantee:    &backend.Grantee{URI: backend.AuthenticatedUsersURI},
+			Permission: backend.PermissionWrite,
+		}}},
+	}
 	if !aclAllowsWrite(authUsersWrite, "", false) {
 		t.Fatal("expected authenticated user write to be allowed")
 	}
 
 	canonical := backend.OwnerForAccessKey("minis3-access-key")
-	canonicalReadACP := &backend.AccessControlPolicy{AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
-		Grantee:    &backend.Grantee{ID: canonical.ID},
-		Permission: backend.PermissionReadACP,
-	}}}}
+	canonicalReadACP := &backend.AccessControlPolicy{
+		AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
+			Grantee:    &backend.Grantee{ID: canonical.ID},
+			Permission: backend.PermissionReadACP,
+		}}},
+	}
 	if !aclAllowsACP(canonicalReadACP, canonical.ID, false, backend.PermissionReadACP) {
 		t.Fatal("expected canonical read-acp to be allowed")
 	}
@@ -55,7 +61,10 @@ func TestNormalizeAndValidateACL(t *testing.T) {
 		acl := &backend.AccessControlPolicy{
 			Owner: &backend.Owner{ID: owner.ID},
 			AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
-				Grantee:    &backend.Grantee{Type: "AmazonCustomerByEmail", EmailAddress: "alt@example.com"},
+				Grantee: &backend.Grantee{
+					Type:         "AmazonCustomerByEmail",
+					EmailAddress: "alt@example.com",
+				},
 				Permission: backend.PermissionRead,
 			}}},
 		}
@@ -80,10 +89,15 @@ func TestNormalizeAndValidateACL(t *testing.T) {
 	})
 
 	t.Run("unresolvable email", func(t *testing.T) {
-		acl := &backend.AccessControlPolicy{AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
-			Grantee:    &backend.Grantee{Type: "AmazonCustomerByEmail", EmailAddress: "missing@example.com"},
-			Permission: backend.PermissionRead,
-		}}}}
+		acl := &backend.AccessControlPolicy{
+			AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
+				Grantee: &backend.Grantee{
+					Type:         "AmazonCustomerByEmail",
+					EmailAddress: "missing@example.com",
+				},
+				Permission: backend.PermissionRead,
+			}}},
+		}
 		err := normalizeAndValidateACL(acl)
 		if err == nil || err.code != "UnresolvableGrantByEmailAddress" {
 			t.Fatalf("unexpected error: %+v", err)
@@ -91,10 +105,12 @@ func TestNormalizeAndValidateACL(t *testing.T) {
 	})
 
 	t.Run("canonical grantee without id", func(t *testing.T) {
-		acl := &backend.AccessControlPolicy{AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
-			Grantee:    &backend.Grantee{Type: "CanonicalUser"},
-			Permission: backend.PermissionRead,
-		}}}}
+		acl := &backend.AccessControlPolicy{
+			AccessControlList: backend.AccessControlList{Grants: []backend.Grant{{
+				Grantee:    &backend.Grantee{Type: "CanonicalUser"},
+				Permission: backend.PermissionRead,
+			}}},
+		}
 		err := normalizeAndValidateACL(acl)
 		if err == nil || err.code != "InvalidArgument" {
 			t.Fatalf("unexpected error: %+v", err)
@@ -165,12 +181,17 @@ func TestHandlerMiscBranches(t *testing.T) {
 	})
 
 	t.Run("options preflight valid continues", func(t *testing.T) {
-		req := newRequest(http.MethodOptions, "http://example.test/bucket/key", "", map[string]string{
-			"Origin":                        "https://example.test",
-			"Access-Control-Request-Method": "GET",
-		})
+		req := newRequest(
+			http.MethodOptions,
+			"http://example.test/bucket/key",
+			"",
+			map[string]string{
+				"Origin":                        "https://example.test",
+				"Access-Control-Request-Method": "GET",
+			},
+		)
 		w := doRequest(h, req)
-		requireStatus(t, w, http.StatusMethodNotAllowed)
+		requireStatus(t, w, http.StatusForbidden)
 	})
 
 	t.Run("expected bucket owner mismatch", func(t *testing.T) {

@@ -47,7 +47,10 @@ func TestHandleService(t *testing.T) {
 	t.Run("list buckets pagination params", func(t *testing.T) {
 		req := newRequest(
 			http.MethodGet,
-			fmt.Sprintf("http://example.test/?prefix=svc&continuation-token=%s&max-buckets=1", "svc-a"),
+			fmt.Sprintf(
+				"http://example.test/?prefix=svc&continuation-token=%s&max-buckets=1",
+				"svc-a",
+			),
 			"",
 			nil,
 		)

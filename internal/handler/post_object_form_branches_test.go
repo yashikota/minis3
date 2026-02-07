@@ -107,10 +107,10 @@ func TestHandlePostObjectFormUploadBranches(t *testing.T) {
 			t,
 			"http://example.test/form-bucket",
 			map[string]string{
-				"key":           "k",
+				"key":            "k",
 				"AWSAccessKeyId": "minis3-access-key",
-				"policy":        policy,
-				"signature":     "bad",
+				"policy":         policy,
+				"signature":      "bad",
 			},
 			true,
 		)
@@ -155,7 +155,12 @@ func TestHandlePostObjectFormUploadBranches(t *testing.T) {
 	})
 
 	t.Run("success default status", func(t *testing.T) {
-		req := makeMultipartReq(t, "http://example.test/form-bucket", map[string]string{"key": "final"}, true)
+		req := makeMultipartReq(
+			t,
+			"http://example.test/form-bucket",
+			map[string]string{"key": "final"},
+			true,
+		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusNoContent)
 	})
