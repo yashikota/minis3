@@ -145,9 +145,6 @@ func (b *Backend) CompleteMultipartUpload(
 		return nil, ErrInvalidPart
 	}
 	normalizedParts := normalizeCompleteParts(parts)
-	if len(normalizedParts) == 0 {
-		return nil, ErrInvalidPart
-	}
 
 	// Validate parts are in ascending order and exist
 	var lastPartNumber int

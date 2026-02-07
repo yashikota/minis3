@@ -45,11 +45,6 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 		}
 
 		updated := bucket.Objects[key]
-		if updated == nil || len(updated.Versions) == 0 {
-			delete(bucket.Objects, key)
-			continue
-		}
-
 		updated.Versions = applyNoncurrentExpirationRules(
 			key,
 			updated.Versions,
