@@ -209,3 +209,110 @@ func TestApplyLifecycleDeletesExpiredObjectDeleteMarker(t *testing.T) {
 		t.Fatalf("expected test2/abc to remain with 2 versions, got %+v", versions)
 	}
 }
+
+func TestApplyLifecycleDeletesOrphanDeleteMarkerAfterExpirationDays(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("lifecycle-delete-marker-days"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	if err := b.SetBucketVersioning("lifecycle-delete-marker-days", VersioningEnabled, MFADeleteDisabled); err != nil {
+		t.Fatalf("SetBucketVersioning failed: %v", err)
+	}
+
+	if _, err := b.PutObject("lifecycle-delete-marker-days", "test1/a", []byte("a"), PutObjectOptions{}); err != nil {
+		t.Fatalf("PutObject test1/a failed: %v", err)
+	}
+	if _, err := b.DeleteObject("lifecycle-delete-marker-days", "test1/a", false); err != nil {
+		t.Fatalf("DeleteObject test1/a failed: %v", err)
+	}
+
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				ID:     "rule1",
+				Status: LifecycleStatusEnabled,
+				Prefix: "test1/",
+				NoncurrentVersionExpiration: &NoncurrentVersionExpiration{
+					NoncurrentDays: 1,
+				},
+				Expiration: &LifecycleExpiration{
+					Days: 5,
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("lifecycle-delete-marker-days", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+	}
+
+	bucket, ok := b.GetBucket("lifecycle-delete-marker-days")
+	if !ok || bucket == nil {
+		t.Fatal("GetBucket failed")
+	}
+	dmTime := bucket.Objects["test1/a"].Versions[0].LastModified
+
+	// Before 5 debug-days (5 * 10 seconds), delete marker should remain.
+	b.ApplyLifecycle(dmTime.Add(40*time.Second), 10*time.Second)
+	if versions, exists := bucket.Objects["test1/a"]; !exists || len(versions.Versions) != 1 {
+		t.Fatalf("expected delete marker to remain before expiration, got %+v", versions)
+	}
+
+	// After 5 debug-days, delete marker should expire.
+	b.ApplyLifecycle(dmTime.Add(60*time.Second), 10*time.Second)
+	if _, exists := bucket.Objects["test1/a"]; exists {
+		t.Fatalf("expected delete marker to expire after 5 debug-days, got %+v", bucket.Objects["test1/a"])
+	}
+}
+
+func TestApplyLifecycleAbortsIncompleteMultipartUpload(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("lifecycle-multipart"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	up1, err := b.CreateMultipartUpload(
+		"lifecycle-multipart",
+		"test1/a",
+		CreateMultipartUploadOptions{},
+	)
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload test1/a failed: %v", err)
+	}
+	up2, err := b.CreateMultipartUpload(
+		"lifecycle-multipart",
+		"test2/",
+		CreateMultipartUploadOptions{},
+	)
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload test2/ failed: %v", err)
+	}
+
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				ID:     "rule1",
+				Status: LifecycleStatusEnabled,
+				Prefix: "test1/",
+				AbortIncompleteMultipartUpload: &AbortIncompleteMultipartUpload{
+					DaysAfterInitiation: 2,
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("lifecycle-multipart", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+	}
+
+	initiated, err := time.Parse(time.RFC3339, up1.Initiated)
+	if err != nil {
+		t.Fatalf("failed to parse upload initiation time: %v", err)
+	}
+	b.ApplyLifecycle(initiated.Add(25*time.Second), 10*time.Second)
+
+	if _, ok := b.GetUpload(up1.UploadId); ok {
+		t.Fatal("expected test1/a multipart upload to be aborted")
+	}
+	if _, ok := b.GetUpload(up2.UploadId); !ok {
+		t.Fatal("expected test2/ multipart upload to remain")
+	}
+}

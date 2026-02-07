@@ -22,6 +22,7 @@ func (b *Backend) ApplyLifecycle(now time.Time, dayDuration time.Duration) {
 		}
 		b.applyBucketLifecycle(bucket, now, dayDuration)
 	}
+	b.applyMultipartLifecycle(now, dayDuration)
 }
 
 func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuration time.Duration) {
@@ -59,7 +60,13 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 			delete(bucket.Objects, key)
 			continue
 		}
-		if shouldDeleteExpiredObjectDeleteMarker(key, updated.Versions, bucket.LifecycleConfiguration.Rules) {
+		if shouldDeleteExpiredObjectDeleteMarker(
+			key,
+			updated.Versions,
+			bucket.LifecycleConfiguration.Rules,
+			now,
+			dayDuration,
+		) {
 			delete(bucket.Objects, key)
 			continue
 		}
@@ -251,6 +258,8 @@ func shouldDeleteExpiredObjectDeleteMarker(
 	key string,
 	versions []*Object,
 	rules []LifecycleRule,
+	now time.Time,
+	dayDuration time.Duration,
 ) bool {
 	if len(versions) == 0 || !versions[0].IsDeleteMarker {
 		return false
@@ -261,11 +270,30 @@ func shouldDeleteExpiredObjectDeleteMarker(
 
 	currentDeleteMarker := versions[0]
 	for _, rule := range rules {
-		if !isLifecycleRuleEnabled(rule) || rule.Expiration == nil || !rule.Expiration.ExpiredObjectDeleteMarker {
+		if !isLifecycleRuleEnabled(rule) || rule.Expiration == nil {
 			continue
 		}
-		if lifecycleRuleMatchesObject(rule, key, currentDeleteMarker) {
+		if !lifecycleRuleMatchesObject(rule, key, currentDeleteMarker) {
+			continue
+		}
+
+		expiration := rule.Expiration
+		if expiration.ExpiredObjectDeleteMarker {
 			return true
+		}
+		if expiration.Days > 0 {
+			if !currentDeleteMarker.LastModified.Add(
+				time.Duration(expiration.Days) * dayDuration,
+			).After(now) {
+				return true
+			}
+			continue
+		}
+		if expiration.Date != "" {
+			expiryDate, err := parseLifecycleDate(expiration.Date)
+			if err == nil && !expiryDate.After(now) {
+				return true
+			}
 		}
 	}
 	return false
@@ -278,6 +306,75 @@ func hasNonDeleteVersion(versions []*Object) bool {
 		}
 	}
 	return false
+}
+
+func (b *Backend) applyMultipartLifecycle(now time.Time, dayDuration time.Duration) {
+	for uploadID, upload := range b.uploads {
+		if upload == nil {
+			continue
+		}
+		bucket, ok := b.buckets[upload.Bucket]
+		if !ok || bucket.LifecycleConfiguration == nil {
+			continue
+		}
+		initiated, err := time.Parse(time.RFC3339, upload.Initiated)
+		if err != nil {
+			continue
+		}
+
+		for _, rule := range bucket.LifecycleConfiguration.Rules {
+			abort := rule.AbortIncompleteMultipartUpload
+			if !isLifecycleRuleEnabled(rule) || abort == nil || abort.DaysAfterInitiation <= 0 {
+				continue
+			}
+			if !lifecycleRuleMatchesUpload(rule, upload) {
+				continue
+			}
+			expireAt := initiated.Add(time.Duration(abort.DaysAfterInitiation) * dayDuration)
+			if !expireAt.After(now) {
+				delete(b.uploads, uploadID)
+				break
+			}
+		}
+	}
+}
+
+func lifecycleRuleMatchesUpload(rule LifecycleRule, upload *MultipartUpload) bool {
+	if upload == nil {
+		return false
+	}
+	key := upload.Key
+	if rule.Prefix != "" && !strings.HasPrefix(key, rule.Prefix) {
+		return false
+	}
+	if rule.Filter == nil {
+		return true
+	}
+	if rule.Filter.Prefix != "" && !strings.HasPrefix(key, rule.Filter.Prefix) {
+		return false
+	}
+	if rule.Filter.Tag != nil && !uploadHasTag(upload, *rule.Filter.Tag) {
+		return false
+	}
+	if rule.Filter.And != nil {
+		if rule.Filter.And.Prefix != "" && !strings.HasPrefix(key, rule.Filter.And.Prefix) {
+			return false
+		}
+		for _, tag := range rule.Filter.And.Tags {
+			if !uploadHasTag(upload, tag) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func uploadHasTag(upload *MultipartUpload, tag Tag) bool {
+	if upload == nil || upload.Tags == nil || tag.Key == "" {
+		return false
+	}
+	value, ok := upload.Tags[tag.Key]
+	return ok && value == tag.Value
 }
 
 func parseLifecycleDate(value string) (time.Time, error) {
