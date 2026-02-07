@@ -1,11 +1,15 @@
 package minis3
 
 import (
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMinis3(t *testing.T) {
@@ -314,4 +318,139 @@ func TestDeleteObjectsMalformedXML(t *testing.T) {
 	if !strings.Contains(string(body), "MalformedXML") {
 		t.Errorf("Expected MalformedXML error, got: %s", string(body))
 	}
+}
+
+func TestMinis3RunAndAccessors(t *testing.T) {
+	s, err := Run()
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	addr := s.Addr()
+	if addr == "" {
+		t.Fatal("expected non-empty addr")
+	}
+	if s.Host() != addr {
+		t.Fatalf("Host()=%q, Addr()=%q", s.Host(), addr)
+	}
+
+	resp, err := http.Get("http://" + s.Host() + "/")
+	if err != nil {
+		t.Fatalf("GET / failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestMinis3CloseAndAddrBeforeStart(t *testing.T) {
+	s := New()
+	if got := s.Addr(); got != "" {
+		t.Fatalf("Addr() before start = %q, want empty", got)
+	}
+	if got := s.Host(); got != "" {
+		t.Fatalf("Host() before start = %q, want empty", got)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() before start failed: %v", err)
+	}
+}
+
+func TestMinis3StartListenError(t *testing.T) {
+	origListenFn := listenFn
+	listenFn = func(_, _ string) (net.Listener, error) {
+		return nil, errors.New("boom")
+	}
+	defer func() { listenFn = origListenFn }()
+
+	s := New()
+	err := s.Start()
+	if err == nil {
+		t.Fatal("expected Start() to fail")
+	}
+	if !strings.Contains(err.Error(), "failed to listen: boom") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReturnsStartError(t *testing.T) {
+	origListenFn := listenFn
+	listenFn = func(_, _ string) (net.Listener, error) {
+		return nil, errors.New("run-boom")
+	}
+	defer func() { listenFn = origListenFn }()
+
+	s, err := Run()
+	if err == nil {
+		t.Fatal("expected Run() to fail")
+	}
+	if s != nil {
+		t.Fatalf("Run() server = %#v, want nil", s)
+	}
+	if !strings.Contains(err.Error(), "failed to listen: run-boom") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMinis3StartServeErrorCallsFatal(t *testing.T) {
+	origListenFn := listenFn
+	origFatalFn := fatalFn
+	defer func() {
+		listenFn = origListenFn
+		fatalFn = origFatalFn
+	}()
+
+	listenFn = func(_, _ string) (net.Listener, error) {
+		return failingListener{acceptErr: errors.New("accept failed")}, nil
+	}
+
+	called := make(chan string, 1)
+	fatalFn = func(v ...any) {
+		called <- fmt.Sprint(v...)
+	}
+
+	s := New()
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+
+	select {
+	case msg := <-called:
+		if !strings.Contains(msg, "minis3 server error:") {
+			t.Fatalf("unexpected fatal message: %q", msg)
+		}
+		if !strings.Contains(msg, "accept failed") {
+			t.Fatalf("expected accept error in fatal message: %q", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected fatalFn to be called")
+	}
+}
+
+type failingListener struct {
+	acceptErr error
+}
+
+func (l failingListener) Accept() (net.Conn, error) {
+	return nil, l.acceptErr
+}
+
+func (failingListener) Close() error {
+	return nil
+}
+
+func (failingListener) Addr() net.Addr {
+	return staticAddr("127.0.0.1:0")
+}
+
+type staticAddr string
+
+func (staticAddr) Network() string {
+	return "tcp"
+}
+
+func (a staticAddr) String() string {
+	return string(a)
 }
