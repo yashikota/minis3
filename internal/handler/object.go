@@ -1889,6 +1889,10 @@ func (h *Handler) handleGetObjectACL(
 		return
 	}
 
+	config := h.getBucketPublicAccessBlock(bucketName)
+	ignorePublicACLs := config != nil && config.IgnorePublicAcls
+	acl = effectiveACLForResponse(acl, ignorePublicACLs)
+
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xmlMarshalFn(acl)
