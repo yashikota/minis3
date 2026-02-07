@@ -33,7 +33,8 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 		}
 
 		if b.shouldExpireCurrentVersion(bucket, key, versions, now, dayDuration) {
-			if bucket.VersioningStatus == VersioningEnabled || bucket.VersioningStatus == VersioningSuspended {
+			if bucket.VersioningStatus == VersioningEnabled ||
+				bucket.VersioningStatus == VersioningSuspended {
 				if !versions.Versions[0].IsDeleteMarker {
 					_ = createDeleteMarkerUnlocked(bucket, key)
 				}
@@ -130,7 +131,8 @@ func applyNoncurrentExpirationRules(
 				continue
 			}
 			seenMatchingNoncurrent++
-			if nc.NewerNoncurrentVersions > 0 && seenMatchingNoncurrent <= nc.NewerNoncurrentVersions {
+			if nc.NewerNoncurrentVersions > 0 &&
+				seenMatchingNoncurrent <= nc.NewerNoncurrentVersions {
 				continue
 			}
 			if lifecycleNoncurrentExpirationDue(
@@ -177,7 +179,11 @@ func lifecycleRuleMatchesObject(rule LifecycleRule, key string, obj *Object) boo
 	if filter.Prefix != "" && !strings.HasPrefix(key, filter.Prefix) {
 		return false
 	}
-	if !lifecycleObjectSizeMatch(obj.Size, filter.ObjectSizeGreaterThan, filter.ObjectSizeLessThan) {
+	if !lifecycleObjectSizeMatch(
+		obj.Size,
+		filter.ObjectSizeGreaterThan,
+		filter.ObjectSizeLessThan,
+	) {
 		return false
 	}
 	if filter.Tag != nil && !objectHasTag(obj, *filter.Tag) {

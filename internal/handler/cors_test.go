@@ -25,11 +25,16 @@ func TestHandleRequestCORSPreflightRequestedHeaders(t *testing.T) {
 			t.Fatalf("PutBucketCORS failed: %v", err)
 		}
 
-		req := newRequest(http.MethodOptions, "http://example.test/cors-bucket/bar", "", map[string]string{
-			"Origin":                         "example.origin",
-			"Access-Control-Request-Method":  "GET",
-			"Access-Control-Request-Headers": "x-amz-meta-header2",
-		})
+		req := newRequest(
+			http.MethodOptions,
+			"http://example.test/cors-bucket/bar",
+			"",
+			map[string]string{
+				"Origin":                         "example.origin",
+				"Access-Control-Request-Method":  "GET",
+				"Access-Control-Request-Headers": "x-amz-meta-header2",
+			},
+		)
 		w := doRequest(h, req)
 
 		requireStatus(t, w, http.StatusForbidden)
@@ -55,11 +60,16 @@ func TestHandleRequestCORSPreflightRequestedHeaders(t *testing.T) {
 			t.Fatalf("PutBucketCORS failed: %v", err)
 		}
 
-		req := newRequest(http.MethodOptions, "http://example.test/cors-bucket/bar", "", map[string]string{
-			"Origin":                         "example.origin",
-			"Access-Control-Request-Method":  "GET",
-			"Access-Control-Request-Headers": "x-amz-meta-header2, Content-Type",
-		})
+		req := newRequest(
+			http.MethodOptions,
+			"http://example.test/cors-bucket/bar",
+			"",
+			map[string]string{
+				"Origin":                         "example.origin",
+				"Access-Control-Request-Method":  "GET",
+				"Access-Control-Request-Headers": "x-amz-meta-header2, Content-Type",
+			},
+		)
 		w := doRequest(h, req)
 
 		requireStatus(t, w, http.StatusOK)
@@ -71,30 +81,38 @@ func TestHandleRequestCORSPreflightRequestedHeaders(t *testing.T) {
 		}
 	})
 
-	t.Run("allows preflight without requested headers even when AllowedHeaders is empty", func(t *testing.T) {
-		err := b.PutBucketCORS("cors-bucket", &backend.CORSConfiguration{
-			CORSRules: []backend.CORSRule{
-				{
-					AllowedMethods: []string{"GET"},
-					AllowedOrigins: []string{"*"},
+	t.Run(
+		"allows preflight without requested headers even when AllowedHeaders is empty",
+		func(t *testing.T) {
+			err := b.PutBucketCORS("cors-bucket", &backend.CORSConfiguration{
+				CORSRules: []backend.CORSRule{
+					{
+						AllowedMethods: []string{"GET"},
+						AllowedOrigins: []string{"*"},
+					},
 				},
-			},
-		})
-		if err != nil {
-			t.Fatalf("PutBucketCORS failed: %v", err)
-		}
+			})
+			if err != nil {
+				t.Fatalf("PutBucketCORS failed: %v", err)
+			}
 
-		req := newRequest(http.MethodOptions, "http://example.test/cors-bucket/bar", "", map[string]string{
-			"Origin":                        "example.origin",
-			"Access-Control-Request-Method": "GET",
-		})
-		w := doRequest(h, req)
+			req := newRequest(
+				http.MethodOptions,
+				"http://example.test/cors-bucket/bar",
+				"",
+				map[string]string{
+					"Origin":                        "example.origin",
+					"Access-Control-Request-Method": "GET",
+				},
+			)
+			w := doRequest(h, req)
 
-		requireStatus(t, w, http.StatusOK)
-		if got := w.Header().Get("access-control-allow-origin"); got != "*" {
-			t.Fatalf("access-control-allow-origin = %q, want *", got)
-		}
-	})
+			requireStatus(t, w, http.StatusOK)
+			if got := w.Header().Get("access-control-allow-origin"); got != "*" {
+				t.Fatalf("access-control-allow-origin = %q, want *", got)
+			}
+		},
+	)
 }
 
 func TestCORSRequestHeadersAllowed(t *testing.T) {

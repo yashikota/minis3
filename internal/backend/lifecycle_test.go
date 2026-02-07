@@ -203,7 +203,10 @@ func TestApplyLifecycleDeletesExpiredObjectDeleteMarker(t *testing.T) {
 		t.Fatal("GetBucket failed")
 	}
 	if _, exists := bucket.Objects["test1/a"]; exists {
-		t.Fatalf("expected test1/a to be removed after delete marker expiration, objects=%+v", bucket.Objects["test1/a"])
+		t.Fatalf(
+			"expected test1/a to be removed after delete marker expiration, objects=%+v",
+			bucket.Objects["test1/a"],
+		)
 	}
 	if versions, exists := bucket.Objects["test2/abc"]; !exists || len(versions.Versions) != 2 {
 		t.Fatalf("expected test2/abc to remain with 2 versions, got %+v", versions)
@@ -260,7 +263,10 @@ func TestApplyLifecycleDeletesOrphanDeleteMarkerAfterExpirationDays(t *testing.T
 	// After 5 debug-days, delete marker should expire.
 	b.ApplyLifecycle(dmTime.Add(60*time.Second), 10*time.Second)
 	if _, exists := bucket.Objects["test1/a"]; exists {
-		t.Fatalf("expected delete marker to expire after 5 debug-days, got %+v", bucket.Objects["test1/a"])
+		t.Fatalf(
+			"expected delete marker to expire after 5 debug-days, got %+v",
+			bucket.Objects["test1/a"],
+		)
 	}
 }
 

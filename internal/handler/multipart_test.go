@@ -309,7 +309,10 @@ func TestMultipartHandlers(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/dupepart?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/dupepart?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"BBBBBBBB",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
@@ -321,7 +324,10 @@ func TestMultipartHandlers(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/dupepart?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/dupepart?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"AAAAAAAA",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),

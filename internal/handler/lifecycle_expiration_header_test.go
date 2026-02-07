@@ -85,7 +85,8 @@ func TestHeadObjectLifecycleExpirationHeaderRespectsTagFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBucketLifecycleConfiguration failed: %v", err)
 	}
-	if ruleID, _, ok := findLifecycleExpirationForObject(cfg, "obj", obj); !ok || ruleID != "rule1" {
+	if ruleID, _, ok := findLifecycleExpirationForObject(cfg, "obj", obj); !ok ||
+		ruleID != "rule1" {
 		t.Fatalf("expected lifecycle match for rule1, got ok=%v ruleID=%q", ok, ruleID)
 	}
 
@@ -100,7 +101,10 @@ func TestHeadObjectLifecycleExpirationHeaderRespectsTagFilter(t *testing.T) {
 	)
 	requireStatus(t, wMatch, http.StatusOK)
 	if exp := wMatch.Header().Get("x-amz-expiration"); exp == "" {
-		t.Fatalf("expected x-amz-expiration header for matching tag filter, headers=%v", wMatch.Header())
+		t.Fatalf(
+			"expected x-amz-expiration header for matching tag filter, headers=%v",
+			wMatch.Header(),
+		)
 	}
 
 	nonMatching := &backend.LifecycleConfiguration{

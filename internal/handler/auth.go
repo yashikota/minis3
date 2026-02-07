@@ -22,6 +22,7 @@ type Credentials struct {
 // These match the s3tests.conf configuration.
 func DefaultCredentials() map[string]string {
 	return map[string]string{
+		"test":                  "test",
 		"minis3-access-key":     "minis3-secret-key",
 		"minis3-alt-access-key": "minis3-alt-secret-key",
 		"tenant-access-key":     "tenant-secret-key",

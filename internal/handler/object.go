@@ -225,7 +225,11 @@ func findLifecycleExpirationForObject(
 	return "", time.Time{}, false
 }
 
-func lifecycleRuleMatchesObjectForHeader(rule backend.LifecycleRule, key string, obj *backend.Object) bool {
+func lifecycleRuleMatchesObjectForHeader(
+	rule backend.LifecycleRule,
+	key string,
+	obj *backend.Object,
+) bool {
 	if obj == nil {
 		return false
 	}
@@ -286,7 +290,10 @@ func lifecycleObjectSizeMatchForHeader(size int64, greaterThan, lessThan int64) 
 	return true
 }
 
-func lifecycleExpiryDate(expiration *backend.LifecycleExpiration, base time.Time) (time.Time, bool) {
+func lifecycleExpiryDate(
+	expiration *backend.LifecycleExpiration,
+	base time.Time,
+) (time.Time, bool) {
 	if expiration == nil {
 		return time.Time{}, false
 	}
