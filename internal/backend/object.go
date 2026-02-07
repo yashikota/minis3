@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash/crc32"
-	"io"
 	"sort"
 	"strings"
 	"time"
@@ -171,9 +170,7 @@ func (b *Backend) PutObject(
 	}
 
 	md5Hash := md5.New()
-	crc32Hash := crc32.NewIEEE()
-	w := io.MultiWriter(md5Hash, crc32Hash)
-	_, _ = w.Write(data)
+	_, _ = md5Hash.Write(data)
 
 	// Determine version ID based on versioning status
 	var versionId string
@@ -183,6 +180,19 @@ func (b *Backend) PutObject(
 	default:
 		// VersioningUnset or VersioningSuspended: use "null"
 		versionId = NullVersionId
+	}
+
+	// Apply bucket default encryption if no explicit SSE is specified
+	if opts.ServerSideEncryption == "" && opts.SSECustomerAlgorithm == "" {
+		if bucket.EncryptionConfiguration != nil && len(bucket.EncryptionConfiguration.Rules) > 0 {
+			rule := bucket.EncryptionConfiguration.Rules[0]
+			if rule.ApplyServerSideEncryptionByDefault != nil {
+				opts.ServerSideEncryption = rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm
+				if opts.SSEKMSKeyId == "" {
+					opts.SSEKMSKeyId = rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID
+				}
+			}
+		}
 	}
 
 	contentType := opts.ContentType
@@ -205,7 +215,6 @@ func (b *Backend) PutObject(
 		Size:                    int64(len(data)),
 		ContentType:             contentType,
 		Data:                    data,
-		ChecksumCRC32:           base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
 		ChecksumAlgorithm:       opts.ChecksumAlgorithm,
 		Metadata:                opts.Metadata,
 		CacheControl:            opts.CacheControl,
@@ -217,6 +226,8 @@ func (b *Backend) PutObject(
 		StorageClass:            storageClass,
 		ServerSideEncryption:    opts.ServerSideEncryption,
 		SSEKMSKeyId:             opts.SSEKMSKeyId,
+		SSECustomerAlgorithm:    opts.SSECustomerAlgorithm,
+		SSECustomerKeyMD5:       opts.SSECustomerKeyMD5,
 		WebsiteRedirectLocation: opts.WebsiteRedirectLocation,
 	}
 
@@ -248,8 +259,11 @@ func (b *Backend) PutObject(
 	case "CRC32":
 		if opts.ChecksumCRC32 != "" {
 			obj.ChecksumCRC32 = opts.ChecksumCRC32
+		} else {
+			crc32Hash := crc32.NewIEEE()
+			_, _ = crc32Hash.Write(data)
+			obj.ChecksumCRC32 = base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil))
 		}
-		// CRC32 is already computed above as default
 	}
 
 	// Set Object Lock fields if provided
@@ -409,6 +423,8 @@ type CopyObjectOptions struct {
 	// Server-Side Encryption fields
 	ServerSideEncryption string
 	SSEKMSKeyId          string
+	SSECustomerAlgorithm string
+	SSECustomerKeyMD5    string
 	// Storage class
 	StorageClass string
 	// Website redirect
@@ -597,12 +613,29 @@ func (b *Backend) CopyObject(
 	}
 
 	// Handle Server-Side Encryption
-	if opts.ServerSideEncryption != "" {
+	if opts.ServerSideEncryption != "" || opts.SSECustomerAlgorithm != "" {
+		// Explicit SSE specified for destination
 		obj.ServerSideEncryption = opts.ServerSideEncryption
 		obj.SSEKMSKeyId = opts.SSEKMSKeyId
+		obj.SSECustomerAlgorithm = opts.SSECustomerAlgorithm
+		obj.SSECustomerKeyMD5 = opts.SSECustomerKeyMD5
 	} else {
+		// Copy SSE-S3/SSE-KMS from source, but NOT SSE-C (SSE-C requires explicit key per request)
 		obj.ServerSideEncryption = srcObj.ServerSideEncryption
 		obj.SSEKMSKeyId = srcObj.SSEKMSKeyId
+	}
+
+	// Apply bucket default encryption if no explicit SSE is specified
+	if obj.ServerSideEncryption == "" && obj.SSECustomerAlgorithm == "" {
+		if dstBkt.EncryptionConfiguration != nil && len(dstBkt.EncryptionConfiguration.Rules) > 0 {
+			rule := dstBkt.EncryptionConfiguration.Rules[0]
+			if rule.ApplyServerSideEncryptionByDefault != nil {
+				obj.ServerSideEncryption = rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm
+				if obj.SSEKMSKeyId == "" {
+					obj.SSEKMSKeyId = rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID
+				}
+			}
+		}
 	}
 
 	addVersionToObject(dstBkt, dstKey, obj)
@@ -755,6 +788,10 @@ func (b *Backend) ListObjectsV1(
 	}
 
 	for cp := range commonPrefixSet {
+		// Skip common prefixes that were already returned in previous pages.
+		if marker != "" && cp <= marker {
+			continue
+		}
 		entries = append(entries, listEntry{key: cp, isCommonPrefix: true})
 	}
 
@@ -845,6 +882,10 @@ func (b *Backend) ListObjectsV2(
 
 	commonPrefixes := make([]string, 0, len(commonPrefixSet))
 	for cp := range commonPrefixSet {
+		// Filter out common prefixes that are <= marker (already returned in previous page)
+		if marker != "" && cp <= marker {
+			continue
+		}
 		commonPrefixes = append(commonPrefixes, cp)
 	}
 	sort.Strings(commonPrefixes)

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -175,6 +176,7 @@ func TestCopyPart(t *testing.T) {
 		part, err := b.CopyPart(
 			"src-bucket",
 			"src-key",
+			"",
 			"dst-bucket",
 			"dst-key",
 			upload.UploadId,
@@ -197,6 +199,7 @@ func TestCopyPart(t *testing.T) {
 		part, err := b.CopyPart(
 			"src-bucket",
 			"src-key",
+			"",
 			"dst-bucket",
 			"dst-key",
 			upload.UploadId,
@@ -216,6 +219,7 @@ func TestCopyPart(t *testing.T) {
 		_, err := b.CopyPart(
 			"non-existent",
 			"src-key",
+			"",
 			"dst-bucket",
 			"dst-key",
 			upload.UploadId,
@@ -232,6 +236,7 @@ func TestCopyPart(t *testing.T) {
 		_, err := b.CopyPart(
 			"src-bucket",
 			"non-existent",
+			"",
 			"dst-bucket",
 			"dst-key",
 			upload.UploadId,
@@ -248,6 +253,7 @@ func TestCopyPart(t *testing.T) {
 		_, err := b.CopyPart(
 			"src-bucket",
 			"src-key",
+			"",
 			"dst-bucket",
 			"dst-key",
 			"non-existent-upload",
@@ -813,6 +819,363 @@ func TestCopyObjectWithTaggingDirective(t *testing.T) {
 		}
 		if tags["Env"] != "Prod" {
 			t.Errorf("expected tag Env=Prod (default COPY), got %v", tags)
+		}
+	})
+}
+
+func putTestObjectsForListTests(t *testing.T, b *Backend, bucket string, keys []string) {
+	t.Helper()
+	for _, key := range keys {
+		if _, err := b.PutObject(bucket, key, []byte("data:"+key), PutObjectOptions{}); err != nil {
+			t.Fatalf("PutObject(%q) failed: %v", key, err)
+		}
+	}
+}
+
+func objectKeys(objects []*Object) []string {
+	keys := make([]string, len(objects))
+	for i, obj := range objects {
+		keys[i] = obj.Key
+	}
+	return keys
+}
+
+func TestListObjectsV1DelimiterMarkerPagination(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("list-v1-bucket"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	putTestObjectsForListTests(t, b, "list-v1-bucket", []string{
+		"asdf",
+		"boo/bar",
+		"boo/baz/xyzzy",
+		"cquux/thud",
+		"cquux/bla",
+	})
+
+	t.Run("root max-keys=1 pages without common-prefix replay", func(t *testing.T) {
+		page1, err := b.ListObjectsV1("list-v1-bucket", "", "/", "", 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 page1 failed: %v", err)
+		}
+		if !reflect.DeepEqual(objectKeys(page1.Objects), []string{"asdf"}) {
+			t.Fatalf("unexpected page1 objects: %v", objectKeys(page1.Objects))
+		}
+		if len(page1.CommonPrefixes) != 0 {
+			t.Fatalf("expected no page1 common prefixes, got %v", page1.CommonPrefixes)
+		}
+		if !page1.IsTruncated {
+			t.Fatalf("expected page1 to be truncated")
+		}
+		if page1.NextMarker != "asdf" {
+			t.Fatalf("expected page1 next marker 'asdf', got %q", page1.NextMarker)
+		}
+
+		page2, err := b.ListObjectsV1("list-v1-bucket", "", "/", page1.NextMarker, 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 page2 failed: %v", err)
+		}
+		if len(page2.Objects) != 0 {
+			t.Fatalf("expected no page2 objects, got %v", objectKeys(page2.Objects))
+		}
+		if !reflect.DeepEqual(page2.CommonPrefixes, []string{"boo/"}) {
+			t.Fatalf("unexpected page2 common prefixes: %v", page2.CommonPrefixes)
+		}
+		if !page2.IsTruncated {
+			t.Fatalf("expected page2 to be truncated")
+		}
+		if page2.NextMarker != "boo/" {
+			t.Fatalf("expected page2 next marker 'boo/', got %q", page2.NextMarker)
+		}
+
+		page3, err := b.ListObjectsV1("list-v1-bucket", "", "/", page2.NextMarker, 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 page3 failed: %v", err)
+		}
+		if len(page3.Objects) != 0 {
+			t.Fatalf("expected no page3 objects, got %v", objectKeys(page3.Objects))
+		}
+		if !reflect.DeepEqual(page3.CommonPrefixes, []string{"cquux/"}) {
+			t.Fatalf("unexpected page3 common prefixes: %v", page3.CommonPrefixes)
+		}
+		if page3.IsTruncated {
+			t.Fatalf("expected page3 to be the last page")
+		}
+		if page3.NextMarker != "" {
+			t.Fatalf("expected empty page3 next marker, got %q", page3.NextMarker)
+		}
+	})
+
+	t.Run("root max-keys=2 paginates across object and prefix", func(t *testing.T) {
+		page1, err := b.ListObjectsV1("list-v1-bucket", "", "/", "", 2)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 page1 failed: %v", err)
+		}
+		if !reflect.DeepEqual(objectKeys(page1.Objects), []string{"asdf"}) {
+			t.Fatalf("unexpected page1 objects: %v", objectKeys(page1.Objects))
+		}
+		if !reflect.DeepEqual(page1.CommonPrefixes, []string{"boo/"}) {
+			t.Fatalf("unexpected page1 common prefixes: %v", page1.CommonPrefixes)
+		}
+		if !page1.IsTruncated {
+			t.Fatalf("expected page1 to be truncated")
+		}
+		if page1.NextMarker != "boo/" {
+			t.Fatalf("expected page1 next marker 'boo/', got %q", page1.NextMarker)
+		}
+
+		page2, err := b.ListObjectsV1("list-v1-bucket", "", "/", page1.NextMarker, 2)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 page2 failed: %v", err)
+		}
+		if len(page2.Objects) != 0 {
+			t.Fatalf("expected no page2 objects, got %v", objectKeys(page2.Objects))
+		}
+		if !reflect.DeepEqual(page2.CommonPrefixes, []string{"cquux/"}) {
+			t.Fatalf("unexpected page2 common prefixes: %v", page2.CommonPrefixes)
+		}
+		if page2.IsTruncated {
+			t.Fatalf("expected page2 to be the last page")
+		}
+	})
+
+	t.Run("prefix scoped pagination", func(t *testing.T) {
+		page1, err := b.ListObjectsV1("list-v1-bucket", "boo/", "/", "", 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 page1 failed: %v", err)
+		}
+		if !reflect.DeepEqual(objectKeys(page1.Objects), []string{"boo/bar"}) {
+			t.Fatalf("unexpected page1 objects: %v", objectKeys(page1.Objects))
+		}
+		if len(page1.CommonPrefixes) != 0 {
+			t.Fatalf("expected no page1 common prefixes, got %v", page1.CommonPrefixes)
+		}
+		if !page1.IsTruncated {
+			t.Fatalf("expected page1 to be truncated")
+		}
+		if page1.NextMarker != "boo/bar" {
+			t.Fatalf("expected page1 next marker 'boo/bar', got %q", page1.NextMarker)
+		}
+
+		page2, err := b.ListObjectsV1("list-v1-bucket", "boo/", "/", page1.NextMarker, 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 page2 failed: %v", err)
+		}
+		if len(page2.Objects) != 0 {
+			t.Fatalf("expected no page2 objects, got %v", objectKeys(page2.Objects))
+		}
+		if !reflect.DeepEqual(page2.CommonPrefixes, []string{"boo/baz/"}) {
+			t.Fatalf("unexpected page2 common prefixes: %v", page2.CommonPrefixes)
+		}
+		if page2.IsTruncated {
+			t.Fatalf("expected page2 to be the last page")
+		}
+
+		pageSingle, err := b.ListObjectsV1("list-v1-bucket", "boo/", "/", "", 2)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 single page failed: %v", err)
+		}
+		if !reflect.DeepEqual(objectKeys(pageSingle.Objects), []string{"boo/bar"}) {
+			t.Fatalf("unexpected single-page objects: %v", objectKeys(pageSingle.Objects))
+		}
+		if !reflect.DeepEqual(pageSingle.CommonPrefixes, []string{"boo/baz/"}) {
+			t.Fatalf("unexpected single-page common prefixes: %v", pageSingle.CommonPrefixes)
+		}
+		if pageSingle.IsTruncated {
+			t.Fatalf("expected single-page response not to be truncated")
+		}
+	})
+}
+
+func TestListObjectsV1EdgeCases(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("list-v1-edge"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	putTestObjectsForListTests(t, b, "list-v1-edge", []string{
+		"a",
+		"b/x",
+		"b/y",
+		"c",
+		"x%aa",
+		"x%bb",
+		"x.zz",
+		"x yy",
+	})
+
+	t.Run("max-keys zero returns empty and not truncated", func(t *testing.T) {
+		result, err := b.ListObjectsV1("list-v1-edge", "", "/", "", 0)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 failed: %v", err)
+		}
+		if len(result.Objects) != 0 || len(result.CommonPrefixes) != 0 {
+			t.Fatalf(
+				"expected empty response, got objects=%v prefixes=%v",
+				objectKeys(result.Objects),
+				result.CommonPrefixes,
+			)
+		}
+		if result.IsTruncated {
+			t.Fatalf("expected IsTruncated=false with max-keys=0")
+		}
+	})
+
+	t.Run("marker not in list starts after lexical position", func(t *testing.T) {
+		result, err := b.ListObjectsV1("list-v1-edge", "", "", "b0", 1000)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 failed: %v", err)
+		}
+		want := []string{"c", "x yy", "x%aa", "x%bb", "x.zz"}
+		if !reflect.DeepEqual(objectKeys(result.Objects), want) {
+			t.Fatalf(
+				"unexpected objects after marker: got %v want %v",
+				objectKeys(result.Objects),
+				want,
+			)
+		}
+	})
+
+	t.Run("marker after list returns empty", func(t *testing.T) {
+		result, err := b.ListObjectsV1("list-v1-edge", "", "", "zzz", 1000)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 failed: %v", err)
+		}
+		if len(result.Objects) != 0 {
+			t.Fatalf("expected empty objects, got %v", objectKeys(result.Objects))
+		}
+	})
+
+	t.Run("special delimiter percentage", func(t *testing.T) {
+		result, err := b.ListObjectsV1("list-v1-edge", "x", "%", "", 1000)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 failed: %v", err)
+		}
+		if !reflect.DeepEqual(result.CommonPrefixes, []string{"x%"}) {
+			t.Fatalf("unexpected common prefixes: %v", result.CommonPrefixes)
+		}
+		wantObjects := []string{"x yy", "x.zz"}
+		if !reflect.DeepEqual(objectKeys(result.Objects), wantObjects) {
+			t.Fatalf("unexpected objects: got %v want %v", objectKeys(result.Objects), wantObjects)
+		}
+	})
+
+	t.Run("unreadable prefix returns empty", func(t *testing.T) {
+		result, err := b.ListObjectsV1("list-v1-edge", "\x0a", "/", "", 1000)
+		if err != nil {
+			t.Fatalf("ListObjectsV1 failed: %v", err)
+		}
+		if len(result.Objects) != 0 || len(result.CommonPrefixes) != 0 {
+			t.Fatalf(
+				"expected empty response, got objects=%v prefixes=%v",
+				objectKeys(result.Objects),
+				result.CommonPrefixes,
+			)
+		}
+	})
+}
+
+func TestListObjectsV2EdgeCases(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("list-v2-edge"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	putTestObjectsForListTests(t, b, "list-v2-edge", []string{
+		"asdf",
+		"boo/bar",
+		"boo/baz/xyzzy",
+		"cquux/bla",
+		"cquux/thud",
+	})
+
+	t.Run("continuation token takes precedence over start-after", func(t *testing.T) {
+		result, err := b.ListObjectsV2("list-v2-edge", "", "/", "asdf", "zzz", 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+		if len(result.Objects) != 0 {
+			t.Fatalf("expected no objects, got %v", objectKeys(result.Objects))
+		}
+		if !reflect.DeepEqual(result.CommonPrefixes, []string{"boo/"}) {
+			t.Fatalf("unexpected common prefixes: %v", result.CommonPrefixes)
+		}
+		if !result.IsTruncated {
+			t.Fatalf("expected result to be truncated")
+		}
+		if result.NextContinuationToken != "boo/" {
+			t.Fatalf("expected next continuation token boo/, got %q", result.NextContinuationToken)
+		}
+	})
+
+	t.Run("delimiter paging does not replay previous common prefixes", func(t *testing.T) {
+		page1, err := b.ListObjectsV2("list-v2-edge", "", "/", "", "", 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV2 page1 failed: %v", err)
+		}
+		if !reflect.DeepEqual(objectKeys(page1.Objects), []string{"asdf"}) {
+			t.Fatalf("unexpected page1 objects: %v", objectKeys(page1.Objects))
+		}
+		if page1.NextContinuationToken != "asdf" {
+			t.Fatalf("expected page1 token asdf, got %q", page1.NextContinuationToken)
+		}
+
+		page2, err := b.ListObjectsV2("list-v2-edge", "", "/", page1.NextContinuationToken, "", 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV2 page2 failed: %v", err)
+		}
+		if !reflect.DeepEqual(page2.CommonPrefixes, []string{"boo/"}) {
+			t.Fatalf("unexpected page2 common prefixes: %v", page2.CommonPrefixes)
+		}
+		if page2.NextContinuationToken != "boo/" {
+			t.Fatalf("expected page2 token boo/, got %q", page2.NextContinuationToken)
+		}
+
+		page3, err := b.ListObjectsV2("list-v2-edge", "", "/", page2.NextContinuationToken, "", 1)
+		if err != nil {
+			t.Fatalf("ListObjectsV2 page3 failed: %v", err)
+		}
+		if !reflect.DeepEqual(page3.CommonPrefixes, []string{"cquux/"}) {
+			t.Fatalf("unexpected page3 common prefixes: %v", page3.CommonPrefixes)
+		}
+		if page3.IsTruncated {
+			t.Fatalf("expected page3 to be the last page")
+		}
+		if page3.NextContinuationToken != "" {
+			t.Fatalf(
+				"expected no next continuation token on final page, got %q",
+				page3.NextContinuationToken,
+			)
+		}
+	})
+
+	t.Run("max-keys zero returns empty and not truncated", func(t *testing.T) {
+		result, err := b.ListObjectsV2("list-v2-edge", "", "/", "", "", 0)
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+		if len(result.Objects) != 0 || len(result.CommonPrefixes) != 0 || result.KeyCount != 0 {
+			t.Fatalf(
+				"expected empty response, got objects=%v prefixes=%v keycount=%d",
+				objectKeys(result.Objects),
+				result.CommonPrefixes,
+				result.KeyCount,
+			)
+		}
+		if result.IsTruncated {
+			t.Fatalf("expected IsTruncated=false with max-keys=0")
+		}
+	})
+
+	t.Run("keycount equals objects plus common prefixes", func(t *testing.T) {
+		result, err := b.ListObjectsV2("list-v2-edge", "", "/", "", "", 1000)
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+		expectedKeyCount := len(result.Objects) + len(result.CommonPrefixes)
+		if result.KeyCount != expectedKeyCount {
+			t.Fatalf("unexpected key count: got %d want %d", result.KeyCount, expectedKeyCount)
 		}
 	})
 }
