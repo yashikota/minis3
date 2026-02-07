@@ -11,6 +11,11 @@ import (
 	"github.com/yashikota/minis3/internal/handler"
 )
 
+var (
+	listenFn = net.Listen
+	fatalFn  = log.Fatalln
+)
+
 // Minis3 is the main server struct.
 type Minis3 struct {
 	mu       sync.Mutex
@@ -42,7 +47,7 @@ func (m *Minis3) Start() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := listenFn("tcp", "127.0.0.1:0")
 	if err != nil {
 		return errors.New("failed to listen: " + err.Error())
 	}
@@ -54,7 +59,7 @@ func (m *Minis3) Start() error {
 
 	go func() {
 		if err := m.server.Serve(l); err != nil && err != http.ErrServerClosed {
-			log.Fatalln("minis3 server error:", err)
+			fatalFn("minis3 server error:", err)
 		}
 	}()
 

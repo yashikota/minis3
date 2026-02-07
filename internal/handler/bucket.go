@@ -613,6 +613,12 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		w.Header().Set("Location", "/"+bucketName)
+		if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+			if err := h.backend.PutBucketACL(bucketName, backend.CannedACLToPolicy(cannedACL)); err != nil {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+				return
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 	case http.MethodDelete:
 		if r.URL.Query().Has("tagging") {

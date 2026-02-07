@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -15,36 +17,62 @@ import (
 	"github.com/yashikota/minis3/internal/handler"
 )
 
+type httpServer interface {
+	Serve(net.Listener) error
+	Shutdown(context.Context) error
+}
+
+var (
+	listenFn      = net.Listen
+	notifySignal  = signal.Notify
+	newHTTPServer = func(h http.Handler) httpServer { return &http.Server{Handler: h} }
+	logFatalfFn   = log.Fatalf
+	logPrintfFn   = log.Printf
+	logPrintlnFn  = log.Println
+	runFn         = run
+)
+
 func main() {
-	addr := flag.String("addr", "0.0.0.0:9000", "Address to listen on")
-	flag.Parse()
+	if err := runFn(os.Args[1:]); err != nil {
+		logFatalfFn("%v", err)
+	}
+}
+
+func run(args []string) error {
+	fs := flag.NewFlagSet("minis3-s3-test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	addr := fs.String("addr", "0.0.0.0:9000", "Address to listen on")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	b := backend.New()
 	h := handler.New(b)
 
-	listener, err := net.Listen("tcp", *addr)
+	listener, err := listenFn("tcp", *addr)
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	server := &http.Server{Handler: h}
+	server := newHTTPServer(h)
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		notifySignal(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 
-		log.Println("Shutting down server gracefully...")
+		logPrintlnFn("Shutting down server gracefully...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Fatalf("Server shutdown failed: %v", err)
+			logFatalfFn("Server shutdown failed: %v", err)
 		}
 	}()
 
-	log.Printf("minis3 listening on %s", *addr)
+	logPrintfFn("minis3 listening on %s", *addr)
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server error: %v", err)
+		return fmt.Errorf("server error: %w", err)
 	}
+	return nil
 }
