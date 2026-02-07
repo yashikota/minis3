@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
@@ -17,6 +19,12 @@ func (h *Handler) handleCreateMultipartUpload(
 	r *http.Request,
 	bucketName, key string,
 ) {
+	// Check bucket policy for PutObject (CreateMultipartUpload is part of PutObject)
+	if !h.checkAccess(r, bucketName, "s3:PutObject", key) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	opts := backend.CreateMultipartUploadOptions{
 		ContentType:        r.Header.Get("Content-Type"),
 		Metadata:           extractMetadata(r),
@@ -47,12 +55,25 @@ func (h *Handler) handleCreateMultipartUpload(
 		opts.StorageClass = storageClass
 	}
 
+	// Validate Server-Side Encryption headers
+	if errCode, errMsg := validateSSEHeaders(r); errCode != "" {
+		backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+		return
+	}
+
 	// Extract Server-Side Encryption headers
 	if sse := r.Header.Get("x-amz-server-side-encryption"); sse != "" {
 		opts.ServerSideEncryption = sse
 	}
 	if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
 		opts.SSEKMSKeyId = sseKmsKeyId
+	}
+	// SSE-C headers
+	if sseCA := r.Header.Get("x-amz-server-side-encryption-customer-algorithm"); sseCA != "" {
+		opts.SSECustomerAlgorithm = sseCA
+	}
+	if sseCKMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5"); sseCKMD5 != "" {
+		opts.SSECustomerKeyMD5 = sseCKMD5
 	}
 
 	upload, err := h.backend.CreateMultipartUpload(bucketName, key, opts)
@@ -75,6 +96,21 @@ func (h *Handler) handleCreateMultipartUpload(
 		Bucket:   bucketName,
 		Key:      key,
 		UploadId: upload.UploadId,
+	}
+
+	// Return SSE headers
+	if upload.ServerSideEncryption != "" {
+		w.Header().Set("x-amz-server-side-encryption", upload.ServerSideEncryption)
+	}
+	if upload.SSEKMSKeyId != "" {
+		w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", upload.SSEKMSKeyId)
+	}
+	if upload.SSECustomerAlgorithm != "" {
+		w.Header().
+			Set("x-amz-server-side-encryption-customer-algorithm", upload.SSECustomerAlgorithm)
+	}
+	if upload.SSECustomerKeyMD5 != "" {
+		w.Header().Set("x-amz-server-side-encryption-customer-key-md5", upload.SSECustomerKeyMD5)
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
@@ -108,6 +144,20 @@ func (h *Handler) handleUploadPart(
 		return
 	}
 
+	// Validate SSE-C headers against the upload's SSE-C config
+	if errCode, errMsg := validateSSEHeaders(r); errCode != "" {
+		backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+		return
+	}
+	if upload, ok := h.backend.GetUpload(uploadId); ok && upload.SSECustomerAlgorithm != "" {
+		reqKeyMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5")
+		if reqKeyMD5 == "" || reqKeyMD5 != upload.SSECustomerKeyMD5 {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
+				"The SSE-C key provided does not match the key used to initiate the upload.")
+			return
+		}
+	}
+
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -131,6 +181,25 @@ func (h *Handler) handleUploadPart(
 	}
 
 	w.Header().Set("ETag", part.ETag)
+
+	// Return SSE headers from the multipart upload
+	if upload, ok := h.backend.GetUpload(uploadId); ok {
+		if upload.ServerSideEncryption != "" {
+			w.Header().Set("x-amz-server-side-encryption", upload.ServerSideEncryption)
+		}
+		if upload.SSEKMSKeyId != "" {
+			w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", upload.SSEKMSKeyId)
+		}
+		if upload.SSECustomerAlgorithm != "" {
+			w.Header().
+				Set("x-amz-server-side-encryption-customer-algorithm", upload.SSECustomerAlgorithm)
+		}
+		if upload.SSECustomerKeyMD5 != "" {
+			w.Header().
+				Set("x-amz-server-side-encryption-customer-key-md5", upload.SSECustomerKeyMD5)
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -230,6 +299,9 @@ func (h *Handler) handleCompleteMultipartUpload(
 	if obj.VersionId != backend.NullVersionId {
 		w.Header().Set("x-amz-version-id", obj.VersionId)
 	}
+
+	// Return SSE headers
+	setStorageAndEncryptionHeaders(w, obj)
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
@@ -488,6 +560,12 @@ func (h *Handler) handleUploadPartCopy(
 		return
 	}
 
+	// Check bucket policy on source bucket (GetObject)
+	if !h.checkAccess(r, decodedCopySource.bucket, "s3:GetObject", decodedCopySource.key) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	// Parse byte range header
 	rangeStart, rangeEnd := int64(-1), int64(-1)
 	if rangeHeader := r.Header.Get("x-amz-copy-source-range"); rangeHeader != "" {
@@ -507,6 +585,7 @@ func (h *Handler) handleUploadPartCopy(
 	part, err := h.backend.CopyPart(
 		decodedCopySource.bucket,
 		decodedCopySource.key,
+		decodedCopySource.versionId,
 		bucketName,
 		key,
 		uploadId,
@@ -536,6 +615,13 @@ func (h *Handler) handleUploadPartCopy(
 				"NoSuchKey",
 				"The specified source key does not exist.",
 			)
+		} else if errors.Is(err, backend.ErrInvalidRange) {
+			backend.WriteError(
+				w,
+				http.StatusRequestedRangeNotSatisfiable,
+				"InvalidRange",
+				"The requested range is not satisfiable.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -545,6 +631,24 @@ func (h *Handler) handleUploadPartCopy(
 	copyPartResp := backend.CopyPartResult{
 		ETag:         part.ETag,
 		LastModified: part.LastModified,
+	}
+
+	// Return SSE headers from the multipart upload
+	if upload, ok := h.backend.GetUpload(uploadId); ok {
+		if upload.ServerSideEncryption != "" {
+			w.Header().Set("x-amz-server-side-encryption", upload.ServerSideEncryption)
+		}
+		if upload.SSEKMSKeyId != "" {
+			w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", upload.SSEKMSKeyId)
+		}
+		if upload.SSECustomerAlgorithm != "" {
+			w.Header().
+				Set("x-amz-server-side-encryption-customer-algorithm", upload.SSECustomerAlgorithm)
+		}
+		if upload.SSECustomerKeyMD5 != "" {
+			w.Header().
+				Set("x-amz-server-side-encryption-customer-key-md5", upload.SSECustomerKeyMD5)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
@@ -559,14 +663,26 @@ func (h *Handler) handleUploadPartCopy(
 
 // copySourceInfo holds parsed copy source information.
 type copySourceInfo struct {
-	bucket string
-	key    string
+	bucket    string
+	key       string
+	versionId string
 }
 
 // decodeAndParseCopySource decodes and parses x-amz-copy-source header.
 func decodeAndParseCopySource(copySource string) (*copySourceInfo, error) {
-	// URL decode
-	decoded, err := decodeURI(copySource)
+	// Extract versionId query parameter BEFORE URL-decoding
+	var versionId string
+	pathPart := copySource
+	if qIdx := strings.Index(copySource, "?"); qIdx != -1 {
+		queryStr := copySource[qIdx+1:]
+		pathPart = copySource[:qIdx]
+		if values, parseErr := url.ParseQuery(queryStr); parseErr == nil {
+			versionId = values.Get("versionId")
+		}
+	}
+
+	// URL decode the path part only
+	decoded, err := decodeURI(pathPart)
 	if err != nil {
 		return nil, err
 	}
@@ -581,8 +697,9 @@ func decodeAndParseCopySource(copySource string) (*copySourceInfo, error) {
 	}
 
 	return &copySourceInfo{
-		bucket: decoded[:idx],
-		key:    decoded[idx+1:],
+		bucket:    decoded[:idx],
+		key:       decoded[idx+1:],
+		versionId: versionId,
 	}, nil
 }
 

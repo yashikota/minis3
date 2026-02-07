@@ -40,9 +40,39 @@ func (b *Backend) PutObjectLockConfiguration(
 		return ErrBucketNotFound
 	}
 
-	// Enable object lock if not already enabled
-	if config.ObjectLockEnabled == "Enabled" {
+	// If Object Lock is not yet enabled, allow enabling it only if versioning is Enabled
+	if !bucket.ObjectLockEnabled {
+		if bucket.VersioningStatus != VersioningEnabled {
+			return ErrObjectLockNotEnabled
+		}
+		// Enable Object Lock on this versioned bucket
 		bucket.ObjectLockEnabled = true
+	}
+
+	// ObjectLockEnabled must be "Enabled"
+	if config.ObjectLockEnabled != "" && config.ObjectLockEnabled != "Enabled" {
+		return ErrInvalidObjectLockConfig
+	}
+
+	// Validate DefaultRetention if present
+	if config.Rule != nil && config.Rule.DefaultRetention != nil {
+		dr := config.Rule.DefaultRetention
+		// Mode must be GOVERNANCE or COMPLIANCE
+		if dr.Mode != RetentionModeGovernance && dr.Mode != RetentionModeCompliance {
+			return ErrInvalidObjectLockConfig
+		}
+		// Cannot specify both Days and Years
+		if dr.Days > 0 && dr.Years > 0 {
+			return ErrInvalidObjectLockConfig
+		}
+		// Days/Years must be positive
+		if dr.Days < 0 || dr.Years < 0 {
+			return ErrInvalidRetentionPeriod
+		}
+		// Must have at least one of Days or Years
+		if dr.Days == 0 && dr.Years == 0 {
+			return ErrInvalidRetentionPeriod
+		}
 	}
 
 	bucket.ObjectLockConfiguration = config
@@ -59,6 +89,10 @@ func (b *Backend) GetObjectRetention(
 	bucket, exists := b.buckets[bucketName]
 	if !exists {
 		return nil, ErrBucketNotFound
+	}
+
+	if !bucket.ObjectLockEnabled {
+		return nil, ErrObjectLockNotEnabled
 	}
 
 	versions, exists := bucket.Objects[key]
@@ -141,29 +175,49 @@ func (b *Backend) PutObjectRetention(
 		return ErrObjectNotFound
 	}
 
-	// Check if object is already locked with COMPLIANCE mode
-	if obj.RetentionMode == RetentionModeCompliance && obj.RetainUntilDate != nil {
-		if time.Now().Before(*obj.RetainUntilDate) {
-			return ErrObjectLocked
-		}
+	// Validate retention mode
+	if retention.Mode != "" && retention.Mode != RetentionModeGovernance &&
+		retention.Mode != RetentionModeCompliance {
+		return ErrInvalidObjectLockConfig
 	}
 
-	// Check if object is locked with GOVERNANCE mode
-	if obj.RetentionMode == RetentionModeGovernance && !bypassGovernance &&
-		obj.RetainUntilDate != nil {
-		if time.Now().Before(*obj.RetainUntilDate) {
-			return ErrObjectLocked
-		}
-	}
-
-	obj.RetentionMode = retention.Mode
+	// Parse new retain-until-date
+	var newRetainUntil *time.Time
 	if retention.RetainUntilDate != "" {
 		t, err := time.Parse(time.RFC3339, retention.RetainUntilDate)
 		if err != nil {
 			return ErrInvalidRequest
 		}
-		obj.RetainUntilDate = &t
+		newRetainUntil = &t
 	}
+
+	// For GOVERNANCE mode with bypass, or for COMPLIANCE mode that has expired, allow any change.
+	// For active locks without bypass: only allow extending the retention period (same mode).
+	if obj.RetentionMode == RetentionModeGovernance && !bypassGovernance &&
+		obj.RetainUntilDate != nil && time.Now().Before(*obj.RetainUntilDate) {
+		// Cannot change mode without bypass
+		if retention.Mode != obj.RetentionMode {
+			return ErrObjectLocked
+		}
+		// Can only extend the period
+		if newRetainUntil == nil || newRetainUntil.Before(*obj.RetainUntilDate) {
+			return ErrObjectLocked
+		}
+	}
+	if obj.RetentionMode == RetentionModeCompliance &&
+		obj.RetainUntilDate != nil && time.Now().Before(*obj.RetainUntilDate) {
+		// Cannot change mode for COMPLIANCE
+		if retention.Mode != obj.RetentionMode {
+			return ErrObjectLocked
+		}
+		// Can only extend the period
+		if newRetainUntil == nil || newRetainUntil.Before(*obj.RetainUntilDate) {
+			return ErrObjectLocked
+		}
+	}
+
+	obj.RetentionMode = retention.Mode
+	obj.RetainUntilDate = newRetainUntil
 
 	return nil
 }
@@ -257,6 +311,11 @@ func (b *Backend) PutObjectLegalHold(
 
 	if obj.IsDeleteMarker {
 		return ErrObjectNotFound
+	}
+
+	// Validate legal hold status
+	if legalHold.Status != LegalHoldStatusOn && legalHold.Status != LegalHoldStatusOff {
+		return ErrInvalidObjectLockConfig
 	}
 
 	obj.LegalHoldStatus = legalHold.Status

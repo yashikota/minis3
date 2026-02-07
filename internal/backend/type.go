@@ -6,11 +6,21 @@ import (
 )
 
 type ListAllMyBucketsResult struct {
-	XMLName           xml.Name     `xml:"ListAllMyBucketsResult"`
-	Owner             *Owner       `xml:"Owner"`
-	Buckets           []BucketInfo `xml:"Buckets>Bucket"`
-	ContinuationToken string       `xml:"ContinuationToken,omitempty"`
-	Prefix            string       `xml:"Prefix,omitempty"`
+	XMLName           xml.Name      `xml:"ListAllMyBucketsResult"`
+	Owner             *Owner        `xml:"Owner"`
+	Buckets           []BucketInfo  `xml:"Buckets>Bucket"`
+	ContinuationToken string        `xml:"ContinuationToken,omitempty"`
+	Prefix            string        `xml:"Prefix,omitempty"`
+	Summary           *UsageSummary `xml:"Summary,omitempty"`
+}
+
+// UsageSummary contains RGW-style account usage quota information.
+type UsageSummary struct {
+	QuotaMaxBytes             string `xml:"QuotaMaxBytes"`
+	QuotaMaxBuckets           string `xml:"QuotaMaxBuckets"`
+	QuotaMaxObjCount          string `xml:"QuotaMaxObjCount"`
+	QuotaMaxBytesPerBucket    string `xml:"QuotaMaxBytesPerBucket"`
+	QuotaMaxObjCountPerBucket string `xml:"QuotaMaxObjCountPerBucket"`
 }
 
 type Owner struct {
@@ -102,7 +112,7 @@ type ListBucketV2Result struct {
 	MaxKeys               int            `xml:"MaxKeys"`
 	KeyCount              int            `xml:"KeyCount"`
 	IsTruncated           bool           `xml:"IsTruncated"`
-	ContinuationToken     string         `xml:"ContinuationToken,omitempty"`
+	ContinuationToken     *string        `xml:"ContinuationToken,omitempty"`
 	NextContinuationToken string         `xml:"NextContinuationToken,omitempty"`
 	StartAfter            string         `xml:"StartAfter,omitempty"`
 	Contents              []ObjectInfo   `xml:"Contents,omitempty"`
@@ -323,6 +333,8 @@ type MultipartUpload struct {
 	StorageClass         string
 	ServerSideEncryption string
 	SSEKMSKeyId          string
+	SSECustomerAlgorithm string
+	SSECustomerKeyMD5    string
 }
 
 // PartInfo represents an uploaded part.

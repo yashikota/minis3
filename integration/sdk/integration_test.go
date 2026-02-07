@@ -542,6 +542,150 @@ func TestListObjectsV2(t *testing.T) {
 			t.Error("Expected IsTruncated to be false with max-keys=0")
 		}
 	})
+
+	t.Run("ContinuationTokenPriorityOverStartAfter", func(t *testing.T) {
+		priorityBucket := "list-v2-priority-test"
+		keys := []string{"asdf", "boo/bar", "boo/baz/xyzzy", "cquux/thud"}
+		t.Cleanup(func() {
+			for _, key := range keys {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket: aws.String(priorityBucket),
+					Key:    aws.String(key),
+				})
+			}
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(priorityBucket),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(priorityBucket),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+
+		for _, key := range keys {
+			_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+				Bucket: aws.String(priorityBucket),
+				Key:    aws.String(key),
+				Body:   strings.NewReader("x"),
+			})
+			if err != nil {
+				t.Fatalf("PutObject failed for %s: %v", key, err)
+			}
+		}
+
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:            aws.String(priorityBucket),
+			Delimiter:         aws.String("/"),
+			MaxKeys:           aws.Int32(1),
+			ContinuationToken: aws.String("asdf"),
+			StartAfter:        aws.String("zzz"),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+		if len(resp.CommonPrefixes) != 1 || *resp.CommonPrefixes[0].Prefix != "boo/" {
+			t.Fatalf(
+				"expected boo/ from continuation-token precedence, got %+v",
+				resp.CommonPrefixes,
+			)
+		}
+		if resp.ContinuationToken == nil || *resp.ContinuationToken != "asdf" {
+			t.Fatalf("expected ContinuationToken=asdf in response, got %v", resp.ContinuationToken)
+		}
+	})
+
+	t.Run("DelimiterContinuationNoPrefixReplay", func(t *testing.T) {
+		replayBucket := "list-v2-replay-test"
+		keys := []string{"asdf", "boo/bar", "boo/baz/xyzzy", "cquux/bla", "cquux/thud"}
+		t.Cleanup(func() {
+			for _, key := range keys {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket: aws.String(replayBucket),
+					Key:    aws.String(key),
+				})
+			}
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(replayBucket),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(replayBucket),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+		for _, key := range keys {
+			_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+				Bucket: aws.String(replayBucket),
+				Key:    aws.String(key),
+				Body:   strings.NewReader("x"),
+			})
+			if err != nil {
+				t.Fatalf("PutObject failed for %s: %v", key, err)
+			}
+		}
+
+		page1, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:    aws.String(replayBucket),
+			Delimiter: aws.String("/"),
+			MaxKeys:   aws.Int32(1),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 page1 failed: %v", err)
+		}
+		page2, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:            aws.String(replayBucket),
+			Delimiter:         aws.String("/"),
+			MaxKeys:           aws.Int32(1),
+			ContinuationToken: page1.NextContinuationToken,
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 page2 failed: %v", err)
+		}
+		page3, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:            aws.String(replayBucket),
+			Delimiter:         aws.String("/"),
+			MaxKeys:           aws.Int32(1),
+			ContinuationToken: page2.NextContinuationToken,
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 page3 failed: %v", err)
+		}
+
+		if len(page1.Contents) != 1 || *page1.Contents[0].Key != "asdf" {
+			t.Fatalf("unexpected page1 contents: %+v", page1.Contents)
+		}
+		if len(page2.CommonPrefixes) != 1 || *page2.CommonPrefixes[0].Prefix != "boo/" {
+			t.Fatalf("unexpected page2 prefixes: %+v", page2.CommonPrefixes)
+		}
+		if len(page3.CommonPrefixes) != 1 || *page3.CommonPrefixes[0].Prefix != "cquux/" {
+			t.Fatalf("unexpected page3 prefixes: %+v", page3.CommonPrefixes)
+		}
+		if page3.IsTruncated != nil && *page3.IsTruncated {
+			t.Fatal("expected page3 to be the last page")
+		}
+	})
+
+	t.Run("KeyCountMatchesObjectsAndPrefixes", func(t *testing.T) {
+		resp, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+			Bucket:    aws.String(bucketName),
+			Delimiter: aws.String("/"),
+		})
+		if err != nil {
+			t.Fatalf("ListObjectsV2 failed: %v", err)
+		}
+		if resp.KeyCount == nil {
+			t.Fatal("expected KeyCount to be set")
+		}
+		expected := len(resp.Contents) + len(resp.CommonPrefixes)
+		if int(*resp.KeyCount) != expected {
+			t.Fatalf("unexpected key count: got %d want %d", *resp.KeyCount, expected)
+		}
+	})
 }
 
 func TestBucketOperations(t *testing.T) {
@@ -564,7 +708,7 @@ func TestBucketOperations(t *testing.T) {
 		}
 	})
 
-	// 2. Test: Create duplicate bucket returns BucketAlreadyOwnedByYou
+	// 2. Test: Create duplicate bucket behaves compatibly
 	t.Run("CreateDuplicateBucket", func(t *testing.T) {
 		bucketName := "test-duplicate-bucket"
 		t.Cleanup(func() {
@@ -581,17 +725,17 @@ func TestBucketOperations(t *testing.T) {
 			t.Fatalf("First CreateBucket failed: %v", err)
 		}
 
-		// Create second time - should get BucketAlreadyOwnedByYou error
+		// Create second time - S3-compatible implementations may either:
+		// - return success (idempotent behavior), or
+		// - return BucketAlreadyOwnedByYou.
 		_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
 			Bucket: aws.String(bucketName),
 		})
-		if err == nil {
-			t.Fatal("Expected error when creating duplicate bucket")
-		}
-		// Check error type using SDK typed error
-		var baoby *types.BucketAlreadyOwnedByYou
-		if !errors.As(err, &baoby) {
-			t.Errorf("Expected BucketAlreadyOwnedByYou error, got: %v", err)
+		if err != nil {
+			var baoby *types.BucketAlreadyOwnedByYou
+			if !errors.As(err, &baoby) {
+				t.Errorf("Expected success or BucketAlreadyOwnedByYou, got: %v", err)
+			}
 		}
 	})
 
@@ -1030,6 +1174,88 @@ func TestListObjectsV1(t *testing.T) {
 
 		if len(resp.Contents) != 0 {
 			t.Errorf("Expected 0 objects for nonexistent prefix, got %d", len(resp.Contents))
+		}
+	})
+
+	t.Run("DelimiterPaginationNoDuplicatePrefixes", func(t *testing.T) {
+		pagedBucket := "list-v1-delim-paging-test"
+		keys := []string{"asdf", "boo/bar", "boo/baz/xyzzy", "cquux/thud", "cquux/bla"}
+		t.Cleanup(func() {
+			for _, key := range keys {
+				client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+					Bucket: aws.String(pagedBucket),
+					Key:    aws.String(key),
+				})
+			}
+			client.DeleteBucket(context.TODO(), &s3.DeleteBucketInput{
+				Bucket: aws.String(pagedBucket),
+			})
+		})
+
+		_, err := client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+			Bucket: aws.String(pagedBucket),
+		})
+		if err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+		for _, key := range keys {
+			_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+				Bucket: aws.String(pagedBucket),
+				Key:    aws.String(key),
+				Body:   strings.NewReader("x"),
+			})
+			if err != nil {
+				t.Fatalf("PutObject failed for %s: %v", key, err)
+			}
+		}
+
+		page1, err := client.ListObjects(context.TODO(), &s3.ListObjectsInput{
+			Bucket:    aws.String(pagedBucket),
+			Delimiter: aws.String("/"),
+			MaxKeys:   aws.Int32(1),
+		})
+		if err != nil {
+			t.Fatalf("ListObjects page1 failed: %v", err)
+		}
+		page2, err := client.ListObjects(context.TODO(), &s3.ListObjectsInput{
+			Bucket:    aws.String(pagedBucket),
+			Delimiter: aws.String("/"),
+			MaxKeys:   aws.Int32(1),
+			Marker:    page1.NextMarker,
+		})
+		if err != nil {
+			t.Fatalf("ListObjects page2 failed: %v", err)
+		}
+		page3, err := client.ListObjects(context.TODO(), &s3.ListObjectsInput{
+			Bucket:    aws.String(pagedBucket),
+			Delimiter: aws.String("/"),
+			MaxKeys:   aws.Int32(1),
+			Marker:    page2.NextMarker,
+		})
+		if err != nil {
+			t.Fatalf("ListObjects page3 failed: %v", err)
+		}
+
+		if len(page1.Contents) != 1 || *page1.Contents[0].Key != "asdf" {
+			t.Fatalf("unexpected page1 contents: %+v", page1.Contents)
+		}
+		if page1.NextMarker == nil || *page1.NextMarker != "asdf" {
+			t.Fatalf("unexpected page1 NextMarker: %v", page1.NextMarker)
+		}
+		if len(page2.CommonPrefixes) != 1 || *page2.CommonPrefixes[0].Prefix != "boo/" {
+			t.Fatalf("unexpected page2 prefixes: %+v", page2.CommonPrefixes)
+		}
+		if page2.NextMarker == nil || *page2.NextMarker != "boo/" {
+			t.Fatalf("unexpected page2 NextMarker: %v", page2.NextMarker)
+		}
+		if len(page3.CommonPrefixes) != 1 || *page3.CommonPrefixes[0].Prefix != "cquux/" {
+			t.Fatalf("unexpected page3 prefixes: %+v", page3.CommonPrefixes)
+		}
+		if page3.IsTruncated != nil && *page3.IsTruncated {
+			t.Fatal("expected page3 to be the final page")
+		}
+		if page3.NextMarker != nil {
+			t.Fatalf("expected final page to omit NextMarker, got %q", *page3.NextMarker)
 		}
 	})
 }

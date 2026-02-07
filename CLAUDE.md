@@ -10,8 +10,39 @@ This project uses [Task](https://taskfile.dev/) as the task runner (requires `ta
 - `task test` - Run all tests
 - `task unit-test` - Run unit test
 - `task sdk-test` - Run sdk test
-- `task s3-test` - Run s3-test
+- `task s3-test` - Run s3-test (all tests via Docker Compose)
+- `task s3-test-summary` - Show s3-test pass/fail/skip summary from log
 - `go test -v -run TestName ./...` - Run a specific test
+
+### Running Individual s3-tests
+
+s3-test uses Docker Compose with Ceph s3-tests (pytest). To run individual tests:
+
+```bash
+cd integration/s3-test
+
+# Start minis3 container first
+docker compose up -d minis3
+
+# Run a single test by name
+docker compose run --rm --entrypoint "" s3tests pytest -v --tb=short s3tests/functional/test_s3.py::test_bucket_list_empty
+
+# Run tests by marker (category)
+docker compose run --rm --entrypoint "" s3tests pytest -v --tb=short -m tagging s3tests/functional/test_s3.py
+docker compose run --rm --entrypoint "" s3tests pytest -v --tb=short -m copy s3tests/functional/test_s3.py
+docker compose run --rm --entrypoint "" s3tests pytest -v --tb=short -m encryption s3tests/functional/test_s3.py
+docker compose run --rm --entrypoint "" s3tests pytest -v --tb=short -m lifecycle s3tests/functional/test_s3.py
+docker compose run --rm --entrypoint "" s3tests pytest -v --tb=short -m list_objects_v2 s3tests/functional/test_s3.py
+docker compose run --rm --entrypoint "" s3tests pytest -v --tb=short -m bucket_policy s3tests/functional/test_s3.py
+
+# Run tests by keyword pattern
+docker compose run --rm --entrypoint "" s3tests pytest -v --tb=short -k "test_copy" s3tests/functional/test_s3.py
+
+# After testing, stop minis3
+docker compose down
+```
+
+Note: When modifying minis3 source, rebuild with `docker compose build minis3` before re-running tests.
 
 The project uses [aqua](https://aquaproj.github.io/) for tool management in CI.
 

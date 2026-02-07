@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,9 +29,12 @@ func extractMetadata(r *http.Request) map[string]string {
 			// This matches AWS S3 behavior which lowercases all metadata keys
 			metaKey := strings.ToLower(key[len("X-Amz-Meta-"):])
 			value := values[0]
-			// Try to URL-decode the value (AWS SDK may encode non-ASCII chars)
-			if decoded, err := url.QueryUnescape(value); err == nil {
-				value = decoded
+			// Decode only percent-encoded values to avoid converting literal '+' into spaces.
+			// AWS SDKs may encode non-ASCII metadata values like "Hello+World%C3%A9".
+			if strings.Contains(value, "%") {
+				if decoded, err := url.QueryUnescape(value); err == nil {
+					value = decoded
+				}
 			}
 			metadata[metaKey] = value
 		}
@@ -41,28 +47,38 @@ func extractMetadata(r *http.Request) map[string]string {
 
 // setMetadataHeaders sets x-amz-meta-* response headers without Go's canonicalization.
 // This preserves lowercase keys as required by S3 API compatibility.
-// Non-ASCII values are URL-encoded for HTTP header compatibility.
 func setMetadataHeaders(w http.ResponseWriter, metadata map[string]string) {
 	for k, v := range metadata {
-		// Check if value contains non-ASCII characters
-		needsEncoding := false
-		for i := 0; i < len(v); i++ {
-			if v[i] > 127 {
-				needsEncoding = true
-				break
-			}
-		}
-
-		encodedValue := v
-		if needsEncoding {
-			// URL-encode non-ASCII characters for HTTP header compatibility
-			encodedValue = url.QueryEscape(v)
-		}
-
 		// Use direct map access to avoid Go's header canonicalization
 		// This ensures "x-amz-meta-foo" stays lowercase, not "X-Amz-Meta-Foo"
-		w.Header()["x-amz-meta-"+k] = []string{encodedValue}
+		w.Header()["x-amz-meta-"+k] = []string{encodeHeaderMetadataValue(v)}
 	}
+}
+
+// encodeHeaderMetadataValue encodes metadata values to Latin-1 bytes when possible.
+// boto3/botocore decodes response header bytes as Latin-1, so returning UTF-8 bytes
+// for non-ASCII characters causes mojibake (e.g., "é" -> "Ã©").
+func encodeHeaderMetadataValue(v string) string {
+	needsNonASCII := false
+	for _, r := range v {
+		if r > 127 {
+			needsNonASCII = true
+			break
+		}
+	}
+	if !needsNonASCII {
+		return v
+	}
+
+	buf := make([]byte, 0, len(v))
+	for _, r := range v {
+		if r > 255 {
+			// Fallback: keep the original UTF-8 value for characters outside Latin-1.
+			return v
+		}
+		buf = append(buf, byte(r))
+	}
+	return string(buf)
 }
 
 // parseTaggingHeader parses the x-amz-tagging header value.
@@ -85,6 +101,44 @@ func parseTaggingHeader(header string) map[string]string {
 		return nil
 	}
 	return tags
+}
+
+const (
+	maxTagsPerObject = 10
+	maxTagKeyLength  = 128
+	maxTagValLength  = 256
+)
+
+// validateTags checks that tags meet S3 limits: max 10 tags, key <=128 chars, value <=256 chars.
+func validateTags(tags map[string]string) (string, string) {
+	if len(tags) > maxTagsPerObject {
+		return "InvalidTag", "Object tags cannot be greater than 10"
+	}
+	for k, v := range tags {
+		if len(k) > maxTagKeyLength {
+			return "InvalidTag", "The TagKey you have provided is too long"
+		}
+		if len(v) > maxTagValLength {
+			return "InvalidTag", "The TagValue you have provided is too long"
+		}
+	}
+	return "", ""
+}
+
+// validateTagSet checks a TagSet (from XML) for S3 limits.
+func validateTagSet(tagSet []backend.Tag) (string, string) {
+	if len(tagSet) > maxTagsPerObject {
+		return "InvalidTag", "Object tags cannot be greater than 10"
+	}
+	for _, tag := range tagSet {
+		if len(tag.Key) > maxTagKeyLength {
+			return "InvalidTag", "The TagKey you have provided is too long"
+		}
+		if len(tag.Value) > maxTagValLength {
+			return "InvalidTag", "The TagValue you have provided is too long"
+		}
+	}
+	return "", ""
 }
 
 // setObjectLockHeaders sets Object Lock response headers if present on the object.
@@ -112,6 +166,84 @@ func setStorageAndEncryptionHeaders(w http.ResponseWriter, obj *backend.Object) 
 	if obj.SSEKMSKeyId != "" {
 		w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", obj.SSEKMSKeyId)
 	}
+	if obj.SSECustomerAlgorithm != "" {
+		w.Header().Set("x-amz-server-side-encryption-customer-algorithm", obj.SSECustomerAlgorithm)
+	}
+	if obj.SSECustomerKeyMD5 != "" {
+		w.Header().Set("x-amz-server-side-encryption-customer-key-md5", obj.SSECustomerKeyMD5)
+	}
+}
+
+// validateSSEHeaders validates server-side encryption headers on a write request (PutObject, CreateMultipartUpload).
+// Returns (errorCode, errorMessage) or ("", "") if valid.
+func validateSSEHeaders(r *http.Request) (string, string) {
+	sse := r.Header.Get("x-amz-server-side-encryption")
+	sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id")
+	sseCA := r.Header.Get("x-amz-server-side-encryption-customer-algorithm")
+	sseCKey := r.Header.Get("x-amz-server-side-encryption-customer-key")
+	sseCKeyMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5")
+
+	// Validate SSE algorithm value
+	if sse != "" && sse != "AES256" && sse != "aws:kms" && sse != "aws:kms:dsse" {
+		return "InvalidArgument", "Invalid x-amz-server-side-encryption header value."
+	}
+
+	// SSE-C and SSE-S3/SSE-KMS are mutually exclusive
+	if sseCA != "" && sse != "" {
+		return "InvalidArgument", "Server Side Encryption with Customer provided key and target encryption are mutually exclusive."
+	}
+
+	// KMS key ID without aws:kms declaration
+	if sseKmsKeyId != "" && sse != "aws:kms" && sse != "aws:kms:dsse" {
+		return "InvalidArgument", "SSE-KMS key ID is not applicable without aws:kms encryption."
+	}
+
+	// SSE-C header completeness: all or none
+	hasAlgo := sseCA != ""
+	hasKey := sseCKey != ""
+	hasMD5 := sseCKeyMD5 != ""
+	if hasAlgo || hasKey || hasMD5 {
+		if !hasAlgo || !hasKey || !hasMD5 {
+			return "InvalidArgument", "All SSE-C headers must be provided together."
+		}
+
+		// Validate SSE-C key MD5
+		keyBytes, err := base64.StdEncoding.DecodeString(sseCKey)
+		if err != nil {
+			return "InvalidArgument", "The SSE-C key is not valid base64."
+		}
+		computedMD5 := md5.Sum(keyBytes)
+		expectedMD5 := base64.StdEncoding.EncodeToString(computedMD5[:])
+		if expectedMD5 != sseCKeyMD5 {
+			return "InvalidArgument", "The calculated MD5 hash of the key did not match the hash that was provided."
+		}
+	}
+
+	return "", ""
+}
+
+// validateSSECAccess checks if the request provides correct SSE-C headers to access an SSE-C encrypted object.
+// Returns true if access should be denied (caller should return 400).
+func validateSSECAccess(w http.ResponseWriter, r *http.Request, obj *backend.Object) bool {
+	if obj.SSECustomerAlgorithm == "" {
+		return false // not SSE-C encrypted
+	}
+	// Object was encrypted with SSE-C - require SSE-C headers on access
+	reqAlgo := r.Header.Get("x-amz-server-side-encryption-customer-algorithm")
+	reqKeyMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5")
+	if reqAlgo == "" {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest",
+			"The object was stored using a form of Server Side Encryption. "+
+				"The correct parameters must be provided to retrieve the object.")
+		return true
+	}
+	// Verify key MD5 matches
+	if reqKeyMD5 != obj.SSECustomerKeyMD5 {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest",
+			"The provided encryption parameters did not match the ones used originally.")
+		return true
+	}
+	return false
 }
 
 // setChecksumResponseHeaders sets checksum-related response headers based on object's checksum data.
@@ -155,6 +287,10 @@ func inferChecksumAlgorithmFromTrailer(trailer string) string {
 // Returns (data, size, found). If the object has no parts or the part number is invalid, found is false.
 func getPartData(obj *backend.Object, partNumber int) ([]byte, int64, bool) {
 	if len(obj.Parts) == 0 {
+		// Non-multipart object: PartNumber=1 returns entire object
+		if partNumber == 1 {
+			return obj.Data, obj.Size, true
+		}
 		return nil, 0, false
 	}
 
@@ -188,6 +324,19 @@ func parseExpires(value string) *time.Time {
 		return &t
 	}
 	return nil
+}
+
+func stripAWSChunkedContentEncoding(contentEncoding string) string {
+	parts := strings.Split(contentEncoding, ",")
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		token := strings.TrimSpace(part)
+		if token == "" || token == "aws-chunked" {
+			continue
+		}
+		filtered = append(filtered, token)
+	}
+	return strings.Join(filtered, ", ")
 }
 
 // ConditionalResult represents the result of evaluating conditional headers.
@@ -529,10 +678,48 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		// Strip aws-chunked from content encoding (it's a transfer encoding, not content encoding)
 		storedContentEncoding := contentEncoding
 		if isAWSChunkedEncoding(contentEncoding) {
-			storedContentEncoding = strings.Replace(contentEncoding, "aws-chunked", "", 1)
-			storedContentEncoding = strings.TrimPrefix(storedContentEncoding, ",")
-			storedContentEncoding = strings.TrimSuffix(storedContentEncoding, ",")
-			storedContentEncoding = strings.TrimSpace(storedContentEncoding)
+			storedContentEncoding = stripAWSChunkedContentEncoding(contentEncoding)
+		}
+
+		existingObj, getObjErr := h.backend.GetObject(bucketName, key)
+		bucketExists := !errors.Is(getObjErr, backend.ErrBucketNotFound)
+		objectExists := getObjErr == nil && existingObj != nil && !existingObj.IsDeleteMarker
+		if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && bucketExists {
+			if !objectExists {
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchKey",
+					"The specified key does not exist.",
+				)
+				return
+			}
+			if !matchesETag(ifMatch, existingObj.ETag) {
+				backend.WriteError(
+					w,
+					http.StatusPreconditionFailed,
+					"PreconditionFailed",
+					"At least one of the pre-conditions you specified did not hold.",
+				)
+				return
+			}
+		}
+		if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && bucketExists {
+			if objectExists && matchesETag(ifNoneMatch, existingObj.ETag) {
+				backend.WriteError(
+					w,
+					http.StatusPreconditionFailed,
+					"PreconditionFailed",
+					"At least one of the pre-conditions you specified did not hold.",
+				)
+				return
+			}
+		}
+
+		inlineTags := parseTaggingHeader(r.Header.Get("x-amz-tagging"))
+		if errCode, errMsg := validateTags(inlineTags); errCode != "" {
+			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+			return
 		}
 
 		opts := backend.PutObjectOptions{
@@ -543,7 +730,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			ContentEncoding:    storedContentEncoding,
 			ContentLanguage:    r.Header.Get("Content-Language"),
 			ContentDisposition: r.Header.Get("Content-Disposition"),
-			Tags:               parseTaggingHeader(r.Header.Get("x-amz-tagging")),
+			Tags:               inlineTags,
 		}
 
 		// Extract Object Lock headers
@@ -565,12 +752,31 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.StorageClass = storageClass
 		}
 
+		// Evaluate bucket policy (policy denial takes priority)
+		if !h.checkAccess(r, bucketName, "s3:PutObject", key) {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+
+		// Validate Server-Side Encryption headers
+		if errCode, errMsg := validateSSEHeaders(r); errCode != "" {
+			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+			return
+		}
+
 		// Extract Server-Side Encryption headers
 		if sse := r.Header.Get("x-amz-server-side-encryption"); sse != "" {
 			opts.ServerSideEncryption = sse
 		}
 		if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
 			opts.SSEKMSKeyId = sseKmsKeyId
+		}
+		// SSE-C headers
+		if sseCA := r.Header.Get("x-amz-server-side-encryption-customer-algorithm"); sseCA != "" {
+			opts.SSECustomerAlgorithm = sseCA
+		}
+		if sseCKMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5"); sseCKMD5 != "" {
+			opts.SSECustomerKeyMD5 = sseCKMD5
 		}
 
 		// Extract Website Redirect Location header
@@ -625,6 +831,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
+		if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+			if err := h.backend.PutObjectACL(bucketName, key, obj.VersionId, backend.CannedACLToPolicy(cannedACL)); err != nil {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+				return
+			}
+		}
 		w.Header().Set("ETag", obj.ETag)
 		// Add version ID header if versioning is enabled
 		if obj.VersionId != backend.NullVersionId {
@@ -642,6 +854,19 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodGet:
+		// Check bucket policy for GetObject
+		if !h.checkAccess(r, bucketName, "s3:GetObject", key) {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+
+		// Reject SSE write-headers on read operations
+		if r.Header.Get("x-amz-server-side-encryption") != "" {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
+				"x-amz-server-side-encryption header is not applicable to GET requests.")
+			return
+		}
+
 		versionId := r.URL.Query().Get("versionId")
 		var obj *backend.Object
 		var err error
@@ -693,6 +918,26 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
+		// Check PartNumber validity before SSE-C access (invalid part takes priority)
+		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
+			partNumber, parseErr := strconv.Atoi(partNumberStr)
+			if parseErr != nil || partNumber < 1 {
+				backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
+					"Part number must be a positive integer.")
+				return
+			}
+			_, _, found := getPartData(obj, partNumber)
+			if !found {
+				backend.WriteError(w, http.StatusBadRequest, "InvalidPart",
+					"The requested part number is not valid.")
+				return
+			}
+		}
+
+		// Validate SSE-C access
+		if validateSSECAccess(w, r, obj) {
+			return
+		}
 
 		// Evaluate conditional headers before returning content
 		condResult := evaluateConditionalHeaders(r, obj)
@@ -701,6 +946,15 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 			if obj.VersionId != backend.NullVersionId {
 				w.Header().Set("x-amz-version-id", obj.VersionId)
+			}
+			if condResult.StatusCode == http.StatusPreconditionFailed {
+				backend.WriteError(
+					w,
+					http.StatusPreconditionFailed,
+					"PreconditionFailed",
+					"At least one of the pre-conditions you specified did not hold.",
+				)
+				return
 			}
 			w.WriteHeader(condResult.StatusCode)
 			return
@@ -714,9 +968,10 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if obj.VersionId != backend.NullVersionId {
 			w.Header().Set("x-amz-version-id", obj.VersionId)
 		}
-		// Return checksum headers only when ChecksumMode is ENABLED
+		// Return checksum headers only when ChecksumMode is ENABLED and not a Range request.
+		// S3 does not return object-level checksums for range (partial) responses.
 		checksumMode := r.Header.Get("x-amz-checksum-mode")
-		if strings.EqualFold(checksumMode, "ENABLED") {
+		if strings.EqualFold(checksumMode, "ENABLED") && r.Header.Get("Range") == "" {
 			setChecksumResponseHeaders(w, obj)
 		}
 		// Set optional headers if present
@@ -749,6 +1004,11 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		// Apply response header overrides from query parameters
 		applyResponseOverrides(w, r)
 
+		// Set tagging count header
+		if len(obj.Tags) > 0 {
+			w.Header().Set("x-amz-tagging-count", fmt.Sprintf("%d", len(obj.Tags)))
+		}
+
 		// Set parts count header for multipart objects
 		if len(obj.Parts) > 0 {
 			w.Header().Set("x-amz-mp-parts-count", fmt.Sprintf("%d", len(obj.Parts)))
@@ -770,9 +1030,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			if !found {
 				backend.WriteError(
 					w,
-					http.StatusRequestedRangeNotSatisfiable,
-					"InvalidPartNumber",
-					"The requested partnumber is not satisfiable.",
+					http.StatusBadRequest,
+					"InvalidPart",
+					"The requested part number is not valid.",
 				)
 				return
 			}
@@ -810,6 +1070,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		_, _ = w.Write(obj.Data)
 
 	case http.MethodDelete:
+		// Check bucket policy for DeleteObject
+		if !h.checkAccess(r, bucketName, "s3:DeleteObject", key) {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+
 		versionId := r.URL.Query().Get("versionId")
 		bypassGovernance := strings.EqualFold(
 			r.Header.Get("x-amz-bypass-governance-retention"),
@@ -866,6 +1132,19 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		w.WriteHeader(http.StatusNoContent)
 
 	case http.MethodHead:
+		// Check bucket policy for HeadObject
+		if !h.checkAccess(r, bucketName, "s3:GetObject", key) {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+
+		// Reject SSE write-headers on read operations
+		if r.Header.Get("x-amz-server-side-encryption") != "" {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
+				"x-amz-server-side-encryption header is not applicable to HEAD requests.")
+			return
+		}
+
 		versionId := r.URL.Query().Get("versionId")
 		var obj *backend.Object
 		var err error
@@ -891,6 +1170,10 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		// Validate SSE-C access
+		if validateSSECAccess(w, r, obj) {
+			return
+		}
 
 		// Evaluate conditional headers before returning metadata
 		condResult := evaluateConditionalHeaders(r, obj)
@@ -899,6 +1182,15 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 			if obj.VersionId != backend.NullVersionId {
 				w.Header().Set("x-amz-version-id", obj.VersionId)
+			}
+			if condResult.StatusCode == http.StatusPreconditionFailed {
+				backend.WriteError(
+					w,
+					http.StatusPreconditionFailed,
+					"PreconditionFailed",
+					"At least one of the pre-conditions you specified did not hold.",
+				)
+				return
 			}
 			w.WriteHeader(condResult.StatusCode)
 			return
@@ -944,6 +1236,11 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.Header().Set("x-amz-website-redirect-location", obj.WebsiteRedirectLocation)
 		}
 
+		// Set tagging count header
+		if len(obj.Tags) > 0 {
+			w.Header().Set("x-amz-tagging-count", fmt.Sprintf("%d", len(obj.Tags)))
+		}
+
 		// Set parts count header for multipart objects
 		if len(obj.Parts) > 0 {
 			w.Header().Set("x-amz-mp-parts-count", fmt.Sprintf("%d", len(obj.Parts)))
@@ -965,9 +1262,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			if !found {
 				backend.WriteError(
 					w,
-					http.StatusRequestedRangeNotSatisfiable,
-					"InvalidPartNumber",
-					"The requested partnumber is not satisfiable.",
+					http.StatusBadRequest,
+					"InvalidPart",
+					"The requested part number is not valid.",
 				)
 				return
 			}
@@ -1016,6 +1313,15 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 	}
 
 	if len(deleteReq.Objects) == 0 {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema",
+		)
+		return
+	}
+	if len(deleteReq.Objects) > 1000 {
 		backend.WriteError(
 			w,
 			http.StatusBadRequest,
@@ -1093,7 +1399,19 @@ func (h *Handler) handleCopyObject(
 	r *http.Request,
 	dstBucket, dstKey, copySource string,
 ) {
-	decodedCopySource, err := url.PathUnescape(copySource)
+	// Parse versionId from copy source BEFORE URL-decoding
+	// (format: /bucket/key?versionId=xxx or /bucket/key%3Fencoded?versionId=xxx)
+	var srcVersionId string
+	pathPart := copySource
+	if idx := strings.Index(copySource, "?"); idx != -1 {
+		queryStr := copySource[idx+1:]
+		pathPart = copySource[:idx]
+		if values, err := url.ParseQuery(queryStr); err == nil {
+			srcVersionId = values.Get("versionId")
+		}
+	}
+
+	decodedCopySource, err := url.PathUnescape(pathPart)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1104,16 +1422,6 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
-	// Parse versionId from copy source (format: /bucket/key?versionId=xxx)
-	var srcVersionId string
-	if idx := strings.Index(decodedCopySource, "?"); idx != -1 {
-		queryStr := decodedCopySource[idx+1:]
-		decodedCopySource = decodedCopySource[:idx]
-		if values, err := url.ParseQuery(queryStr); err == nil {
-			srcVersionId = values.Get("versionId")
-		}
-	}
-
 	srcBucket, srcKey := extractBucketAndKey(decodedCopySource)
 	if srcBucket == "" || srcKey == "" {
 		backend.WriteError(
@@ -1122,6 +1430,17 @@ func (h *Handler) handleCopyObject(
 			"InvalidArgument",
 			"Invalid x-amz-copy-source header",
 		)
+		return
+	}
+
+	// Check bucket policy on source bucket (GetObject)
+	if !h.checkAccess(r, srcBucket, "s3:GetObject", srcKey) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	// Check bucket policy on destination bucket (PutObject)
+	if !h.checkAccess(r, dstBucket, "s3:PutObject", dstKey) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
 
@@ -1246,6 +1565,13 @@ func (h *Handler) handleCopyObject(
 	if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
 		opts.SSEKMSKeyId = sseKmsKeyId
 	}
+	// SSE-C headers
+	if sseCA := r.Header.Get("x-amz-server-side-encryption-customer-algorithm"); sseCA != "" {
+		opts.SSECustomerAlgorithm = sseCA
+	}
+	if sseCKMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5"); sseCKMD5 != "" {
+		opts.SSECustomerKeyMD5 = sseCKMD5
+	}
 
 	// Extract Storage Class header
 	if storageClass := r.Header.Get("x-amz-storage-class"); storageClass != "" {
@@ -1306,12 +1632,7 @@ func (h *Handler) handleCopyObject(
 		w.Header().Set("x-amz-version-id", obj.VersionId)
 	}
 	// Return SSE headers
-	if obj.ServerSideEncryption != "" {
-		w.Header().Set("x-amz-server-side-encryption", obj.ServerSideEncryption)
-	}
-	if obj.SSEKMSKeyId != "" {
-		w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", obj.SSEKMSKeyId)
-	}
+	setStorageAndEncryptionHeaders(w, obj)
 
 	resp := backend.CopyObjectResult{
 		ETag:         obj.ETag,
@@ -1334,6 +1655,11 @@ func (h *Handler) handleGetObjectACL(
 	r *http.Request,
 	bucketName, key string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:GetObjectAcl", key) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	versionId := r.URL.Query().Get("versionId")
 	acl, err := h.backend.GetObjectACL(bucketName, key, versionId)
 	if err != nil {
@@ -1380,6 +1706,11 @@ func (h *Handler) handlePutObjectACL(
 	r *http.Request,
 	bucketName, key string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:PutObjectAcl", key) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	versionId := r.URL.Query().Get("versionId")
 
 	// Check for canned ACL header first
@@ -1460,6 +1791,11 @@ func (h *Handler) handleGetObjectTagging(
 	r *http.Request,
 	bucketName, key string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:GetObjectTagging", key) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	versionId := r.URL.Query().Get("versionId")
 	tags, actualVersionId, err := h.backend.GetObjectTagging(bucketName, key, versionId)
 	if err != nil {
@@ -1472,10 +1808,15 @@ func (h *Handler) handleGetObjectTagging(
 		w.Header().Set("x-amz-version-id", actualVersionId)
 	}
 
-	// Build response
+	// Build response (sort keys for deterministic output)
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	tagSet := make([]backend.Tag, 0, len(tags))
-	for k, v := range tags {
-		tagSet = append(tagSet, backend.Tag{Key: k, Value: v})
+	for _, k := range keys {
+		tagSet = append(tagSet, backend.Tag{Key: k, Value: tags[k]})
 	}
 
 	resp := backend.Tagging{
@@ -1499,6 +1840,11 @@ func (h *Handler) handlePutObjectTagging(
 	r *http.Request,
 	bucketName, key string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:PutObjectTagging", key) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	versionId := r.URL.Query().Get("versionId")
 
 	defer func() { _ = r.Body.Close() }()
@@ -1521,6 +1867,12 @@ func (h *Handler) handlePutObjectTagging(
 			"MalformedXML",
 			"The XML you provided was not well-formed or did not validate against our published schema.",
 		)
+		return
+	}
+
+	// Validate tag limits
+	if errCode, errMsg := validateTagSet(tagging.TagSet); errCode != "" {
+		backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
 		return
 	}
 

@@ -241,3 +241,73 @@ func TestIsValidJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestGetBucketUsage(t *testing.T) {
+	b := New()
+
+	t.Run("non-existent bucket", func(t *testing.T) {
+		_, _, err := b.GetBucketUsage("no-such-bucket")
+		if !errors.Is(err, ErrBucketNotFound) {
+			t.Fatalf("expected ErrBucketNotFound, got %v", err)
+		}
+	})
+
+	t.Run("unversioned bucket reflects current objects and bytes", func(t *testing.T) {
+		if err := b.CreateBucket("usage-unversioned"); err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+		if _, err := b.PutObject("usage-unversioned", "a", []byte("abc"), PutObjectOptions{}); err != nil {
+			t.Fatalf("PutObject a failed: %v", err)
+		}
+		if _, err := b.PutObject("usage-unversioned", "b", []byte("hello"), PutObjectOptions{}); err != nil {
+			t.Fatalf("PutObject b failed: %v", err)
+		}
+
+		count, bytesUsed, err := b.GetBucketUsage("usage-unversioned")
+		if err != nil {
+			t.Fatalf("GetBucketUsage failed: %v", err)
+		}
+		if count != 2 || bytesUsed != 8 {
+			t.Fatalf("unexpected usage before delete: count=%d bytes=%d", count, bytesUsed)
+		}
+
+		if _, err := b.DeleteObject("usage-unversioned", "a", false); err != nil {
+			t.Fatalf("DeleteObject failed: %v", err)
+		}
+		count, bytesUsed, err = b.GetBucketUsage("usage-unversioned")
+		if err != nil {
+			t.Fatalf("GetBucketUsage failed: %v", err)
+		}
+		if count != 1 || bytesUsed != 5 {
+			t.Fatalf("unexpected usage after delete: count=%d bytes=%d", count, bytesUsed)
+		}
+	})
+
+	t.Run("latest delete marker still counts latest non-delete version", func(t *testing.T) {
+		if err := b.CreateBucket("usage-versioned"); err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+		if err := b.SetBucketVersioning("usage-versioned", VersioningEnabled, MFADeleteDisabled); err != nil {
+			t.Fatalf("SetBucketVersioning failed: %v", err)
+		}
+
+		if _, err := b.PutObject("usage-versioned", "k", []byte("abc"), PutObjectOptions{}); err != nil {
+			t.Fatalf("PutObject failed: %v", err)
+		}
+		if _, err := b.DeleteObject("usage-versioned", "k", false); err != nil {
+			t.Fatalf("DeleteObject failed: %v", err)
+		}
+
+		count, bytesUsed, err := b.GetBucketUsage("usage-versioned")
+		if err != nil {
+			t.Fatalf("GetBucketUsage failed: %v", err)
+		}
+		if count != 1 || bytesUsed != 3 {
+			t.Fatalf(
+				"unexpected usage with delete marker latest: count=%d bytes=%d",
+				count,
+				bytesUsed,
+			)
+		}
+	})
+}

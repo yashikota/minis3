@@ -3,10 +3,8 @@ package backend
 import (
 	"bytes"
 	"crypto/md5"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"sort"
 	"strings"
@@ -29,6 +27,8 @@ type CreateMultipartUploadOptions struct {
 	StorageClass         string
 	ServerSideEncryption string
 	SSEKMSKeyId          string
+	SSECustomerAlgorithm string
+	SSECustomerKeyMD5    string
 }
 
 // CreateMultipartUpload initiates a multipart upload and returns an upload ID.
@@ -64,6 +64,8 @@ func (b *Backend) CreateMultipartUpload(
 		StorageClass:         opts.StorageClass,
 		ServerSideEncryption: opts.ServerSideEncryption,
 		SSEKMSKeyId:          opts.SSEKMSKeyId,
+		SSECustomerAlgorithm: opts.SSECustomerAlgorithm,
+		SSECustomerKeyMD5:    opts.SSECustomerKeyMD5,
 	}
 
 	b.uploads[uploadId] = upload
@@ -180,10 +182,7 @@ func (b *Backend) CompleteMultipartUpload(
 	}
 	finalETag := fmt.Sprintf("\"%x-%d\"", md5Hash.Sum(nil), len(parts))
 
-	// Calculate checksums
 	data := combinedData.Bytes()
-	crc32Hash := crc32.NewIEEE()
-	_, _ = crc32Hash.Write(data)
 
 	// Determine version ID
 	var versionId string
@@ -192,6 +191,19 @@ func (b *Backend) CompleteMultipartUpload(
 		versionId = GenerateVersionId()
 	default:
 		versionId = NullVersionId
+	}
+
+	// Apply bucket default encryption if no explicit SSE is specified
+	if upload.ServerSideEncryption == "" && upload.SSECustomerAlgorithm == "" {
+		if bucket.EncryptionConfiguration != nil && len(bucket.EncryptionConfiguration.Rules) > 0 {
+			rule := bucket.EncryptionConfiguration.Rules[0]
+			if rule.ApplyServerSideEncryptionByDefault != nil {
+				upload.ServerSideEncryption = rule.ApplyServerSideEncryptionByDefault.SSEAlgorithm
+				if upload.SSEKMSKeyId == "" {
+					upload.SSEKMSKeyId = rule.ApplyServerSideEncryptionByDefault.KMSMasterKeyID
+				}
+			}
+		}
 	}
 
 	contentType := upload.ContentType
@@ -214,7 +226,6 @@ func (b *Backend) CompleteMultipartUpload(
 		Size:                 int64(len(data)),
 		ContentType:          contentType,
 		Data:                 data,
-		ChecksumCRC32:        base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil)),
 		Metadata:             upload.Metadata,
 		Tags:                 upload.Tags,
 		CacheControl:         upload.CacheControl,
@@ -225,6 +236,8 @@ func (b *Backend) CompleteMultipartUpload(
 		StorageClass:         storageClass,
 		ServerSideEncryption: upload.ServerSideEncryption,
 		SSEKMSKeyId:          upload.SSEKMSKeyId,
+		SSECustomerAlgorithm: upload.SSECustomerAlgorithm,
+		SSECustomerKeyMD5:    upload.SSECustomerKeyMD5,
 	}
 
 	// Save part information for PartNumber support in GetObject/HeadObject
@@ -449,7 +462,7 @@ func (b *Backend) ListParts(
 
 // CopyPart copies a part from an existing object.
 func (b *Backend) CopyPart(
-	srcBucket, srcKey, dstBucket, dstKey, uploadId string,
+	srcBucket, srcKey, srcVersionId, dstBucket, dstKey, uploadId string,
 	partNumber int,
 	rangeStart, rangeEnd int64, // -1 means not specified
 ) (*PartInfo, error) {
@@ -477,9 +490,22 @@ func (b *Backend) CopyPart(
 		return nil, ErrSourceObjectNotFound
 	}
 
-	srcObj := srcVersions.getLatestVersion()
-	if srcObj == nil {
-		return nil, ErrSourceObjectNotFound
+	var srcObj *Object
+	if srcVersionId != "" {
+		for _, v := range srcVersions.Versions {
+			if v.VersionId == srcVersionId {
+				srcObj = v
+				break
+			}
+		}
+		if srcObj == nil {
+			return nil, ErrSourceObjectNotFound
+		}
+	} else {
+		srcObj = srcVersions.getLatestVersion()
+		if srcObj == nil {
+			return nil, ErrSourceObjectNotFound
+		}
 	}
 
 	// Get the data range
@@ -487,8 +513,18 @@ func (b *Backend) CopyPart(
 	if rangeStart < 0 {
 		data = srcObj.Data
 	} else {
-		if rangeEnd < 0 || rangeEnd >= srcObj.Size {
+		// Validate range
+		if rangeStart >= srcObj.Size {
+			return nil, ErrInvalidRange
+		}
+		if rangeEnd >= srcObj.Size {
+			return nil, ErrInvalidRange
+		}
+		if rangeEnd < 0 {
 			rangeEnd = srcObj.Size - 1
+		}
+		if rangeStart > rangeEnd {
+			return nil, ErrInvalidRange
 		}
 		data = srcObj.Data[rangeStart : rangeEnd+1]
 	}
@@ -508,4 +544,13 @@ func (b *Backend) CopyPart(
 
 	upload.Parts[partNumber] = part
 	return part, nil
+}
+
+// GetUpload returns a multipart upload by its upload ID.
+func (b *Backend) GetUpload(uploadId string) (*MultipartUpload, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	upload, ok := b.uploads[uploadId]
+	return upload, ok
 }

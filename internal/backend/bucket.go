@@ -114,6 +114,16 @@ func (b *Backend) CreateBucket(name string) error {
 	return nil
 }
 
+// SetBucketOwner sets the owner access key for a bucket.
+func (b *Backend) SetBucketOwner(name, ownerAccessKey string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if bucket, ok := b.buckets[name]; ok {
+		bucket.OwnerAccessKey = ownerAccessKey
+	}
+}
+
 // GetBucket retrieves a bucket by name
 func (b *Backend) GetBucket(name string) (*Bucket, bool) {
 	b.mu.RLock()
@@ -210,6 +220,31 @@ func sortBucketsByName(buckets []*Bucket) {
 	})
 }
 
+// GetBucketUsage returns the number of visible objects and total bytes used in a bucket.
+// It counts only the latest non-delete-marker version for each key.
+func (b *Backend) GetBucketUsage(bucketName string) (int, int64, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return 0, 0, ErrBucketNotFound
+	}
+
+	var objectCount int
+	var bytesUsed int64
+	for _, versions := range bucket.Objects {
+		obj := versions.getLatestVersion()
+		if obj == nil {
+			continue
+		}
+		objectCount++
+		bytesUsed += obj.Size
+	}
+
+	return objectCount, bytesUsed, nil
+}
+
 // SetBucketVersioning sets the versioning configuration for a bucket.
 func (b *Backend) SetBucketVersioning(
 	bucketName string,
@@ -222,6 +257,11 @@ func (b *Backend) SetBucketVersioning(
 	bucket, exists := b.buckets[bucketName]
 	if !exists {
 		return ErrBucketNotFound
+	}
+
+	// Cannot suspend versioning on Object Lock enabled buckets
+	if bucket.ObjectLockEnabled && status == VersioningSuspended {
+		return ErrObjectLockNotEnabled
 	}
 
 	bucket.VersioningStatus = status
@@ -576,6 +616,21 @@ func IsACLPublicRead(acl *AccessControlPolicy) bool {
 	return false
 }
 
+// IsACLPublicWrite checks if the ACL grants public write access.
+func IsACLPublicWrite(acl *AccessControlPolicy) bool {
+	if acl == nil {
+		return false
+	}
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee != nil &&
+			grant.Grantee.URI == AllUsersURI &&
+			(grant.Permission == PermissionWrite || grant.Permission == PermissionFullControl) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsObjectPubliclyReadable checks if an object is publicly readable.
 func (b *Backend) IsObjectPubliclyReadable(bucketName, key, versionId string) bool {
 	acl, err := b.GetObjectACL(bucketName, key, versionId)
@@ -592,6 +647,15 @@ func (b *Backend) IsBucketPubliclyReadable(bucketName string) bool {
 		return false
 	}
 	return IsACLPublicRead(acl)
+}
+
+// IsBucketPubliclyWritable checks if a bucket is publicly writable.
+func (b *Backend) IsBucketPubliclyWritable(bucketName string) bool {
+	acl, err := b.GetBucketACL(bucketName)
+	if err != nil {
+		return false
+	}
+	return IsACLPublicWrite(acl)
 }
 
 // GetBucketLifecycleConfiguration returns the lifecycle configuration for a bucket.

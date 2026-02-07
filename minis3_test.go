@@ -34,6 +34,7 @@ func TestMinis3(t *testing.T) {
 
 	// 2. Create Bucket
 	req, _ := http.NewRequest("PUT", server.URL+"/testbucket", nil)
+	req.Header.Set("x-amz-acl", "public-read-write")
 	resp, err = client.Do(req)
 	if err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -105,6 +106,7 @@ func TestDeleteObjects(t *testing.T) {
 
 	// Create bucket
 	req, _ := http.NewRequest("PUT", server.URL+"/testbucket", nil)
+	req.Header.Set("x-amz-acl", "public-read-write")
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -190,6 +192,7 @@ func TestDeleteObjectsQuietMode(t *testing.T) {
 
 	// Create bucket
 	req, _ := http.NewRequest("PUT", server.URL+"/testbucket", nil)
+	req.Header.Set("x-amz-acl", "public-read-write")
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

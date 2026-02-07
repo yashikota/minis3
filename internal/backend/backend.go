@@ -16,10 +16,16 @@ type Backend struct {
 	uploads map[string]*MultipartUpload // key: uploadId
 }
 
+var (
+	xmlMarshal = xml.Marshal
+	logFatalf  = log.Fatalf
+)
+
 // Bucket represents an S3 bucket containing objects and metadata
 type Bucket struct {
 	Name                    string
 	CreationDate            time.Time
+	OwnerAccessKey          string           // Access key of the bucket creator
 	VersioningStatus        VersioningStatus // Versioning state (Unset, Enabled, Suspended)
 	MFADelete               MFADeleteStatus  // MFA Delete configuration
 	Objects                 map[string]*ObjectVersions
@@ -75,6 +81,8 @@ type Object struct {
 	// Server-Side Encryption fields
 	ServerSideEncryption string // AES256, aws:kms, etc.
 	SSEKMSKeyId          string // KMS key ID (only for aws:kms)
+	SSECustomerAlgorithm string // AES256 (for SSE-C)
+	SSECustomerKeyMD5    string // MD5 of customer-provided key (for SSE-C)
 	// Website redirect
 	WebsiteRedirectLocation string // x-amz-website-redirect-location
 	// Multipart part info (populated after CompleteMultipartUpload)
@@ -104,6 +112,8 @@ type PutObjectOptions struct {
 	StorageClass            string            // Storage class (e.g., STANDARD)
 	ServerSideEncryption    string            // Server-side encryption algorithm
 	SSEKMSKeyId             string            // KMS key ID for SSE-KMS
+	SSECustomerAlgorithm    string            // AES256 (for SSE-C)
+	SSECustomerKeyMD5       string            // MD5 of customer-provided key (for SSE-C)
 	WebsiteRedirectLocation string            // x-amz-website-redirect-location
 	ChecksumAlgorithm       string            // CRC32, CRC32C, SHA1, SHA256
 	ChecksumCRC32           string            // Client-provided CRC32 checksum
@@ -143,7 +153,13 @@ var (
 	ErrNoSuchObjectLockConfig = errors.New(
 		"the object lock configuration does not exist",
 	)
-	ErrObjectLocked = errors.New("object is locked")
+	ErrObjectLocked            = errors.New("object is locked")
+	ErrInvalidObjectLockConfig = errors.New(
+		"invalid object lock configuration",
+	)
+	ErrInvalidRetentionPeriod = errors.New(
+		"the retention period must be extended, not shortened",
+	)
 	ErrInvalidRange = errors.New(
 		"the requested range is not satisfiable",
 	)
@@ -175,12 +191,14 @@ func WriteError(w http.ResponseWriter, code int, s3Code, message string) {
 	w.WriteHeader(code)
 	// S3 errors are XML
 	resp := ErrorResponse{
-		Code:    s3Code,
-		Message: message,
+		Code:      s3Code,
+		Message:   message,
+		RequestID: w.Header().Get("x-amz-request-id"),
+		HostId:    w.Header().Get("x-amz-id-2"),
 	}
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshal(resp)
 	if err != nil {
-		log.Fatalln("Failed to marshal XML error response:", err)
+		logFatalf("Failed to marshal XML error response: %v", err)
 		return
 	}
 	// Ignore write errors as we cannot recover from them here.
