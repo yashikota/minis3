@@ -100,3 +100,26 @@ func TestHandlerMiscBranches(t *testing.T) {
 		requireS3ErrorCode(t, w, "AccessDenied")
 	})
 }
+
+func TestHandleRequestPresignedErrorBranches(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	t.Run("v4 presigned error is returned as S3 error code", func(t *testing.T) {
+		req := newRequest(
+			http.MethodGet,
+			"http://example.test/bucket/key?X-Amz-Signature=sig&X-Amz-Algorithm=INVALID",
+			"",
+			nil,
+		)
+		w := doRequest(h, req)
+		requireStatus(t, w, http.StatusForbidden)
+		requireS3ErrorCode(t, w, "AuthorizationQueryParametersError")
+	})
+
+	t.Run("v2 presigned error is returned as S3 error code", func(t *testing.T) {
+		req := newRequest(http.MethodGet, "http://example.test/bucket/key?Signature=sig", "", nil)
+		w := doRequest(h, req)
+		requireStatus(t, w, http.StatusForbidden)
+		requireS3ErrorCode(t, w, "MissingSecurityHeader")
+	})
+}

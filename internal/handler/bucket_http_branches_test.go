@@ -201,4 +201,71 @@ func TestPublicAccessBlockAccessBranches(t *testing.T) {
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "MalformedXML")
 	})
+
+	t.Run("authorized public access block get put delete branches", func(t *testing.T) {
+		headers := map[string]string{"Authorization": authHeader("minis3-access-key")}
+
+		wGetNoConfig := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/pab-branch?publicAccessBlock",
+				"",
+				headers,
+			),
+		)
+		requireStatus(t, wGetNoConfig, http.StatusNotFound)
+		requireS3ErrorCode(t, wGetNoConfig, "NoSuchPublicAccessBlockConfiguration")
+
+		wGetNoBucket := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/no-such-pab?publicAccessBlock",
+				"",
+				headers,
+			),
+		)
+		requireStatus(t, wGetNoBucket, http.StatusNotFound)
+		requireS3ErrorCode(t, wGetNoBucket, "NoSuchBucket")
+
+		putBody := `<PublicAccessBlockConfiguration>` +
+			`<BlockPublicAcls>true</BlockPublicAcls>` +
+			`<IgnorePublicAcls>false</IgnorePublicAcls>` +
+			`<BlockPublicPolicy>true</BlockPublicPolicy>` +
+			`<RestrictPublicBuckets>false</RestrictPublicBuckets>` +
+			`</PublicAccessBlockConfiguration>`
+		wPutOK := doRequest(
+			h,
+			newRequest(
+				http.MethodPut,
+				"http://example.test/pab-branch?publicAccessBlock",
+				putBody,
+				headers,
+			),
+		)
+		requireStatus(t, wPutOK, http.StatusOK)
+
+		wGetOK := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/pab-branch?publicAccessBlock",
+				"",
+				headers,
+			),
+		)
+		requireStatus(t, wGetOK, http.StatusOK)
+
+		wDeleteOK := doRequest(
+			h,
+			newRequest(
+				http.MethodDelete,
+				"http://example.test/pab-branch?publicAccessBlock",
+				"",
+				headers,
+			),
+		)
+		requireStatus(t, wDeleteOK, http.StatusNoContent)
+	})
 }

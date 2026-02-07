@@ -191,6 +191,81 @@ func TestVerifyPresignedURLV4(t *testing.T) {
 		requirePresignedErrorCode(t, verifyPresignedURL(req), "AuthorizationQueryParametersError")
 	})
 
+	t.Run("missing credential", func(t *testing.T) {
+		req := newV4PresignedRequest(
+			t,
+			http.MethodGet,
+			"/bucket/key",
+			"minis3-access-key",
+			now,
+			300,
+		)
+		values := req.URL.Query()
+		values.Del("X-Amz-Credential")
+		req.URL.RawQuery = values.Encode()
+		requirePresignedErrorCode(t, verifyPresignedURL(req), "AuthorizationQueryParametersError")
+	})
+
+	t.Run("missing expires", func(t *testing.T) {
+		req := newV4PresignedRequest(
+			t,
+			http.MethodGet,
+			"/bucket/key",
+			"minis3-access-key",
+			now,
+			300,
+		)
+		values := req.URL.Query()
+		values.Del("X-Amz-Expires")
+		req.URL.RawQuery = values.Encode()
+		requirePresignedErrorCode(t, verifyPresignedURL(req), "AuthorizationQueryParametersError")
+	})
+
+	t.Run("missing signature parameter in v4 verifier", func(t *testing.T) {
+		req := newV4PresignedRequest(
+			t,
+			http.MethodGet,
+			"/bucket/key",
+			"minis3-access-key",
+			now,
+			300,
+		)
+		values := req.URL.Query()
+		values.Del("X-Amz-Signature")
+		req.URL.RawQuery = values.Encode()
+		requirePresignedErrorCode(t, verifyPresignedURLV4(req), "AuthorizationQueryParametersError")
+	})
+
+	t.Run("invalid date format", func(t *testing.T) {
+		req := newV4PresignedRequest(
+			t,
+			http.MethodGet,
+			"/bucket/key",
+			"minis3-access-key",
+			now,
+			300,
+		)
+		values := req.URL.Query()
+		values.Set("X-Amz-Date", "invalid-date")
+		req.URL.RawQuery = values.Encode()
+		requirePresignedErrorCode(t, verifyPresignedURL(req), "AuthorizationQueryParametersError")
+	})
+
+	t.Run("invalid credential format", func(t *testing.T) {
+		req := newV4PresignedRequest(
+			t,
+			http.MethodGet,
+			"/bucket/key",
+			"minis3-access-key",
+			now,
+			300,
+		)
+		values := req.URL.Query()
+		values.Set("X-Amz-Credential", "broken")
+		req.URL.RawQuery = values.Encode()
+		requirePresignedErrorCode(t, verifyPresignedURL(req), "AuthorizationQueryParametersError")
+	})
+
 	t.Run("invalid expires format", func(t *testing.T) {
 		req := newV4PresignedRequest(
 			t,
@@ -205,6 +280,13 @@ func TestVerifyPresignedURLV4(t *testing.T) {
 		req.URL.RawQuery = values.Encode()
 		requirePresignedErrorCode(t, verifyPresignedURL(req), "AuthorizationQueryParametersError")
 	})
+}
+
+func TestVerifyPresignedURLNonPresignedReturnsNil(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+	if err := verifyPresignedURL(req); err != nil {
+		t.Fatalf("expected nil for non-presigned request, got %v", err)
+	}
 }
 
 func TestVerifyPresignedURLV2(t *testing.T) {

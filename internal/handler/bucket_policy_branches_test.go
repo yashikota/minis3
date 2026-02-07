@@ -104,6 +104,23 @@ func TestBucketPolicyBranchCoverage(t *testing.T) {
 		)
 		requireStatus(t, wDelete, http.StatusNoContent)
 	})
+
+	t.Run("get policy no such bucket and no policy", func(t *testing.T) {
+		wMissingBucket := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/no-such-policy-bucket?policy", "", nil),
+		)
+		requireStatus(t, wMissingBucket, http.StatusNotFound)
+		requireS3ErrorCode(t, wMissingBucket, "NoSuchBucket")
+
+		mustCreateBucket(t, b, "no-policy-yet")
+		wNoPolicy := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/no-policy-yet?policy", "", nil),
+		)
+		requireStatus(t, wNoPolicy, http.StatusNotFound)
+		requireS3ErrorCode(t, wNoPolicy, "NoSuchBucketPolicy")
+	})
 }
 
 func TestBucketPolicyStatusBranches(t *testing.T) {
