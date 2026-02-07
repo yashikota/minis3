@@ -45,17 +45,16 @@ func verifyAuthorizationHeader(r *http.Request) error {
 		return nil
 	}
 
-	accessKey := extractAccessKey(r)
-	credentials := DefaultCredentials()
-	secretKey, ok := credentials[accessKey]
-	if !ok {
-		return &presignedError{
-			code:    "InvalidAccessKeyId",
-			message: "The AWS Access Key Id you provided does not exist in our records",
-		}
-	}
-
 	if strings.HasPrefix(auth, "AWS4-HMAC-SHA256") {
+		accessKey := extractAccessKey(r)
+		credentials := DefaultCredentials()
+		secretKey, ok := credentials[accessKey]
+		if !ok {
+			return &presignedError{
+				code:    "InvalidAccessKeyId",
+				message: "The AWS Access Key Id you provided does not exist in our records",
+			}
+		}
 		return verifyAuthorizationHeaderV4(r, auth, secretKey)
 	}
 	if strings.HasPrefix(auth, "AWS ") {

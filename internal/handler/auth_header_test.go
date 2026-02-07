@@ -64,15 +64,22 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 	})
 
 	t.Run("unknown access key", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
-		req.Header.Set("Authorization", "AWS unknown:sig")
+		req := newV4AuthHeaderRequest(t, "unknown", time.Now().UTC())
 		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "InvalidAccessKeyId")
 	})
 
 	t.Run("unsupported authorization scheme", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
 		req.Header.Set("Authorization", "Bearer token")
-		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "InvalidAccessKeyId")
+		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "AccessDenied")
+	})
+
+	t.Run("v2 unknown access key is accepted", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
+		req.Header.Set("Authorization", "AWS unknown:sig")
+		if err := verifyAuthorizationHeader(req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("v2 malformed", func(t *testing.T) {

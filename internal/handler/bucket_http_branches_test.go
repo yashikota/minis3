@@ -50,42 +50,46 @@ func TestBucketHTTPBranches(t *testing.T) {
 		requireS3ErrorCode(t, w, "InvalidBucketName")
 	})
 
-	t.Run("create bucket success with owner and canned acl then idempotent", func(t *testing.T) {
-		headers := map[string]string{
-			"Authorization": authHeader("minis3-access-key"),
-			"x-amz-acl":     "public-read",
-		}
-		wCreate := doRequest(
-			h,
-			newRequest(http.MethodPut, "http://example.test/create-branch-bucket", "", headers),
-		)
-		requireStatus(t, wCreate, http.StatusOK)
-		if got := wCreate.Header().Get("Location"); got != "/create-branch-bucket" {
-			t.Fatalf("unexpected location header: %q", got)
-		}
+	t.Run(
+		"create bucket success with owner and canned acl then duplicate returns conflict",
+		func(t *testing.T) {
+			headers := map[string]string{
+				"Authorization": authHeader("minis3-access-key"),
+				"x-amz-acl":     "public-read",
+			}
+			wCreate := doRequest(
+				h,
+				newRequest(http.MethodPut, "http://example.test/create-branch-bucket", "", headers),
+			)
+			requireStatus(t, wCreate, http.StatusOK)
+			if got := wCreate.Header().Get("Location"); got != "/create-branch-bucket" {
+				t.Fatalf("unexpected location header: %q", got)
+			}
 
-		bucket, ok := b.GetBucket("create-branch-bucket")
-		if !ok {
-			t.Fatal("bucket should exist after create")
-		}
-		if bucket.OwnerAccessKey != "minis3-access-key" {
-			t.Fatalf("unexpected owner: %q", bucket.OwnerAccessKey)
-		}
+			bucket, ok := b.GetBucket("create-branch-bucket")
+			if !ok {
+				t.Fatal("bucket should exist after create")
+			}
+			if bucket.OwnerAccessKey != "minis3-access-key" {
+				t.Fatalf("unexpected owner: %q", bucket.OwnerAccessKey)
+			}
 
-		acl, err := b.GetBucketACL("create-branch-bucket")
-		if err != nil {
-			t.Fatalf("GetBucketACL failed: %v", err)
-		}
-		if !isPublicACL(acl) {
-			t.Fatalf("expected public-read canned ACL, got %+v", acl)
-		}
+			acl, err := b.GetBucketACL("create-branch-bucket")
+			if err != nil {
+				t.Fatalf("GetBucketACL failed: %v", err)
+			}
+			if !isPublicACL(acl) {
+				t.Fatalf("expected public-read canned ACL, got %+v", acl)
+			}
 
-		wCreateAgain := doRequest(
-			h,
-			newRequest(http.MethodPut, "http://example.test/create-branch-bucket", "", headers),
-		)
-		requireStatus(t, wCreateAgain, http.StatusOK)
-	})
+			wCreateAgain := doRequest(
+				h,
+				newRequest(http.MethodPut, "http://example.test/create-branch-bucket", "", headers),
+			)
+			requireStatus(t, wCreateAgain, http.StatusConflict)
+			requireS3ErrorCode(t, wCreateAgain, "BucketAlreadyExists")
+		},
+	)
 
 	t.Run("head bucket missing and read stats", func(t *testing.T) {
 		wMissing := doRequest(
