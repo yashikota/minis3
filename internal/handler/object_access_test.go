@@ -9,11 +9,12 @@ import (
 	"github.com/yashikota/minis3/internal/backend"
 )
 
-func TestHandleObjectAnonymousPutWithoutPolicyIsAllowed(t *testing.T) {
+func TestHandleObjectAnonymousPutWithoutPolicyIsDenied(t *testing.T) {
 	b := backend.New()
 	if err := b.CreateBucket("bucket-private"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
+	b.SetBucketOwner("bucket-private", "owner-access")
 	h := New(b)
 
 	req := httptest.NewRequest(
@@ -24,8 +25,8 @@ func TestHandleObjectAnonymousPutWithoutPolicyIsAllowed(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d, want %d", w.Code, http.StatusOK)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("unexpected status: got %d, want %d", w.Code, http.StatusForbidden)
 	}
 }
 
@@ -60,6 +61,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 	if err := b.CreateBucket("bucket-acl"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
+	b.SetBucketOwner("bucket-acl", "owner-access")
 	if _, err := b.PutObject("bucket-acl", "obj", []byte("data"), backend.PutObjectOptions{}); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
@@ -79,7 +81,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 		}
 	})
 
-	t.Run("private object is still readable without policy deny", func(t *testing.T) {
+	t.Run("private object is not readable anonymously", func(t *testing.T) {
 		if err := b.PutObjectACL("bucket-acl", "obj", "", backend.CannedACLToPolicy("private")); err != nil {
 			t.Fatalf("PutObjectACL failed: %v", err)
 		}
@@ -88,8 +90,8 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 
-		if w.Code != http.StatusOK {
-			t.Fatalf("unexpected status: got %d, want %d", w.Code, http.StatusOK)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("unexpected status: got %d, want %d", w.Code, http.StatusForbidden)
 		}
 	})
 }
@@ -145,10 +147,18 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 	b.SetBucketOwner("policy-bucket", "owner-access")
 	h := New(b)
 
-	t.Run("no policy allows request", func(t *testing.T) {
+	t.Run("no policy denies non-owner request", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/policy-bucket/obj", nil)
+		if h.checkAccess(req, "policy-bucket", "s3:GetObject", "obj") {
+			t.Fatal("expected non-owner access to be denied when no policy/ACL allows it")
+		}
+	})
+
+	t.Run("no policy allows owner request", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/policy-bucket/obj", nil)
+		req.Header.Set("Authorization", "AWS owner-access:sig")
 		if !h.checkAccess(req, "policy-bucket", "s3:GetObject", "obj") {
-			t.Fatal("expected access to be allowed when no bucket policy exists")
+			t.Fatal("expected owner access to be allowed when no explicit deny exists")
 		}
 	})
 
