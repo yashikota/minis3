@@ -91,7 +91,10 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 
 	t.Run("v4 missing fields", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
-		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=minis3-access-key/20260207/us-east-1/s3/aws4_request")
+		req.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=minis3-access-key/20260207/us-east-1/s3/aws4_request",
+		)
 		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "AccessDenied")
 	})
 
@@ -99,7 +102,8 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 		req := newV4AuthHeaderRequest(t, "minis3-access-key", time.Now().UTC())
 		req.Header.Set(
 			"Authorization",
-			"AWS4-HMAC-SHA256 Credential=minis3-access-key/20260207/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=deadbeef",
+			"AWS4-HMAC-SHA256 Credential=minis3-access-key/20260207/us-east-1/s3/aws4_request, "+
+				"SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=deadbeef",
 		)
 		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "SignatureDoesNotMatch")
 	})

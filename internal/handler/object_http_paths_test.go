@@ -58,20 +58,35 @@ func TestHandleObjectMainPaths(t *testing.T) {
 	})
 
 	t.Run("get object range success", func(t *testing.T) {
-		req := newRequest(http.MethodGet, "http://example.test/obj-http/key", "", map[string]string{"Range": "bytes=0-4"})
+		req := newRequest(
+			http.MethodGet,
+			"http://example.test/obj-http/key",
+			"",
+			map[string]string{"Range": "bytes=0-4"},
+		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusPartialContent)
 	})
 
 	t.Run("get object range invalid", func(t *testing.T) {
-		req := newRequest(http.MethodGet, "http://example.test/obj-http/key", "", map[string]string{"Range": "bytes=999-1000"})
+		req := newRequest(
+			http.MethodGet,
+			"http://example.test/obj-http/key",
+			"",
+			map[string]string{"Range": "bytes=999-1000"},
+		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusRequestedRangeNotSatisfiable)
 		requireS3ErrorCode(t, w, "InvalidRange")
 	})
 
 	t.Run("get object invalid part number", func(t *testing.T) {
-		req := newRequest(http.MethodGet, "http://example.test/obj-http/key?partNumber=abc", "", nil)
+		req := newRequest(
+			http.MethodGet,
+			"http://example.test/obj-http/key?partNumber=abc",
+			"",
+			nil,
+		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "InvalidArgument")
@@ -107,7 +122,10 @@ func TestHandleObjectMainPaths(t *testing.T) {
 	})
 
 	t.Run("delete object success", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodDelete, "http://example.test/obj-http/key", "", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodDelete, "http://example.test/obj-http/key", "", nil),
+		)
 		requireStatus(t, w, http.StatusNoContent)
 	})
 

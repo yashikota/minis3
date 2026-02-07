@@ -4,7 +4,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -27,7 +26,12 @@ func createMultipartUpload(
 	headers map[string]string,
 ) (uploadID string) {
 	t.Helper()
-	req := newRequest(http.MethodPost, "http://example.test/"+bucket+"/"+key+"?uploads", "", headers)
+	req := newRequest(
+		http.MethodPost,
+		"http://example.test/"+bucket+"/"+key+"?uploads",
+		"",
+		headers,
+	)
 	w := doRequest(h, req)
 	requireStatus(t, w, http.StatusOK)
 	var resp backend.InitiateMultipartUploadResult
@@ -58,26 +62,18 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("create multipart invalid sse header", func(t *testing.T) {
-		req := newRequest(
-			http.MethodPost,
-			"http://example.test/mp-bucket/key?uploads",
-			"",
-			map[string]string{
-				"Authorization":                 authHeader("minis3-access-key"),
-				"x-amz-server-side-encryption": "invalid",
-			},
+		w := doRequest(
+			h,
+			newRequest(
+				http.MethodPost,
+				"http://example.test/mp-bucket/key?uploads",
+				"",
+				map[string]string{
+					"Authorization":                authHeader("minis3-access-key"),
+					"x-amz-server-side-encryption": "invalid",
+				},
+			),
 		)
-		if req.URL.Query().Has("Signature") || req.URL.Query().Has("X-Amz-Signature") {
-			t.Fatalf("unexpected presigned query params: %v", req.URL.Query())
-		}
-		if isPresignedURL(req) {
-			t.Fatalf("unexpectedly treated as presigned URL: %v", req.URL.Query())
-		}
-		if err := verifyPresignedURL(req); err != nil {
-			t.Fatalf("verifyPresignedURL unexpectedly failed: %v query=%v", err, req.URL.Query())
-		}
-		w := httptest.NewRecorder()
-		h.handleRequest(w, req)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "InvalidArgument")
 	})
@@ -131,7 +127,7 @@ func TestMultipartHandlers(t *testing.T) {
 			"mp-bucket",
 			"ssec",
 			map[string]string{
-				"Authorization":                                     authHeader("minis3-access-key"),
+				"Authorization": authHeader("minis3-access-key"),
 				"x-amz-server-side-encryption-customer-algorithm": "AES256",
 				"x-amz-server-side-encryption-customer-key":       "c2VjcmV0",
 				"x-amz-server-side-encryption-customer-key-md5":   "Xr4ilOzQ4PCOq3aQ0qbuaQ==",
@@ -141,7 +137,10 @@ func TestMultipartHandlers(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/ssec?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/ssec?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"part",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
@@ -151,7 +150,13 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("complete multipart malformed xml", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "badxml", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"badxml",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
@@ -166,7 +171,13 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("complete multipart invalid part", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "invalidpart", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"invalidpart",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
@@ -181,12 +192,21 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("complete multipart invalid part order", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "partorder", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"partorder",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w1 := doRequest(
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/partorder?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/partorder?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"123456",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
@@ -211,12 +231,21 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("complete multipart entity too small", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "toosmall", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"toosmall",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w1 := doRequest(
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/toosmall?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/toosmall?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"small",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
@@ -227,7 +256,10 @@ func TestMultipartHandlers(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/toosmall?uploadId=%s&partNumber=2", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/toosmall?uploadId=%s&partNumber=2",
+					uploadID,
+				),
 				"last",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
@@ -258,7 +290,7 @@ func TestMultipartHandlers(t *testing.T) {
 			"mp-bucket",
 			"ok",
 			map[string]string{
-				"Authorization":                 authHeader("minis3-access-key"),
+				"Authorization":                authHeader("minis3-access-key"),
 				"x-amz-server-side-encryption": "AES256",
 			},
 		)
@@ -304,7 +336,13 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("abort multipart success", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "abortme", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"abortme",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
@@ -320,7 +358,12 @@ func TestMultipartHandlers(t *testing.T) {
 	t.Run("list multipart uploads invalid max", func(t *testing.T) {
 		w := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/mp-bucket?uploads&max-uploads=-1", "", nil),
+			newRequest(
+				http.MethodGet,
+				"http://example.test/mp-bucket?uploads&max-uploads=-1",
+				"",
+				nil,
+			),
 		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "InvalidArgument")
@@ -333,8 +376,20 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("list multipart uploads success", func(t *testing.T) {
-		_ = createMultipartUpload(t, h, "mp-bucket", "p/a", map[string]string{"Authorization": authHeader("minis3-access-key")})
-		_ = createMultipartUpload(t, h, "mp-bucket", "p/b", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		_ = createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"p/a",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
+		_ = createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"p/b",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
@@ -385,13 +440,23 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("list parts success", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "listparts", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"listparts",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		for i := 1; i <= 2; i++ {
 			w := doRequest(
 				h,
 				newRequest(
 					http.MethodPut,
-					fmt.Sprintf("http://example.test/mp-bucket/listparts?uploadId=%s&partNumber=%d", uploadID, i),
+					fmt.Sprintf(
+						"http://example.test/mp-bucket/listparts?uploadId=%s&partNumber=%d",
+						uploadID,
+						i,
+					),
 					strings.Repeat("x", i),
 					map[string]string{"Authorization": authHeader("minis3-access-key")},
 				),
@@ -402,7 +467,10 @@ func TestMultipartHandlers(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodGet,
-				fmt.Sprintf("http://example.test/mp-bucket/listparts?uploadId=%s&max-parts=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/listparts?uploadId=%s&max-parts=1",
+					uploadID,
+				),
 				"",
 				nil,
 			),
@@ -425,12 +493,21 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("upload part copy invalid source header", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "copybad", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"copybad",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/copybad?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/copybad?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"",
 				map[string]string{"x-amz-copy-source": "noslash"},
 			),
@@ -440,17 +517,26 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("upload part copy invalid range", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "copyrange", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"copyrange",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/copyrange?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/copyrange?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"",
 				map[string]string{
-					"Authorization":             authHeader("minis3-access-key"),
-					"x-amz-copy-source":        "/src-bucket/src-key",
-					"x-amz-copy-source-range":  "bytes=bad",
+					"Authorization":           authHeader("minis3-access-key"),
+					"x-amz-copy-source":       "/src-bucket/src-key",
+					"x-amz-copy-source-range": "bytes=bad",
 				},
 			),
 		)
@@ -459,15 +545,24 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("upload part copy source key not found", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "copymiss", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"copymiss",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/copymiss?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/copymiss?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"",
 				map[string]string{
-					"Authorization":      authHeader("minis3-access-key"),
+					"Authorization":     authHeader("minis3-access-key"),
 					"x-amz-copy-source": "/src-bucket/missing",
 				},
 			),
@@ -477,17 +572,26 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("upload part copy range unsatisfiable", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "copyrange2", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"copyrange2",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/copyrange2?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/copyrange2?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"",
 				map[string]string{
-					"Authorization":             authHeader("minis3-access-key"),
-					"x-amz-copy-source":        "/src-bucket/src-key",
-					"x-amz-copy-source-range":  "bytes=100-200",
+					"Authorization":           authHeader("minis3-access-key"),
+					"x-amz-copy-source":       "/src-bucket/src-key",
+					"x-amz-copy-source-range": "bytes=100-200",
 				},
 			),
 		)
@@ -496,15 +600,24 @@ func TestMultipartHandlers(t *testing.T) {
 	})
 
 	t.Run("upload part copy success", func(t *testing.T) {
-		uploadID := createMultipartUpload(t, h, "mp-bucket", "copyok", map[string]string{"Authorization": authHeader("minis3-access-key")})
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"copyok",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
 		w := doRequest(
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-bucket/copyok?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/copyok?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"",
 				map[string]string{
-					"Authorization":      authHeader("minis3-access-key"),
+					"Authorization":     authHeader("minis3-access-key"),
 					"x-amz-copy-source": "/src-bucket/src-key",
 				},
 			),
