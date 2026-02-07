@@ -1,8 +1,10 @@
 package backend
 
 import (
+	"encoding/xml"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -311,6 +313,247 @@ func TestACLAndPublicAccessHelpers(t *testing.T) {
 		ErrObjectNotFound,
 	) {
 		t.Fatalf("expected ErrObjectNotFound for delete marker ACL write, got %v", err)
+	}
+}
+
+func TestPutBucketLifecycleConfigurationAssignsRuleIDWhenMissing(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("lifecycle-id-bucket"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				Prefix: "test1/",
+				Status: LifecycleStatusEnabled,
+				Expiration: &LifecycleExpiration{
+					Days: 31,
+				},
+			},
+			{
+				ID:     "custom-id",
+				Prefix: "test2/",
+				Status: LifecycleStatusEnabled,
+				Expiration: &LifecycleExpiration{
+					Days: 120,
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("lifecycle-id-bucket", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+	}
+
+	got, err := b.GetBucketLifecycleConfiguration("lifecycle-id-bucket")
+	if err != nil {
+		t.Fatalf("GetBucketLifecycleConfiguration failed: %v", err)
+	}
+	if len(got.Rules) != 2 {
+		t.Fatalf("expected 2 lifecycle rules, got %d", len(got.Rules))
+	}
+	if got.Rules[0].ID == "" {
+		t.Fatalf("expected missing rule ID to be auto-assigned, got empty")
+	}
+	if got.Rules[1].ID != "custom-id" {
+		t.Fatalf("expected existing rule ID to be preserved, got %q", got.Rules[1].ID)
+	}
+}
+
+func TestACLNormalizationForXMLRoundTrip(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("acl-xml-bucket"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	owner := DefaultOwner()
+	bucketACL := &AccessControlPolicy{
+		Xmlns: S3Xmlns,
+		Owner: owner,
+		AccessControlList: AccessControlList{
+			Grants: []Grant{
+				{
+					Grantee: &Grantee{
+						Type: "Group",
+						URI:  AllUsersURI,
+					},
+					Permission: PermissionRead,
+				},
+				{
+					Grantee: &Grantee{
+						ID:          owner.ID,
+						DisplayName: owner.DisplayName,
+					},
+					Permission: PermissionFullControl,
+				},
+			},
+		},
+	}
+
+	if err := b.PutBucketACL("acl-xml-bucket", bucketACL); err != nil {
+		t.Fatalf("PutBucketACL failed: %v", err)
+	}
+	gotBucketACL, err := b.GetBucketACL("acl-xml-bucket")
+	if err != nil {
+		t.Fatalf("GetBucketACL failed: %v", err)
+	}
+	if len(gotBucketACL.AccessControlList.Grants) != 2 {
+		t.Fatalf(
+			"unexpected bucket ACL grants count: %d",
+			len(gotBucketACL.AccessControlList.Grants),
+		)
+	}
+	if gotBucketACL.AccessControlList.Grants[0].Grantee == nil ||
+		gotBucketACL.AccessControlList.Grants[0].Grantee.Type != "Group" {
+		t.Fatalf(
+			"expected Group grant first, got %+v",
+			gotBucketACL.AccessControlList.Grants[0].Grantee,
+		)
+	}
+	if gotBucketACL.XmlnsXsi != XMLSchemaInstanceNS {
+		t.Fatalf("expected xmlns:xsi to be set, got %q", gotBucketACL.XmlnsXsi)
+	}
+	bucketXML, err := xml.Marshal(gotBucketACL)
+	if err != nil {
+		t.Fatalf("marshal bucket ACL failed: %v", err)
+	}
+	if !strings.Contains(string(bucketXML), `xsi:type="Group"`) {
+		t.Fatalf("expected Group grantee xsi:type in XML: %s", string(bucketXML))
+	}
+	if !strings.Contains(string(bucketXML), `xsi:type="CanonicalUser"`) {
+		t.Fatalf("expected CanonicalUser grantee xsi:type in XML: %s", string(bucketXML))
+	}
+
+	if _, err := b.PutObject("acl-xml-bucket", "obj", []byte("data"), PutObjectOptions{}); err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+	objectACL := &AccessControlPolicy{
+		Owner: owner,
+		AccessControlList: AccessControlList{
+			Grants: []Grant{
+				{
+					Grantee: &Grantee{
+						Type: "Group",
+						URI:  AllUsersURI,
+					},
+					Permission: PermissionRead,
+				},
+			},
+		},
+	}
+	if err := b.PutObjectACL("acl-xml-bucket", "obj", "", objectACL); err != nil {
+		t.Fatalf("PutObjectACL failed: %v", err)
+	}
+	gotObjectACL, err := b.GetObjectACL("acl-xml-bucket", "obj", "")
+	if err != nil {
+		t.Fatalf("GetObjectACL failed: %v", err)
+	}
+	if gotObjectACL.XmlnsXsi != XMLSchemaInstanceNS {
+		t.Fatalf("expected object ACL xmlns:xsi to be set, got %q", gotObjectACL.XmlnsXsi)
+	}
+	if _, err := xml.Marshal(gotObjectACL); err != nil {
+		t.Fatalf("marshal object ACL failed: %v", err)
+	}
+}
+
+func TestCannedACLToPolicyForOwnerBucketOwnerVariants(t *testing.T) {
+	objectOwner := OwnerForAccessKey("minis3-alt-access-key")
+	bucketOwner := OwnerForAccessKey("minis3-access-key")
+
+	readACL := CannedACLToPolicyForOwner(string(ACLBucketOwnerRead), objectOwner, bucketOwner)
+	if readACL.Owner == nil || readACL.Owner.ID != objectOwner.ID {
+		t.Fatalf("unexpected owner for bucket-owner-read ACL: %+v", readACL.Owner)
+	}
+	if len(readACL.AccessControlList.Grants) != 2 {
+		t.Fatalf(
+			"unexpected grants for bucket-owner-read ACL: %+v",
+			readACL.AccessControlList.Grants,
+		)
+	}
+	if readACL.AccessControlList.Grants[0].Permission != PermissionRead ||
+		readACL.AccessControlList.Grants[0].Grantee == nil ||
+		readACL.AccessControlList.Grants[0].Grantee.ID != bucketOwner.ID {
+		t.Fatalf(
+			"unexpected bucket-owner-read grant: %+v",
+			readACL.AccessControlList.Grants[0],
+		)
+	}
+	if readACL.AccessControlList.Grants[1].Permission != PermissionFullControl ||
+		readACL.AccessControlList.Grants[1].Grantee == nil ||
+		readACL.AccessControlList.Grants[1].Grantee.ID != objectOwner.ID {
+		t.Fatalf(
+			"unexpected object-owner full-control grant: %+v",
+			readACL.AccessControlList.Grants[1],
+		)
+	}
+
+	fullACL := CannedACLToPolicyForOwner(string(ACLBucketOwnerFull), objectOwner, bucketOwner)
+	if len(fullACL.AccessControlList.Grants) != 2 {
+		t.Fatalf(
+			"unexpected grants for bucket-owner-full-control ACL: %+v",
+			fullACL.AccessControlList.Grants,
+		)
+	}
+	if fullACL.AccessControlList.Grants[0].Permission != PermissionFullControl ||
+		fullACL.AccessControlList.Grants[0].Grantee == nil ||
+		fullACL.AccessControlList.Grants[0].Grantee.ID != bucketOwner.ID {
+		t.Fatalf(
+			"unexpected bucket-owner-full-control grant: %+v",
+			fullACL.AccessControlList.Grants[0],
+		)
+	}
+	if fullACL.AccessControlList.Grants[1].Permission != PermissionFullControl ||
+		fullACL.AccessControlList.Grants[1].Grantee == nil ||
+		fullACL.AccessControlList.Grants[1].Grantee.ID != objectOwner.ID {
+		t.Fatalf(
+			"unexpected object-owner full-control grant: %+v",
+			fullACL.AccessControlList.Grants[1],
+		)
+	}
+}
+
+func TestNormalizeACLFillsKnownCanonicalDisplayName(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("acl-displayname-bucket"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	mainOwner := OwnerForAccessKey("minis3-access-key")
+	altOwner := OwnerForAccessKey("minis3-alt-access-key")
+	acl := &AccessControlPolicy{
+		Owner: &Owner{ID: mainOwner.ID},
+		AccessControlList: AccessControlList{
+			Grants: []Grant{
+				{
+					Grantee: &Grantee{
+						Type: "CanonicalUser",
+						ID:   altOwner.ID,
+					},
+					Permission: PermissionFullControl,
+				},
+			},
+		},
+	}
+
+	if err := b.PutBucketACL("acl-displayname-bucket", acl); err != nil {
+		t.Fatalf("PutBucketACL failed: %v", err)
+	}
+	got, err := b.GetBucketACL("acl-displayname-bucket")
+	if err != nil {
+		t.Fatalf("GetBucketACL failed: %v", err)
+	}
+	if got.Owner == nil || got.Owner.DisplayName != mainOwner.DisplayName {
+		t.Fatalf("owner display name was not normalized: %+v", got.Owner)
+	}
+	if len(got.AccessControlList.Grants) != 1 {
+		t.Fatalf("unexpected grants: %+v", got.AccessControlList.Grants)
+	}
+	if got.AccessControlList.Grants[0].Grantee == nil ||
+		got.AccessControlList.Grants[0].Grantee.DisplayName != altOwner.DisplayName {
+		t.Fatalf(
+			"grantee display name was not normalized: %+v",
+			got.AccessControlList.Grants[0].Grantee,
+		)
 	}
 }
 

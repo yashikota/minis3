@@ -39,6 +39,18 @@ func (ov *ObjectVersions) getLatestVersion() *Object {
 	return nil
 }
 
+// getCurrentVisibleVersion returns the current version only when it is not a delete marker.
+// This is used by list APIs where a current delete marker should hide the key.
+func (ov *ObjectVersions) getCurrentVisibleVersion() *Object {
+	if ov == nil || len(ov.Versions) == 0 {
+		return nil
+	}
+	if ov.Versions[0].IsDeleteMarker {
+		return nil
+	}
+	return ov.Versions[0]
+}
+
 // addVersionToObject adds a new version to an object's version list.
 // This handles versioning-enabled buckets (prepend new version) and
 // unset/suspended buckets (replace null version).
@@ -747,11 +759,11 @@ func (b *Backend) ListObjectsV1(
 		return nil, ErrBucketNotFound
 	}
 
-	// Collect all keys with their latest non-DeleteMarker version
+	// Collect all keys with their current visible version.
 	allKeys := make([]string, 0, len(bucket.Objects))
 	keyToObj := make(map[string]*Object)
 	for key, versions := range bucket.Objects {
-		obj := versions.getLatestVersion()
+		obj := versions.getCurrentVisibleVersion()
 		if obj != nil {
 			allKeys = append(allKeys, key)
 			keyToObj[key] = obj
@@ -836,11 +848,11 @@ func (b *Backend) ListObjectsV2(
 		return nil, ErrBucketNotFound
 	}
 
-	// Collect all keys with their latest non-DeleteMarker version
+	// Collect all keys with their current visible version.
 	keys := make([]string, 0, len(bucket.Objects))
 	keyToObj := make(map[string]*Object)
 	for key, versions := range bucket.Objects {
-		obj := versions.getLatestVersion()
+		obj := versions.getCurrentVisibleVersion()
 		if obj != nil {
 			keys = append(keys, key)
 			keyToObj[key] = obj

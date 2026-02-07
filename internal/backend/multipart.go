@@ -14,6 +14,7 @@ import (
 // CreateMultipartUploadOptions contains options for CreateMultipartUpload.
 type CreateMultipartUploadOptions struct {
 	ContentType          string
+	Owner                *Owner
 	Metadata             map[string]string
 	Tags                 map[string]string
 	CacheControl         string
@@ -44,10 +45,16 @@ func (b *Backend) CreateMultipartUpload(
 	}
 
 	uploadId := GenerateVersionId()
+	owner := opts.Owner
+	if owner == nil {
+		owner = DefaultOwner()
+	}
 	upload := &MultipartUpload{
 		UploadId:             uploadId,
 		Bucket:               bucketName,
 		Key:                  key,
+		Initiator:            owner,
+		Owner:                owner,
 		Initiated:            time.Now().UTC().Format(time.RFC3339),
 		Parts:                make(map[int]*PartInfo),
 		ContentType:          opts.ContentType,
@@ -137,13 +144,17 @@ func (b *Backend) CompleteMultipartUpload(
 	if len(parts) == 0 {
 		return nil, ErrInvalidPart
 	}
+	normalizedParts := normalizeCompleteParts(parts)
+	if len(normalizedParts) == 0 {
+		return nil, ErrInvalidPart
+	}
 
 	// Validate parts are in ascending order and exist
 	var lastPartNumber int
 	var combinedData bytes.Buffer
 	var partETags []string
 
-	for _, p := range parts {
+	for _, p := range normalizedParts {
 		if p.PartNumber <= lastPartNumber {
 			return nil, ErrInvalidPartOrder
 		}
@@ -163,7 +174,8 @@ func (b *Backend) CompleteMultipartUpload(
 		}
 
 		// Check minimum part size (5MB) for all parts except the last one
-		if p.PartNumber != parts[len(parts)-1].PartNumber && uploadedPart.Size < 5*1024*1024 {
+		if p.PartNumber != normalizedParts[len(normalizedParts)-1].PartNumber &&
+			uploadedPart.Size < 5*1024*1024 {
 			return nil, ErrEntityTooSmall
 		}
 
@@ -180,7 +192,7 @@ func (b *Backend) CompleteMultipartUpload(
 		}
 		md5Hash.Write(decoded)
 	}
-	finalETag := fmt.Sprintf("\"%x-%d\"", md5Hash.Sum(nil), len(parts))
+	finalETag := fmt.Sprintf("\"%x-%d\"", md5Hash.Sum(nil), len(normalizedParts))
 
 	data := combinedData.Bytes()
 
@@ -238,12 +250,13 @@ func (b *Backend) CompleteMultipartUpload(
 		SSEKMSKeyId:          upload.SSEKMSKeyId,
 		SSECustomerAlgorithm: upload.SSECustomerAlgorithm,
 		SSECustomerKeyMD5:    upload.SSECustomerKeyMD5,
+		ACL:                  NewDefaultACLForOwner(upload.Owner),
 	}
 
 	// Save part information for PartNumber support in GetObject/HeadObject
 	var objectParts []ObjectPart
 	var offset int64
-	for _, p := range parts {
+	for _, p := range normalizedParts {
 		uploadedPart := upload.Parts[p.PartNumber]
 		objectParts = append(objectParts, ObjectPart{
 			PartNumber: p.PartNumber,
@@ -270,6 +283,21 @@ func (b *Backend) CompleteMultipartUpload(
 	delete(b.uploads, uploadId)
 
 	return obj, nil
+}
+
+func normalizeCompleteParts(parts []CompletePart) []CompletePart {
+	lastIndexByPartNumber := make(map[int]int, len(parts))
+	for idx, part := range parts {
+		lastIndexByPartNumber[part.PartNumber] = idx
+	}
+
+	normalized := make([]CompletePart, 0, len(lastIndexByPartNumber))
+	for idx, part := range parts {
+		if lastIndexByPartNumber[part.PartNumber] == idx {
+			normalized = append(normalized, part)
+		}
+	}
+	return normalized
 }
 
 // AbortMultipartUpload aborts a multipart upload.

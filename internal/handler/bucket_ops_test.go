@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/xml"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -242,7 +243,7 @@ func TestBucketOperationHandlers(t *testing.T) {
 	})
 
 	t.Run("lifecycle put/get/delete", func(t *testing.T) {
-		payload := `<LifecycleConfiguration><Rule><ID>r1</ID><Status>Enabled</Status></Rule></LifecycleConfiguration>`
+		payload := `<LifecycleConfiguration><Rule><ID>r1</ID><Prefix>test1/</Prefix><Status>Enabled</Status></Rule></LifecycleConfiguration>`
 		wPut := doRequest(
 			h,
 			newRequest(http.MethodPut, "http://example.test/bucket?lifecycle", payload, nil),
@@ -253,6 +254,13 @@ func TestBucketOperationHandlers(t *testing.T) {
 			newRequest(http.MethodGet, "http://example.test/bucket?lifecycle", "", nil),
 		)
 		requireStatus(t, wGet, http.StatusOK)
+		var cfg backend.LifecycleConfiguration
+		if err := xml.Unmarshal(wGet.Body.Bytes(), &cfg); err != nil {
+			t.Fatalf("failed to parse lifecycle configuration: %v body=%s", err, wGet.Body.String())
+		}
+		if len(cfg.Rules) != 1 || cfg.Rules[0].Prefix != "test1/" {
+			t.Fatalf("unexpected lifecycle rules: %+v", cfg.Rules)
+		}
 		wDel := doRequest(
 			h,
 			newRequest(http.MethodDelete, "http://example.test/bucket?lifecycle", "", nil),

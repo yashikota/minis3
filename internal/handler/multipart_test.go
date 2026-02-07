@@ -213,8 +213,22 @@ func TestMultipartHandlers(t *testing.T) {
 		)
 		requireStatus(t, w1, http.StatusOK)
 		etag1 := w1.Header().Get("ETag")
+		w2 := doRequest(
+			h,
+			newRequest(
+				http.MethodPut,
+				fmt.Sprintf(
+					"http://example.test/mp-bucket/partorder?uploadId=%s&partNumber=2",
+					uploadID,
+				),
+				strings.Repeat("2", 5*1024*1024),
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
+			),
+		)
+		requireStatus(t, w2, http.StatusOK)
+		etag2 := w2.Header().Get("ETag")
 		complete := `<CompleteMultipartUpload>` +
-			`<Part><PartNumber>1</PartNumber><ETag>` + etag1 + `</ETag></Part>` +
+			`<Part><PartNumber>2</PartNumber><ETag>` + etag2 + `</ETag></Part>` +
 			`<Part><PartNumber>1</PartNumber><ETag>` + etag1 + `</ETag></Part>` +
 			`</CompleteMultipartUpload>`
 		w := doRequest(
@@ -281,6 +295,62 @@ func TestMultipartHandlers(t *testing.T) {
 		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "EntityTooSmall")
+	})
+
+	t.Run("complete multipart duplicate part number uses last entry", func(t *testing.T) {
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"mp-bucket",
+			"dupepart",
+			map[string]string{"Authorization": authHeader("minis3-access-key")},
+		)
+		w1 := doRequest(
+			h,
+			newRequest(
+				http.MethodPut,
+				fmt.Sprintf("http://example.test/mp-bucket/dupepart?uploadId=%s&partNumber=1", uploadID),
+				"BBBBBBBB",
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
+			),
+		)
+		requireStatus(t, w1, http.StatusOK)
+		etagFirst := w1.Header().Get("ETag")
+
+		w2 := doRequest(
+			h,
+			newRequest(
+				http.MethodPut,
+				fmt.Sprintf("http://example.test/mp-bucket/dupepart?uploadId=%s&partNumber=1", uploadID),
+				"AAAAAAAA",
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
+			),
+		)
+		requireStatus(t, w2, http.StatusOK)
+		etagLast := w2.Header().Get("ETag")
+
+		complete := `<CompleteMultipartUpload>` +
+			`<Part><PartNumber>1</PartNumber><ETag>` + etagFirst + `</ETag></Part>` +
+			`<Part><PartNumber>1</PartNumber><ETag>` + etagLast + `</ETag></Part>` +
+			`</CompleteMultipartUpload>`
+		wComplete := doRequest(
+			h,
+			newRequest(
+				http.MethodPost,
+				fmt.Sprintf("http://example.test/mp-bucket/dupepart?uploadId=%s", uploadID),
+				complete,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
+			),
+		)
+		requireStatus(t, wComplete, http.StatusOK)
+
+		obj, err := b.GetObject("mp-bucket", "dupepart")
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+		if got := string(obj.Data); got != "AAAAAAAA" {
+			t.Fatalf("object data = %q, want %q", got, "AAAAAAAA")
+		}
 	})
 
 	t.Run("complete multipart success", func(t *testing.T) {

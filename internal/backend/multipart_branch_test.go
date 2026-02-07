@@ -137,7 +137,13 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 		1,
 		make([]byte, 5*1024*1024),
 	)
-	_, _ = b.UploadPart("complete-branch-bucket", "obj", upload.UploadId, 2, make([]byte, 1024))
+	p2, _ := b.UploadPart(
+		"complete-branch-bucket",
+		"obj",
+		upload.UploadId,
+		2,
+		make([]byte, 5*1024*1024),
+	)
 
 	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", upload.UploadId, nil); !errors.Is(
 		err,
@@ -147,7 +153,7 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 	}
 
 	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", upload.UploadId, []CompletePart{
-		{PartNumber: 1, ETag: p1.ETag},
+		{PartNumber: 2, ETag: p2.ETag},
 		{PartNumber: 1, ETag: p1.ETag},
 	}); !errors.Is(
 		err,
@@ -227,6 +233,59 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 
 	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", upload.UploadId, []CompletePart{{PartNumber: 1, ETag: p1.ETag}}); err != nil {
 		t.Fatalf("expected valid completion for single part, got %v", err)
+	}
+}
+
+func TestCompleteMultipartUploadDuplicatePartNumberUsesLastEntry(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("complete-duplicate-part"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	upload, err := b.CreateMultipartUpload(
+		"complete-duplicate-part",
+		"obj",
+		CreateMultipartUploadOptions{},
+	)
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload failed: %v", err)
+	}
+
+	first, err := b.UploadPart(
+		"complete-duplicate-part",
+		"obj",
+		upload.UploadId,
+		1,
+		[]byte("BBBBBBBB"),
+	)
+	if err != nil {
+		t.Fatalf("UploadPart first failed: %v", err)
+	}
+	last, err := b.UploadPart(
+		"complete-duplicate-part",
+		"obj",
+		upload.UploadId,
+		1,
+		[]byte("AAAAAAAA"),
+	)
+	if err != nil {
+		t.Fatalf("UploadPart last failed: %v", err)
+	}
+
+	obj, err := b.CompleteMultipartUpload(
+		"complete-duplicate-part",
+		"obj",
+		upload.UploadId,
+		[]CompletePart{
+			{PartNumber: 1, ETag: first.ETag},
+			{PartNumber: 1, ETag: last.ETag},
+		},
+	)
+	if err != nil {
+		t.Fatalf("CompleteMultipartUpload failed: %v", err)
+	}
+	if got := string(obj.Data); got != "AAAAAAAA" {
+		t.Fatalf("completed object data = %q, want %q", got, "AAAAAAAA")
 	}
 }
 
