@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,18 +44,12 @@ func TestSetMetadataHeadersAndEncoding(t *testing.T) {
 		"latin": "café",
 	})
 
-	plainValues := w.Header()["x-amz-meta-plain"]
-	if len(plainValues) == 0 {
-		plainValues = w.Header()["X-Amz-Meta-Plain"]
-	}
+	plainValues := getHeaderValuesCaseInsensitive(w.Header(), "x-amz-meta-plain")
 	if len(plainValues) != 1 || plainValues[0] != "value" {
 		t.Fatalf("unexpected plain metadata header: %+v", plainValues)
 	}
 
-	latinValues := w.Header()["x-amz-meta-latin"]
-	if len(latinValues) == 0 {
-		latinValues = w.Header()["X-Amz-Meta-Latin"]
-	}
+	latinValues := getHeaderValuesCaseInsensitive(w.Header(), "x-amz-meta-latin")
 	if len(latinValues) != 1 {
 		t.Fatalf("unexpected latin metadata header values: %+v", latinValues)
 	}
@@ -69,6 +64,15 @@ func TestSetMetadataHeadersAndEncoding(t *testing.T) {
 	if got := encodeHeaderMetadataValue("price €"); got != "price €" {
 		t.Fatalf("encodeHeaderMetadataValue(non-latin1) = %q", got)
 	}
+}
+
+func getHeaderValuesCaseInsensitive(h http.Header, key string) []string {
+	for k, values := range h {
+		if strings.EqualFold(k, key) {
+			return values
+		}
+	}
+	return nil
 }
 
 func TestParseTaggingAndValidation(t *testing.T) {

@@ -54,7 +54,10 @@ func TestPolicyMatcherHelpers(t *testing.T) {
 		if !matchesResource(PolicyStringOrSlice{"*"}, "arn:aws:s3:::bucket/key") {
 			t.Fatal("* resource should match")
 		}
-		if !matchesResource(PolicyStringOrSlice{"arn:aws:s3:::bucket/*"}, "arn:aws:s3:::bucket/path/to/key") {
+		if !matchesResource(
+			PolicyStringOrSlice{"arn:aws:s3:::bucket/*"},
+			"arn:aws:s3:::bucket/path/to/key",
+		) {
 			t.Fatal("expected wildcard resource to match")
 		}
 		if matchesResource(PolicyStringOrSlice{"arn:aws:s3:::other/*"}, "arn:aws:s3:::bucket/key") {
@@ -141,7 +144,12 @@ func TestPolicyConditionHelpers(t *testing.T) {
 		if !evaluateCondition("StringEquals", "s3:x-amz-server-side-encryption", "AES256", ctx) {
 			t.Fatal("expected StringEquals match")
 		}
-		if !evaluateCondition("StringNotEquals", "s3:x-amz-server-side-encryption", "aws:kms", ctx) {
+		if !evaluateCondition(
+			"StringNotEquals",
+			"s3:x-amz-server-side-encryption",
+			"aws:kms",
+			ctx,
+		) {
 			t.Fatal("expected StringNotEquals match")
 		}
 		if !evaluateCondition("StringLike", "aws:Referer", "https://*.test", ctx) {

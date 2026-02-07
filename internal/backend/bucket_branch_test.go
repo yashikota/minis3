@@ -15,13 +15,19 @@ func TestBucketBranchCoverage(t *testing.T) {
 
 	t.Run("bucket tagging and policy not found branches", func(t *testing.T) {
 		b := New()
-		if err := b.PutBucketTagging("missing", map[string]string{"k": "v"}); !errors.Is(err, ErrBucketNotFound) {
+		if err := b.PutBucketTagging("missing", map[string]string{"k": "v"}); !errors.Is(
+			err,
+			ErrBucketNotFound,
+		) {
 			t.Fatalf("expected ErrBucketNotFound from PutBucketTagging, got %v", err)
 		}
 		if err := b.DeleteBucketTagging("missing"); !errors.Is(err, ErrBucketNotFound) {
 			t.Fatalf("expected ErrBucketNotFound from DeleteBucketTagging, got %v", err)
 		}
-		if err := b.PutBucketPolicy("missing", `{"Version":"2012-10-17","Statement":[]}`); !errors.Is(err, ErrBucketNotFound) {
+		if err := b.PutBucketPolicy("missing", `{"Version":"2012-10-17","Statement":[]}`); !errors.Is(
+			err,
+			ErrBucketNotFound,
+		) {
 			t.Fatalf("expected ErrBucketNotFound from PutBucketPolicy, got %v", err)
 		}
 		if err := b.DeleteBucketPolicy("missing"); !errors.Is(err, ErrBucketNotFound) {
@@ -31,14 +37,20 @@ func TestBucketBranchCoverage(t *testing.T) {
 
 	t.Run("object ACL missing bucket and object branches", func(t *testing.T) {
 		b := New()
-		if err := b.PutObjectACL("missing", "key", "", NewDefaultACL()); !errors.Is(err, ErrBucketNotFound) {
+		if err := b.PutObjectACL("missing", "key", "", NewDefaultACL()); !errors.Is(
+			err,
+			ErrBucketNotFound,
+		) {
 			t.Fatalf("expected ErrBucketNotFound from PutObjectACL, got %v", err)
 		}
 
 		if err := b.CreateBucket("acl-branch"); err != nil {
 			t.Fatalf("CreateBucket failed: %v", err)
 		}
-		if err := b.PutObjectACL("acl-branch", "missing", "", NewDefaultACL()); !errors.Is(err, ErrObjectNotFound) {
+		if err := b.PutObjectACL("acl-branch", "missing", "", NewDefaultACL()); !errors.Is(
+			err,
+			ErrObjectNotFound,
+		) {
 			t.Fatalf("expected ErrObjectNotFound from PutObjectACL, got %v", err)
 		}
 	})
@@ -62,7 +74,11 @@ func TestBucketBranchCoverage(t *testing.T) {
 			t.Fatalf("GetBucketUsage failed: %v", err)
 		}
 		if count != 1 || bytesUsed != 4 {
-			t.Fatalf("unexpected usage for key with older live version: count=%d bytes=%d", count, bytesUsed)
+			t.Fatalf(
+				"unexpected usage for key with older live version: count=%d bytes=%d",
+				count,
+				bytesUsed,
+			)
 		}
 
 		if err := b.SetBucketVersioning("usage-nil-latest", VersioningSuspended, MFADeleteDisabled); err != nil {
@@ -76,7 +92,11 @@ func TestBucketBranchCoverage(t *testing.T) {
 			t.Fatalf("GetBucketUsage failed: %v", err)
 		}
 		if count != 1 || bytesUsed != 4 {
-			t.Fatalf("expected only live key to be counted, got count=%d bytes=%d", count, bytesUsed)
+			t.Fatalf(
+				"expected only live key to be counted, got count=%d bytes=%d",
+				count,
+				bytesUsed,
+			)
 		}
 	})
 
