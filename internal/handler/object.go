@@ -1307,6 +1307,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 
 		if err != nil {
+			if errors.Is(err, backend.ErrObjectNotFound) {
+				w.Header().Set("x-amz-delete-marker", "false")
+			}
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

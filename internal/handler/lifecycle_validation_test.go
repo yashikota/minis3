@@ -158,4 +158,46 @@ func TestValidateLifecycleConfiguration(t *testing.T) {
 			t.Fatalf("expected InvalidArgument, got ok=%v code=%q", ok, code)
 		}
 	})
+
+	t.Run("rejects transition with invalid date format", func(t *testing.T) {
+		cfg := &backend.LifecycleConfiguration{
+			Rules: []backend.LifecycleRule{
+				{
+					ID:     "rule1",
+					Status: backend.LifecycleStatusEnabled,
+					Transition: []backend.LifecycleTransition{
+						{
+							Date:         "20220927",
+							StorageClass: "GLACIER",
+						},
+					},
+				},
+			},
+		}
+		code, _, ok := validateLifecycleConfiguration(cfg)
+		if ok || code != "InvalidArgument" {
+			t.Fatalf("expected InvalidArgument, got ok=%v code=%q", ok, code)
+		}
+	})
+
+	t.Run("accepts transition with valid RFC3339 date", func(t *testing.T) {
+		cfg := &backend.LifecycleConfiguration{
+			Rules: []backend.LifecycleRule{
+				{
+					ID:     "rule1",
+					Status: backend.LifecycleStatusEnabled,
+					Transition: []backend.LifecycleTransition{
+						{
+							Date:         "2023-09-27T00:00:00Z",
+							StorageClass: "GLACIER",
+						},
+					},
+				},
+			},
+		}
+		_, _, ok := validateLifecycleConfiguration(cfg)
+		if !ok {
+			t.Fatal("expected lifecycle configuration with transition date to be valid")
+		}
+	})
 }

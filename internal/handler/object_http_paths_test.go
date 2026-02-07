@@ -109,6 +109,17 @@ func TestHandleObjectMainPaths(t *testing.T) {
 		requireStatus(t, w, http.StatusOK)
 	})
 
+	t.Run("head object missing key sets delete marker false", func(t *testing.T) {
+		w := doRequest(
+			h,
+			newRequest(http.MethodHead, "http://example.test/obj-http/missing", "", nil),
+		)
+		requireStatus(t, w, http.StatusNotFound)
+		if got := w.Header().Get("x-amz-delete-marker"); got != "false" {
+			t.Fatalf("expected x-amz-delete-marker=false, got %q", got)
+		}
+	})
+
 	t.Run("head object unsupported sse header", func(t *testing.T) {
 		req := newRequest(
 			http.MethodHead,

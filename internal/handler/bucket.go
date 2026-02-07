@@ -2014,6 +2014,28 @@ func validateLifecycleConfiguration(config *backend.LifecycleConfiguration) (str
 			}
 		}
 
+		for _, transition := range rule.Transition {
+			hasDate := strings.TrimSpace(transition.Date) != ""
+			hasDays := transition.Days > 0
+			if transition.Days < 0 {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if !hasDate && !hasDays {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if hasDate && hasDays {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if strings.TrimSpace(transition.StorageClass) == "" {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if hasDate {
+				if _, err := parseLifecycleExpirationDate(transition.Date); err != nil {
+					return "InvalidArgument", "Invalid argument", false
+				}
+			}
+		}
+
 		if rule.NoncurrentVersionExpiration != nil &&
 			rule.NoncurrentVersionExpiration.NoncurrentDays <= 0 {
 			return "InvalidArgument", "Invalid argument", false
