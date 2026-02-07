@@ -2,8 +2,10 @@ package handler
 
 import (
 	"bytes"
+	"encoding/xml"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/yashikota/minis3/internal/backend"
@@ -14,7 +16,7 @@ func TestHandleObjectAnonymousPutWithoutPolicyIsDenied(t *testing.T) {
 	if err := b.CreateBucket("bucket-private"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	b.SetBucketOwner("bucket-private", "owner-access")
+	b.SetBucketOwner("bucket-private", "minis3-access-key")
 	h := New(b)
 
 	req := httptest.NewRequest(
@@ -61,7 +63,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 	if err := b.CreateBucket("bucket-acl"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	b.SetBucketOwner("bucket-acl", "owner-access")
+	b.SetBucketOwner("bucket-acl", "minis3-access-key")
 	if _, err := b.PutObject("bucket-acl", "obj", []byte("data"), backend.PutObjectOptions{}); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
@@ -94,6 +96,118 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 			t.Fatalf("unexpected status: got %d, want %d", w.Code, http.StatusForbidden)
 		}
 	})
+}
+
+func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
+	b := backend.New()
+	if err := b.CreateBucket("bucket-acl-roundtrip"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("bucket-acl-roundtrip", "minis3-access-key")
+	h := New(b)
+
+	owner := backend.DefaultOwner()
+	body := strings.Join([]string{
+		`<?xml version="1.0" encoding="UTF-8"?>`,
+		`<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/" `,
+		`xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`,
+		`<Owner><ID>`,
+		owner.ID,
+		`</ID><DisplayName>`,
+		owner.DisplayName,
+		`</DisplayName></Owner>`,
+		`<AccessControlList>`,
+		`<Grant><Grantee xsi:type="Group"><URI>`,
+		backend.AllUsersURI,
+		`</URI></Grantee><Permission>READ</Permission></Grant>`,
+		`<Grant><Grantee xsi:type="CanonicalUser"><ID>`,
+		owner.ID,
+		`</ID><DisplayName>`,
+		owner.DisplayName,
+		`</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant>`,
+		`</AccessControlList></AccessControlPolicy>`,
+	}, "")
+
+	putReq := httptest.NewRequest(
+		http.MethodPut,
+		"/bucket-acl-roundtrip?acl",
+		strings.NewReader(body),
+	)
+	putReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	putRes := httptest.NewRecorder()
+	h.ServeHTTP(putRes, putReq)
+	if putRes.Code != http.StatusOK {
+		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/bucket-acl-roundtrip?acl", nil)
+	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	getRes := httptest.NewRecorder()
+	h.ServeHTTP(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf(
+			"unexpected GET status: got %d, want %d, body=%s",
+			getRes.Code,
+			http.StatusOK,
+			getRes.Body.String(),
+		)
+	}
+	if !strings.Contains(getRes.Body.String(), backend.AllUsersURI) {
+		t.Fatalf(
+			"expected GET ACL response to include AllUsers grant, body=%s",
+			getRes.Body.String(),
+		)
+	}
+
+	var acl backend.AccessControlPolicy
+	if err := xml.Unmarshal(getRes.Body.Bytes(), &acl); err != nil {
+		t.Fatalf(
+			"response ACL XML should be parseable: %v, body=%s",
+			err,
+			getRes.Body.String(),
+		)
+	}
+}
+
+func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
+	b := backend.New()
+	if err := b.CreateBucket("bucket-owner-read-test"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("bucket-owner-read-test", "minis3-access-key")
+	if err := b.PutBucketACL("bucket-owner-read-test", backend.CannedACLToPolicy("public-read-write")); err != nil {
+		t.Fatalf("PutBucketACL failed: %v", err)
+	}
+	h := New(b)
+
+	putReq := httptest.NewRequest(
+		http.MethodPut,
+		"/bucket-owner-read-test/foo",
+		strings.NewReader("bar"),
+	)
+	putReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
+	putReq.Header.Set("x-amz-acl", "bucket-owner-read")
+	putRes := httptest.NewRecorder()
+	h.ServeHTTP(putRes, putReq)
+	if putRes.Code != http.StatusOK {
+		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
+	}
+
+	getACLReq := httptest.NewRequest(http.MethodGet, "/bucket-owner-read-test/foo?acl", nil)
+	getACLReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
+	getACLRes := httptest.NewRecorder()
+	h.ServeHTTP(getACLRes, getACLReq)
+	if getACLRes.Code != http.StatusOK {
+		t.Fatalf("unexpected GetObjectAcl status: got %d, want %d", getACLRes.Code, http.StatusOK)
+	}
+
+	var acl backend.AccessControlPolicy
+	if err := xml.Unmarshal(getACLRes.Body.Bytes(), &acl); err != nil {
+		t.Fatalf("failed to parse GetObjectAcl response: %v", err)
+	}
+	if acl.Owner == nil || acl.Owner.ID != backend.OwnerForAccessKey("minis3-alt-access-key").ID {
+		t.Fatalf("unexpected ACL owner: %+v", acl.Owner)
+	}
 }
 
 func TestExtractAccessKey(t *testing.T) {
@@ -144,7 +258,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 	if err := b.CreateBucket("policy-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	b.SetBucketOwner("policy-bucket", "owner-access")
+	b.SetBucketOwner("policy-bucket", "minis3-access-key")
 	h := New(b)
 
 	t.Run("no policy denies non-owner request", func(t *testing.T) {
@@ -156,7 +270,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 
 	t.Run("no policy allows owner request", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/policy-bucket/obj", nil)
-		req.Header.Set("Authorization", "AWS owner-access:sig")
+		req.Header.Set("Authorization", "AWS minis3-access-key:sig")
 		if !h.checkAccess(req, "policy-bucket", "s3:GetObject", "obj") {
 			t.Fatal("expected owner access to be allowed when no explicit deny exists")
 		}
@@ -169,7 +283,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/policy-bucket/obj", nil)
-		req.Header.Set("Authorization", "AWS owner-access:sig")
+		req.Header.Set("Authorization", "AWS minis3-access-key:sig")
 		if h.checkAccess(req, "policy-bucket", "s3:GetObject", "obj") {
 			t.Fatal("expected explicit deny to block owner")
 		}
@@ -194,7 +308,7 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 	if err := b.CreateBucket("policy-context-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	b.SetBucketOwner("policy-context-bucket", "owner-access")
+	b.SetBucketOwner("policy-context-bucket", "minis3-access-key")
 	h := New(b)
 
 	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-context-bucket/*","Condition":{"StringEquals":{"s3:ExistingObjectTag/Project":"alpha"}}}]}`
@@ -229,6 +343,275 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 	)
 	if denied {
 		t.Fatal("expected access to be denied with non-matching existing object tag")
+	}
+}
+
+func TestCheckAccessBucketACLCanonicalUserPermissions(t *testing.T) {
+	b := backend.New()
+	if err := b.CreateBucket("bucket-acl-canonical"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("bucket-acl-canonical", "minis3-access-key")
+	owner := backend.OwnerForAccessKey("minis3-access-key")
+	alt := backend.OwnerForAccessKey("minis3-alt-access-key")
+	acl := &backend.AccessControlPolicy{
+		Owner: owner,
+		AccessControlList: backend.AccessControlList{
+			Grants: []backend.Grant{
+				{
+					Grantee: &backend.Grantee{
+						Type:        "CanonicalUser",
+						ID:          alt.ID,
+						DisplayName: alt.DisplayName,
+					},
+					Permission: backend.PermissionWrite,
+				},
+				{
+					Grantee: &backend.Grantee{
+						Type:        "CanonicalUser",
+						ID:          alt.ID,
+						DisplayName: alt.DisplayName,
+					},
+					Permission: backend.PermissionReadACP,
+				},
+				{
+					Grantee: &backend.Grantee{
+						Type:        "CanonicalUser",
+						ID:          alt.ID,
+						DisplayName: alt.DisplayName,
+					},
+					Permission: backend.PermissionWriteACP,
+				},
+				{
+					Grantee: &backend.Grantee{
+						Type:        "CanonicalUser",
+						ID:          owner.ID,
+						DisplayName: owner.DisplayName,
+					},
+					Permission: backend.PermissionFullControl,
+				},
+			},
+		},
+	}
+	if err := b.PutBucketACL("bucket-acl-canonical", acl); err != nil {
+		t.Fatalf("PutBucketACL failed: %v", err)
+	}
+
+	h := New(b)
+	req := httptest.NewRequest(http.MethodGet, "/bucket-acl-canonical", nil)
+	req.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
+
+	if !h.checkAccess(req, "bucket-acl-canonical", "s3:PutObject", "obj") {
+		t.Fatal("expected alt user to have write access by canonical grant")
+	}
+	if !h.checkAccess(req, "bucket-acl-canonical", "s3:GetBucketAcl", "") {
+		t.Fatal("expected alt user to have read ACP access by canonical grant")
+	}
+	if !h.checkAccess(req, "bucket-acl-canonical", "s3:PutBucketAcl", "") {
+		t.Fatal("expected alt user to have write ACP access by canonical grant")
+	}
+}
+
+func TestHandlePutBucketACLRejectsUnknownCanonicalUser(t *testing.T) {
+	b := backend.New()
+	if err := b.CreateBucket("bucket-acl-invalid-user"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("bucket-acl-invalid-user", "minis3-access-key")
+	h := New(b)
+
+	owner := backend.OwnerForAccessKey("minis3-access-key")
+	body := strings.Join([]string{
+		`<?xml version="1.0" encoding="UTF-8"?>`,
+		`<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/" `,
+		`xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`,
+		`<Owner><ID>`,
+		owner.ID,
+		`</ID><DisplayName>`,
+		owner.DisplayName,
+		`</DisplayName></Owner>`,
+		`<AccessControlList>`,
+		`<Grant><Grantee xsi:type="CanonicalUser"><ID>_foo</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant>`,
+		`</AccessControlList></AccessControlPolicy>`,
+	}, "")
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/bucket-acl-invalid-user?acl",
+		strings.NewReader(body),
+	)
+	req.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(w.Body.String(), "<Code>InvalidArgument</Code>") {
+		t.Fatalf("unexpected response body: %s", w.Body.String())
+	}
+}
+
+func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
+	b := backend.New()
+	if err := b.CreateBucket("bucket-object-grants"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("bucket-object-grants", "minis3-access-key")
+	h := New(b)
+
+	alt := backend.OwnerForAccessKey("minis3-alt-access-key")
+	putReq := httptest.NewRequest(
+		http.MethodPut,
+		"/bucket-object-grants/foo",
+		strings.NewReader("bar"),
+	)
+	putReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	for _, header := range []string{
+		"x-amz-grant-read",
+		"x-amz-grant-write",
+		"x-amz-grant-read-acp",
+		"x-amz-grant-write-acp",
+		"x-amz-grant-full-control",
+	} {
+		putReq.Header.Set(header, "id="+alt.ID)
+	}
+	putRes := httptest.NewRecorder()
+	h.ServeHTTP(putRes, putReq)
+	if putRes.Code != http.StatusOK {
+		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/bucket-object-grants/foo?acl", nil)
+	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	getRes := httptest.NewRecorder()
+	h.ServeHTTP(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("unexpected GetObjectAcl status: got %d, want %d", getRes.Code, http.StatusOK)
+	}
+
+	var acl backend.AccessControlPolicy
+	if err := xml.Unmarshal(getRes.Body.Bytes(), &acl); err != nil {
+		t.Fatalf("failed to parse GetObjectAcl response: %v", err)
+	}
+	if len(acl.AccessControlList.Grants) != 5 {
+		t.Fatalf("unexpected grant count: %d", len(acl.AccessControlList.Grants))
+	}
+	seen := make(map[string]bool, 5)
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee == nil ||
+			grant.Grantee.ID != alt.ID ||
+			grant.Grantee.DisplayName != alt.DisplayName {
+			t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
+		}
+		seen[grant.Permission] = true
+	}
+	for _, permission := range []string{
+		backend.PermissionRead,
+		backend.PermissionWrite,
+		backend.PermissionReadACP,
+		backend.PermissionWriteACP,
+		backend.PermissionFullControl,
+	} {
+		if !seen[permission] {
+			t.Fatalf(
+				"missing permission %q in ACL grants: %+v",
+				permission,
+				acl.AccessControlList.Grants,
+			)
+		}
+	}
+}
+
+func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
+	b := backend.New()
+	h := New(b)
+	alt := backend.OwnerForAccessKey("minis3-alt-access-key")
+
+	createReq := httptest.NewRequest(http.MethodPut, "/bucket-create-grants", nil)
+	createReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	for _, header := range []string{
+		"x-amz-grant-read",
+		"x-amz-grant-write",
+		"x-amz-grant-read-acp",
+		"x-amz-grant-write-acp",
+		"x-amz-grant-full-control",
+	} {
+		createReq.Header.Set(header, "id="+alt.ID)
+	}
+	createRes := httptest.NewRecorder()
+	h.ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusOK {
+		t.Fatalf("unexpected CreateBucket status: got %d, want %d", createRes.Code, http.StatusOK)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/bucket-create-grants?acl", nil)
+	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	getRes := httptest.NewRecorder()
+	h.ServeHTTP(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("unexpected GetBucketAcl status: got %d, want %d", getRes.Code, http.StatusOK)
+	}
+
+	var acl backend.AccessControlPolicy
+	if err := xml.Unmarshal(getRes.Body.Bytes(), &acl); err != nil {
+		t.Fatalf("failed to parse GetBucketAcl response: %v", err)
+	}
+	if len(acl.AccessControlList.Grants) != 5 {
+		t.Fatalf("unexpected grant count: %d", len(acl.AccessControlList.Grants))
+	}
+	seen := make(map[string]bool, 5)
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee == nil || grant.Grantee.ID != alt.ID ||
+			grant.Grantee.DisplayName != alt.DisplayName {
+			t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
+		}
+		seen[grant.Permission] = true
+	}
+	for _, permission := range []string{
+		backend.PermissionRead,
+		backend.PermissionWrite,
+		backend.PermissionReadACP,
+		backend.PermissionWriteACP,
+		backend.PermissionFullControl,
+	} {
+		if !seen[permission] {
+			t.Fatalf(
+				"missing permission %q in ACL grants: %+v",
+				permission,
+				acl.AccessControlList.Grants,
+			)
+		}
+	}
+}
+
+func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
+	b := backend.New()
+	if err := b.CreateBucket("bucket-copy-acl"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("bucket-copy-acl", "minis3-access-key")
+	if _, err := b.PutObject("bucket-copy-acl", "src", []byte("data"), backend.PutObjectOptions{}); err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+	h := New(b)
+
+	copyReq := httptest.NewRequest(http.MethodPut, "/bucket-copy-acl/dst", nil)
+	copyReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	copyReq.Header.Set("x-amz-copy-source", "/bucket-copy-acl/src")
+	copyReq.Header.Set("x-amz-acl", "public-read")
+	copyRes := httptest.NewRecorder()
+	h.ServeHTTP(copyRes, copyReq)
+	if copyRes.Code != http.StatusOK {
+		t.Fatalf("unexpected CopyObject status: got %d, want %d", copyRes.Code, http.StatusOK)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/bucket-copy-acl/dst", nil)
+	getReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
+	getRes := httptest.NewRecorder()
+	h.ServeHTTP(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("unexpected GET status: got %d, want %d", getRes.Code, http.StatusOK)
 	}
 }
 
