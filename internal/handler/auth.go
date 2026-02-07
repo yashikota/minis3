@@ -22,6 +22,7 @@ type Credentials struct {
 // These match the s3tests.conf configuration.
 func DefaultCredentials() map[string]string {
 	return map[string]string{
+		"test":                  "test",
 		"minis3-access-key":     "minis3-secret-key",
 		"minis3-alt-access-key": "minis3-alt-secret-key",
 		"tenant-access-key":     "tenant-secret-key",
@@ -35,6 +36,138 @@ func DefaultCredentials() map[string]string {
 func isPresignedURL(r *http.Request) bool {
 	query := r.URL.Query()
 	return query.Has("X-Amz-Signature") || query.Has("Signature")
+}
+
+// verifyAuthorizationHeader verifies standard Authorization header signatures.
+func verifyAuthorizationHeader(r *http.Request) error {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return nil
+	}
+
+	if strings.HasPrefix(auth, "AWS4-HMAC-SHA256") {
+		accessKey := extractAccessKey(r)
+		credentials := DefaultCredentials()
+		secretKey, ok := credentials[accessKey]
+		if !ok {
+			return &presignedError{
+				code:    "InvalidAccessKeyId",
+				message: "The AWS Access Key Id you provided does not exist in our records",
+			}
+		}
+		return verifyAuthorizationHeaderV4(r, auth, secretKey)
+	}
+	if strings.HasPrefix(auth, "AWS ") {
+		return verifyAuthorizationHeaderV2(r, auth)
+	}
+
+	return &presignedError{code: "AccessDenied", message: "Access Denied"}
+}
+
+func verifyAuthorizationHeaderV4(r *http.Request, auth, secretKey string) error {
+	const prefix = "AWS4-HMAC-SHA256 "
+	kvStr := strings.TrimSpace(strings.TrimPrefix(auth, prefix))
+	fields := strings.Split(kvStr, ",")
+	values := map[string]string{}
+	for _, f := range fields {
+		parts := strings.SplitN(strings.TrimSpace(f), "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		values[parts[0]] = parts[1]
+	}
+
+	credential := values["Credential"]
+	signedHeadersStr := values["SignedHeaders"]
+	signature := values["Signature"]
+	if credential == "" || signedHeadersStr == "" || signature == "" {
+		return &presignedError{code: "AccessDenied", message: "Access Denied"}
+	}
+
+	credParts := strings.Split(credential, "/")
+	if len(credParts) < 5 {
+		return &presignedError{code: "AccessDenied", message: "Access Denied"}
+	}
+	dateStamp := credParts[1]
+	region := credParts[2]
+	service := credParts[3]
+
+	dateTime := r.Header.Get("x-amz-date")
+	if dateTime == "" {
+		return &presignedError{code: "AccessDenied", message: "Access Denied"}
+	}
+
+	canonicalURI := r.URL.EscapedPath()
+	if canonicalURI == "" {
+		canonicalURI = "/"
+	}
+
+	params := make([]string, 0)
+	query := r.URL.Query()
+	for key := range query {
+		values := query[key]
+		for _, value := range values {
+			params = append(params, awsQueryEscape(key)+"="+awsQueryEscape(value))
+		}
+	}
+	sort.Strings(params)
+	canonicalQueryString := strings.Join(params, "&")
+
+	signedHeaders := strings.Split(signedHeadersStr, ";")
+	canonicalHeaders := ""
+	for _, header := range signedHeaders {
+		header = strings.ToLower(strings.TrimSpace(header))
+		if header == "" {
+			continue
+		}
+		var value string
+		if header == "host" {
+			value = r.Host
+		} else {
+			value = strings.Join(r.Header.Values(header), ",")
+		}
+		canonicalHeaders += header + ":" + strings.TrimSpace(value) + "\n"
+	}
+
+	payloadHash := r.Header.Get("x-amz-content-sha256")
+	if payloadHash == "" {
+		payloadHash = "UNSIGNED-PAYLOAD"
+	}
+
+	canonicalRequest := strings.Join([]string{
+		r.Method,
+		canonicalURI,
+		canonicalQueryString,
+		canonicalHeaders,
+		signedHeadersStr,
+		payloadHash,
+	}, "\n")
+
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		dateTime,
+		dateStamp + "/" + region + "/" + service + "/aws4_request",
+		sha256Hash(canonicalRequest),
+	}, "\n")
+
+	signingKey := getSignatureKey(secretKey, dateStamp, region, service)
+	expectedSignature := hmacSHA256Hex(signingKey, stringToSign)
+	if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
+		return &presignedError{
+			code:    "SignatureDoesNotMatch",
+			message: "The request signature we calculated does not match the signature you provided",
+		}
+	}
+
+	return nil
+}
+
+func verifyAuthorizationHeaderV2(_ *http.Request, auth string) error {
+	parts := strings.SplitN(strings.TrimPrefix(auth, "AWS "), ":", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return &presignedError{code: "AccessDenied", message: "Access Denied"}
+	}
+	return nil
 }
 
 // verifyPresignedURL verifies a presigned URL request.
@@ -195,7 +328,7 @@ func calculatePresignedSignatureV4(
 		if key != "X-Amz-Signature" {
 			values := query[key]
 			for _, value := range values {
-				params = append(params, url.QueryEscape(key)+"="+url.QueryEscape(value))
+				params = append(params, awsQueryEscape(key)+"="+awsQueryEscape(value))
 			}
 		}
 	}
@@ -314,4 +447,12 @@ func sha256Hash(data string) string {
 	h := sha256.New()
 	h.Write([]byte(data))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func awsQueryEscape(s string) string {
+	escaped := url.QueryEscape(s)
+	escaped = strings.ReplaceAll(escaped, "+", "%20")
+	escaped = strings.ReplaceAll(escaped, "*", "%2A")
+	escaped = strings.ReplaceAll(escaped, "%7E", "~")
+	return escaped
 }

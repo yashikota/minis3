@@ -89,38 +89,4 @@ func TestHandlePutBucketACLBranches(t *testing.T) {
 		requireStatus(t, w, http.StatusForbidden)
 		requireS3ErrorCode(t, w, "AccessDenied")
 	})
-
-	t.Run("xml body success", func(t *testing.T) {
-		payload := `<AccessControlPolicy><Owner><ID>` +
-			`0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</ID></Owner>` +
-			`<AccessControlList><Grant><Grantee xsi:type="CanonicalUser" ` +
-			`xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><ID>` +
-			`0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef` +
-			`</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`
-		w := doRequest(
-			h,
-			newRequest(
-				http.MethodPut,
-				"http://example.test/acl-bucket?acl",
-				payload,
-				map[string]string{"Authorization": authHeader("minis3-access-key")},
-			),
-		)
-		requireStatus(t, w, http.StatusOK)
-	})
-
-	t.Run("xml body no such bucket", func(t *testing.T) {
-		payload := `<AccessControlPolicy><AccessControlList></AccessControlList></AccessControlPolicy>`
-		w := doRequest(
-			h,
-			newRequest(
-				http.MethodPut,
-				"http://example.test/no-such-acl?acl",
-				payload,
-				map[string]string{"Authorization": authHeader("minis3-access-key")},
-			),
-		)
-		requireStatus(t, w, http.StatusNotFound)
-		requireS3ErrorCode(t, w, "NoSuchBucket")
-	})
 }

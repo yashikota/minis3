@@ -28,10 +28,10 @@ func TestACLHelpersAdditionalBranches(t *testing.T) {
 		},
 	}
 
-	if aclAllowsRead(acl, true) {
+	if aclAllowsRead(acl, "", true) {
 		t.Fatal("authenticated-users read grant should not allow anonymous requests")
 	}
-	if !aclAllowsRead(acl, false) {
+	if !aclAllowsRead(acl, "", false) {
 		t.Fatal("authenticated-users read grant should allow authenticated requests")
 	}
 
@@ -49,7 +49,7 @@ func TestACLHelpersAdditionalBranches(t *testing.T) {
 			},
 		},
 	}
-	if !aclAllowsWrite(writeACL, true) {
+	if !aclAllowsWrite(writeACL, "", true) {
 		t.Fatal("all-users write grant should allow anonymous write")
 	}
 }

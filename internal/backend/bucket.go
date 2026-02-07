@@ -199,7 +199,8 @@ func (b *Backend) ListBucketsWithOptions(opts ListBucketsOptions) *ListBucketsRe
 	endIdx := startIdx + maxBuckets
 	if endIdx > len(allBuckets) {
 		endIdx = len(allBuckets)
-	} else {
+	}
+	if endIdx < len(allBuckets) {
 		result.IsTruncated = true
 	}
 
@@ -414,15 +415,23 @@ func DefaultOwner() *Owner {
 
 // NewDefaultACL creates a default private ACL with the owner having full control.
 func NewDefaultACL() *AccessControlPolicy {
-	owner := DefaultOwner()
+	return NewDefaultACLForOwner(DefaultOwner())
+}
+
+// NewDefaultACLForOwner creates a default private ACL for a specific owner.
+func NewDefaultACLForOwner(owner *Owner) *AccessControlPolicy {
+	if owner == nil {
+		owner = DefaultOwner()
+	}
 	return &AccessControlPolicy{
-		Xmlns: S3Xmlns,
-		Owner: owner,
+		Xmlns:    S3Xmlns,
+		XmlnsXsi: XMLSchemaInstanceNS,
+		Owner:    owner,
 		AccessControlList: AccessControlList{
 			Grants: []Grant{
 				{
 					Grantee: &Grantee{
-						Xmlns:       "http://www.w3.org/2001/XMLSchema-instance",
+						Xmlns:       XMLSchemaInstanceNS,
 						Type:        "CanonicalUser",
 						ID:          owner.ID,
 						DisplayName: owner.DisplayName,
@@ -438,7 +447,7 @@ func NewDefaultACL() *AccessControlPolicy {
 func newGroupGrant(uri, permission string) Grant {
 	return Grant{
 		Grantee: &Grantee{
-			Xmlns: "http://www.w3.org/2001/XMLSchema-instance",
+			Xmlns: XMLSchemaInstanceNS,
 			Type:  "Group",
 			URI:   uri,
 		},
@@ -446,22 +455,98 @@ func newGroupGrant(uri, permission string) Grant {
 	}
 }
 
+func normalizeACL(acl *AccessControlPolicy) *AccessControlPolicy {
+	if acl == nil {
+		return NewDefaultACL()
+	}
+	if acl.Xmlns == "" {
+		acl.Xmlns = S3Xmlns
+	}
+	if acl.XmlnsXsi == "" {
+		acl.XmlnsXsi = XMLSchemaInstanceNS
+	}
+	if acl.Owner == nil {
+		acl.Owner = DefaultOwner()
+	} else if acl.Owner.DisplayName == "" && acl.Owner.ID != "" {
+		if knownOwner := OwnerForCanonicalID(acl.Owner.ID); knownOwner != nil {
+			acl.Owner.DisplayName = knownOwner.DisplayName
+		}
+	}
+	for i := range acl.AccessControlList.Grants {
+		grantee := acl.AccessControlList.Grants[i].Grantee
+		if grantee == nil {
+			continue
+		}
+		if grantee.Type == "" {
+			switch {
+			case grantee.URI != "":
+				grantee.Type = "Group"
+			case grantee.ID != "" || grantee.DisplayName != "":
+				grantee.Type = "CanonicalUser"
+			}
+		}
+		if grantee.DisplayName == "" && grantee.ID != "" {
+			if knownOwner := OwnerForCanonicalID(grantee.ID); knownOwner != nil {
+				grantee.DisplayName = knownOwner.DisplayName
+			}
+		}
+		if grantee.Type != "" && grantee.Xmlns == "" {
+			grantee.Xmlns = XMLSchemaInstanceNS
+		}
+	}
+	// Keep group grants before canonical-user grants for s3tests compatibility.
+	sort.SliceStable(acl.AccessControlList.Grants, func(i, j int) bool {
+		return aclGrantSortKey(acl.AccessControlList.Grants[i]) <
+			aclGrantSortKey(acl.AccessControlList.Grants[j])
+	})
+	return acl
+}
+
+func aclGrantSortKey(grant Grant) int {
+	if grant.Grantee == nil {
+		return 2
+	}
+	if grant.Grantee.Type == "Group" || grant.Grantee.URI != "" {
+		return 0
+	}
+	return 1
+}
+
 // CannedACLToPolicy converts a canned ACL string to an AccessControlPolicy.
 func CannedACLToPolicy(cannedACL string) *AccessControlPolicy {
-	owner := DefaultOwner()
-	ownerGrant := Grant{
+	return CannedACLToPolicyForOwner(cannedACL, DefaultOwner(), DefaultOwner())
+}
+
+func newCanonicalGrant(owner *Owner, permission string) Grant {
+	if owner == nil {
+		owner = DefaultOwner()
+	}
+	return Grant{
 		Grantee: &Grantee{
-			Xmlns:       "http://www.w3.org/2001/XMLSchema-instance",
+			Xmlns:       XMLSchemaInstanceNS,
 			Type:        "CanonicalUser",
 			ID:          owner.ID,
 			DisplayName: owner.DisplayName,
 		},
-		Permission: PermissionFullControl,
+		Permission: permission,
 	}
+}
+
+// CannedACLToPolicyForOwner converts a canned ACL string for the request and bucket owners.
+func CannedACLToPolicyForOwner(cannedACL string, owner, bucketOwner *Owner) *AccessControlPolicy {
+	if owner == nil {
+		owner = DefaultOwner()
+	}
+	if bucketOwner == nil {
+		bucketOwner = owner
+	}
+
+	ownerGrant := newCanonicalGrant(owner, PermissionFullControl)
 	grants := []Grant{}
 
 	acl := &AccessControlPolicy{
 		Xmlns:             S3Xmlns,
+		XmlnsXsi:          XMLSchemaInstanceNS,
 		Owner:             owner,
 		AccessControlList: AccessControlList{Grants: grants},
 	}
@@ -475,11 +560,19 @@ func CannedACLToPolicy(cannedACL string) *AccessControlPolicy {
 			newGroupGrant(AllUsersURI, PermissionWrite))
 	case ACLAuthenticatedRead:
 		grants = append(grants, newGroupGrant(AuthenticatedUsersURI, PermissionRead))
+	case ACLBucketOwnerRead:
+		if bucketOwner.ID != owner.ID {
+			grants = append(grants, newCanonicalGrant(bucketOwner, PermissionRead))
+		}
+	case ACLBucketOwnerFull:
+		if bucketOwner.ID != owner.ID {
+			grants = append(grants, newCanonicalGrant(bucketOwner, PermissionFullControl))
+		}
 	}
 	grants = append(grants, ownerGrant)
 	acl.AccessControlList.Grants = grants
 
-	return acl
+	return normalizeACL(acl)
 }
 
 // GetBucketACL returns the ACL for a bucket.
@@ -509,7 +602,7 @@ func (b *Backend) PutBucketACL(bucketName string, acl *AccessControlPolicy) erro
 		return ErrBucketNotFound
 	}
 
-	bucket.ACL = acl
+	bucket.ACL = normalizeACL(acl)
 	return nil
 }
 
@@ -596,7 +689,7 @@ func (b *Backend) PutObjectACL(bucketName, key, versionId string, acl *AccessCon
 		return ErrObjectNotFound
 	}
 
-	obj.ACL = acl
+	obj.ACL = normalizeACL(acl)
 	return nil
 }
 
@@ -689,8 +782,25 @@ func (b *Backend) PutBucketLifecycleConfiguration(
 		return ErrBucketNotFound
 	}
 
-	bucket.LifecycleConfiguration = config
+	bucket.LifecycleConfiguration = normalizeLifecycleConfiguration(config)
 	return nil
+}
+
+func normalizeLifecycleConfiguration(config *LifecycleConfiguration) *LifecycleConfiguration {
+	if config == nil {
+		return nil
+	}
+
+	normalized := *config
+	normalized.Rules = make([]LifecycleRule, len(config.Rules))
+	copy(normalized.Rules, config.Rules)
+
+	for i := range normalized.Rules {
+		if strings.TrimSpace(normalized.Rules[i].ID) == "" {
+			normalized.Rules[i].ID = fmt.Sprintf("rule-%d", i+1)
+		}
+	}
+	return &normalized
 }
 
 // DeleteBucketLifecycleConfiguration removes the lifecycle configuration for a bucket.

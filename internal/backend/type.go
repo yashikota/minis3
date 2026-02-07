@@ -262,6 +262,7 @@ type Tagging struct {
 type AccessControlPolicy struct {
 	XMLName           xml.Name          `xml:"AccessControlPolicy"`
 	Xmlns             string            `xml:"xmlns,attr,omitempty"`
+	XmlnsXsi          string            `xml:"xmlns:xsi,attr,omitempty"`
 	Owner             *Owner            `xml:"Owner"`
 	AccessControlList AccessControlList `xml:"AccessControlList"`
 }
@@ -279,12 +280,13 @@ type Grant struct {
 
 // Grantee represents the entity receiving permission.
 type Grantee struct {
-	XMLName     xml.Name `xml:"Grantee"`
-	Xmlns       string   `xml:"xmlns:xsi,attr,omitempty"`
-	Type        string   `xml:"xsi:type,attr"`
-	ID          string   `xml:"ID,omitempty"`
-	DisplayName string   `xml:"DisplayName,omitempty"`
-	URI         string   `xml:"URI,omitempty"`
+	XMLName      xml.Name `xml:"Grantee"`
+	Xmlns        string   `xml:"xmlns:xsi,attr,omitempty"`
+	Type         string   `xml:"xsi:type,attr"`
+	ID           string   `xml:"ID,omitempty"`
+	DisplayName  string   `xml:"DisplayName,omitempty"`
+	EmailAddress string   `xml:"EmailAddress,omitempty"`
+	URI          string   `xml:"URI,omitempty"`
 }
 
 // CannedACL represents predefined ACL values.
@@ -295,6 +297,8 @@ const (
 	ACLPublicRead        CannedACL = "public-read"
 	ACLPublicReadWrite   CannedACL = "public-read-write"
 	ACLAuthenticatedRead CannedACL = "authenticated-read"
+	ACLBucketOwnerRead   CannedACL = "bucket-owner-read"
+	ACLBucketOwnerFull   CannedACL = "bucket-owner-full-control"
 )
 
 // ACL permission constants.
@@ -317,6 +321,8 @@ type MultipartUpload struct {
 	UploadId             string
 	Bucket               string
 	Key                  string
+	Initiator            *Owner
+	Owner                *Owner
 	Initiated            string // RFC3339 formatted time
 	Parts                map[int]*PartInfo
 	ContentType          string
@@ -468,6 +474,9 @@ type ObjectLockLegalHold struct {
 // S3Xmlns is the standard S3 XML namespace used in API responses.
 const S3Xmlns = "http://s3.amazonaws.com/doc/2006-03-01/"
 
+// XMLSchemaInstanceNS is the XML schema instance namespace for xsi:type attributes.
+const XMLSchemaInstanceNS = "http://www.w3.org/2001/XMLSchema-instance"
+
 // Object Lock mode constants.
 const (
 	RetentionModeGovernance = "GOVERNANCE"
@@ -518,6 +527,7 @@ type LifecycleConfiguration struct {
 type LifecycleRule struct {
 	ID                             string                          `xml:"ID,omitempty"`
 	Status                         string                          `xml:"Status"` // Enabled or Disabled
+	Prefix                         string                          `xml:"Prefix,omitempty"`
 	Filter                         *LifecycleFilter                `xml:"Filter,omitempty"`
 	Expiration                     *LifecycleExpiration            `xml:"Expiration,omitempty"`
 	Transition                     []LifecycleTransition           `xml:"Transition,omitempty"`
@@ -528,15 +538,19 @@ type LifecycleRule struct {
 
 // LifecycleFilter specifies which objects the rule applies to.
 type LifecycleFilter struct {
-	Prefix string              `xml:"Prefix,omitempty"`
-	Tag    *Tag                `xml:"Tag,omitempty"`
-	And    *LifecycleFilterAnd `xml:"And,omitempty"`
+	Prefix                string              `xml:"Prefix,omitempty"`
+	Tag                   *Tag                `xml:"Tag,omitempty"`
+	And                   *LifecycleFilterAnd `xml:"And,omitempty"`
+	ObjectSizeGreaterThan int64               `xml:"ObjectSizeGreaterThan,omitempty"`
+	ObjectSizeLessThan    int64               `xml:"ObjectSizeLessThan,omitempty"`
 }
 
 // LifecycleFilterAnd represents AND logic for filter conditions.
 type LifecycleFilterAnd struct {
-	Prefix string `xml:"Prefix,omitempty"`
-	Tags   []Tag  `xml:"Tag,omitempty"`
+	Prefix                string `xml:"Prefix,omitempty"`
+	Tags                  []Tag  `xml:"Tag,omitempty"`
+	ObjectSizeGreaterThan int64  `xml:"ObjectSizeGreaterThan,omitempty"`
+	ObjectSizeLessThan    int64  `xml:"ObjectSizeLessThan,omitempty"`
 }
 
 // LifecycleExpiration defines when objects expire.

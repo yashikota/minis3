@@ -27,6 +27,7 @@ func (h *Handler) handleCreateMultipartUpload(
 
 	opts := backend.CreateMultipartUploadOptions{
 		ContentType:        r.Header.Get("Content-Type"),
+		Owner:              requesterOwner(r),
 		Metadata:           extractMetadata(r),
 		Tags:               parseTaggingHeader(r.Header.Get("x-amz-tagging")),
 		CacheControl:       r.Header.Get("Cache-Control"),
@@ -237,12 +238,20 @@ func (h *Handler) handleCompleteMultipartUpload(
 	obj, err := h.backend.CompleteMultipartUpload(bucketName, key, uploadId, completeReq.Parts)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
-			backend.WriteError(
-				w,
-				http.StatusNotFound,
-				"NoSuchUpload",
-				"The specified upload does not exist.",
-			)
+			// S3 treats repeated completion of the same upload as idempotent success
+			// if the completed object already exists at the destination key.
+			existingObj, getErr := h.backend.GetObject(bucketName, key)
+			if getErr == nil && existingObj != nil {
+				obj = existingObj
+			} else {
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchUpload",
+					"The specified upload does not exist.",
+				)
+				return
+			}
 		} else if errors.Is(err, backend.ErrInvalidPart) {
 			backend.WriteError(
 				w,
@@ -250,6 +259,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 				"InvalidPart",
 				"One or more of the specified parts could not be found.",
 			)
+			return
 		} else if errors.Is(err, backend.ErrInvalidPartOrder) {
 			backend.WriteError(
 				w,
@@ -257,6 +267,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 				"InvalidPartOrder",
 				"The list of parts was not in ascending order.",
 			)
+			return
 		} else if errors.Is(err, backend.ErrEntityTooSmall) {
 			backend.WriteError(
 				w,
@@ -264,6 +275,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 				"EntityTooSmall",
 				"Your proposed upload is smaller than the minimum allowed size.",
 			)
+			return
 		} else if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
 				w,
@@ -271,6 +283,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 				"NoSuchBucket",
 				"The specified bucket does not exist.",
 			)
+			return
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
 			backend.WriteError(
 				w,
@@ -278,10 +291,11 @@ func (h *Handler) handleCompleteMultipartUpload(
 				"InvalidRequest",
 				"Bucket is missing Object Lock Configuration",
 			)
+			return
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			return
 		}
-		return
 	}
 
 	// Build location URL
@@ -385,7 +399,6 @@ func (h *Handler) handleListMultipartUploads(
 		return
 	}
 
-	owner := backend.DefaultOwner()
 	resp := backend.ListMultipartUploadsResult{
 		Xmlns:              backend.S3Xmlns,
 		Bucket:             bucketName,
@@ -400,6 +413,14 @@ func (h *Handler) handleListMultipartUploads(
 	}
 
 	for _, upload := range result.Uploads {
+		initiator := upload.Initiator
+		if initiator == nil {
+			initiator = backend.DefaultOwner()
+		}
+		owner := upload.Owner
+		if owner == nil {
+			owner = backend.DefaultOwner()
+		}
 		storageClass := upload.StorageClass
 		if storageClass == "" {
 			storageClass = "STANDARD"
@@ -407,7 +428,7 @@ func (h *Handler) handleListMultipartUploads(
 		resp.Uploads = append(resp.Uploads, backend.UploadInfo{
 			Key:          upload.Key,
 			UploadId:     upload.UploadId,
-			Initiator:    owner,
+			Initiator:    initiator,
 			Owner:        owner,
 			StorageClass: storageClass,
 			Initiated:    upload.Initiated,
@@ -489,7 +510,14 @@ func (h *Handler) handleListParts(
 		return
 	}
 
-	owner := backend.DefaultOwner()
+	initiator := upload.Initiator
+	if initiator == nil {
+		initiator = backend.DefaultOwner()
+	}
+	owner := upload.Owner
+	if owner == nil {
+		owner = backend.DefaultOwner()
+	}
 	storageClass := upload.StorageClass
 	if storageClass == "" {
 		storageClass = "STANDARD"
@@ -499,7 +527,7 @@ func (h *Handler) handleListParts(
 		Bucket:               bucketName,
 		Key:                  key,
 		UploadId:             uploadId,
-		Initiator:            owner,
+		Initiator:            initiator,
 		Owner:                owner,
 		StorageClass:         storageClass,
 		PartNumberMarker:     partNumberMarker,

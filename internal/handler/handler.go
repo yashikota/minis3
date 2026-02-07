@@ -3,9 +3,15 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
 )
@@ -13,7 +19,15 @@ import (
 // Handler handles HTTP requests for S3 operations.
 type Handler struct {
 	backend *backend.Backend
+
+	lifecycleMu        sync.Mutex
+	lastLifecycleApply time.Time
 }
+
+var (
+	lifecycleIntervalOnce  sync.Once
+	lifecycleIntervalValue time.Duration
+)
 
 // New creates a new Handler with the given backend.
 func New(b *backend.Backend) *Handler {
@@ -36,9 +50,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleRequest is the main dispatch point.
 func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
+	h.applyLifecycleIfDue(time.Now().UTC())
+
 	if r.Method == http.MethodOptions {
 		origin := r.Header.Get("Origin")
 		requestMethod := r.Header.Get("Access-Control-Request-Method")
+		requestHeaders := r.Header.Get("Access-Control-Request-Headers")
 		if origin == "" || requestMethod == "" {
 			backend.WriteError(
 				w,
@@ -48,6 +65,24 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
+		pathValue := r.URL.Path
+		if pathValue == "/" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		bucketName, _ := extractBucketAndKey(pathValue)
+		if h.setCORSHeadersForRequest(
+			w,
+			bucketName,
+			origin,
+			requestMethod,
+			requestHeaders,
+		) {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusForbidden)
+		}
+		return
 	}
 
 	// Verify presigned URL if applicable
@@ -61,6 +96,14 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := verifyAuthorizationHeader(r); err != nil {
+		if pe, ok := err.(*presignedError); ok {
+			backend.WriteError(w, http.StatusForbidden, pe.code, pe.message)
+		} else {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", err.Error())
+		}
+		return
+	}
 
 	path := r.URL.Path
 	if path == "/" {
@@ -69,6 +112,13 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bucketName, key := extractBucketAndKey(path)
+	if origin := r.Header.Get("Origin"); origin != "" {
+		corsMethod := r.Header.Get("Access-Control-Request-Method")
+		if corsMethod == "" {
+			corsMethod = r.Method
+		}
+		h.setCORSHeadersForRequest(w, bucketName, origin, corsMethod, "")
+	}
 	expectedBucketOwner := r.Header.Get("x-amz-expected-bucket-owner")
 	if expectedBucketOwner != "" && expectedBucketOwner != backend.DefaultOwner().ID {
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
@@ -80,6 +130,34 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 	} else {
 		h.handleObject(w, r, bucketName, key)
 	}
+}
+
+func (h *Handler) applyLifecycleIfDue(now time.Time) {
+	interval := lifecycleDebugInterval()
+
+	h.lifecycleMu.Lock()
+	if !h.lastLifecycleApply.IsZero() && now.Sub(h.lastLifecycleApply) < interval {
+		h.lifecycleMu.Unlock()
+		return
+	}
+	h.lastLifecycleApply = now
+	h.lifecycleMu.Unlock()
+
+	h.backend.ApplyLifecycle(now, interval)
+}
+
+func lifecycleDebugInterval() time.Duration {
+	lifecycleIntervalOnce.Do(func() {
+		const defaultSeconds = 10
+		seconds := defaultSeconds
+		if raw := strings.TrimSpace(os.Getenv("MINIS3_LC_DEBUG_INTERVAL_SECONDS")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				seconds = parsed
+			}
+		}
+		lifecycleIntervalValue = time.Duration(seconds) * time.Second
+	})
+	return lifecycleIntervalValue
 }
 
 // extractAccessKey extracts the AWS access key from the Authorization header.
@@ -124,6 +202,10 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 	accessKey := extractAccessKey(r)
 	isAnonymous := isAnonymousRequest(r)
 	isOwner := accessKey == bucket.OwnerAccessKey
+	requesterCanonicalID := ""
+	if !isAnonymous {
+		requesterCanonicalID = backend.OwnerForAccessKey(accessKey).ID
+	}
 
 	// Build resource ARN
 	var resource string
@@ -179,14 +261,26 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if err != nil {
 			return false
 		}
-		return aclAllowsRead(acl, isAnonymous)
+		return aclAllowsRead(acl, requesterCanonicalID, isAnonymous)
 	case "s3:PutObject":
 		acl, err := h.backend.GetBucketACL(bucketName)
 		if err != nil {
 			return false
 		}
-		return aclAllowsWrite(acl, isAnonymous)
-	case "s3:GetObject", "s3:GetObjectVersion":
+		return aclAllowsWrite(acl, requesterCanonicalID, isAnonymous)
+	case "s3:GetBucketAcl":
+		acl, err := h.backend.GetBucketACL(bucketName)
+		if err != nil {
+			return false
+		}
+		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
+	case "s3:PutBucketAcl":
+		acl, err := h.backend.GetBucketACL(bucketName)
+		if err != nil {
+			return false
+		}
+		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionWriteACP)
+	case "s3:GetObjectAcl":
 		if key == "" {
 			return false
 		}
@@ -194,7 +288,37 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if err != nil {
 			return false
 		}
-		return aclAllowsRead(acl, isAnonymous)
+		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
+	case "s3:PutObjectAcl":
+		if key == "" {
+			return false
+		}
+		acl, err := h.backend.GetObjectACL(bucketName, key, "")
+		if err != nil {
+			return false
+		}
+		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionWriteACP)
+	case "s3:GetObject", "s3:GetObjectVersion":
+		if key == "" {
+			return false
+		}
+		acl, err := h.backend.GetObjectACL(bucketName, key, "")
+		if err == nil {
+			return aclAllowsRead(acl, requesterCanonicalID, isAnonymous)
+		}
+		// Missing objects (including latest delete marker) should be authorized
+		// by bucket read ACL so the caller gets 404 instead of 403.
+		if errors.Is(err, backend.ErrObjectNotFound) || errors.Is(err, backend.ErrVersionNotFound) {
+			bucketACL, bucketErr := h.backend.GetBucketACL(bucketName)
+			if bucketErr != nil {
+				return false
+			}
+			return aclAllowsRead(bucketACL, requesterCanonicalID, isAnonymous)
+		}
+		if err != nil {
+			return false
+		}
+		return false
 	default:
 		return false
 	}
@@ -262,6 +386,18 @@ func (h *Handler) getBucketPublicAccessBlock(
 	return config
 }
 
+func requesterOwner(r *http.Request) *backend.Owner {
+	return backend.OwnerForAccessKey(extractAccessKey(r))
+}
+
+func (h *Handler) bucketOwner(bucketName string) *backend.Owner {
+	bucket, ok := h.backend.GetBucket(bucketName)
+	if !ok {
+		return backend.DefaultOwner()
+	}
+	return backend.OwnerForAccessKey(bucket.OwnerAccessKey)
+}
+
 func isPublicACL(acl *backend.AccessControlPolicy) bool {
 	if acl == nil {
 		return false
@@ -282,7 +418,11 @@ func isPublicACL(acl *backend.AccessControlPolicy) bool {
 	return false
 }
 
-func aclAllowsRead(acl *backend.AccessControlPolicy, isAnonymous bool) bool {
+func aclAllowsRead(
+	acl *backend.AccessControlPolicy,
+	requesterCanonicalID string,
+	isAnonymous bool,
+) bool {
 	if acl == nil {
 		return false
 	}
@@ -300,11 +440,18 @@ func aclAllowsRead(acl *backend.AccessControlPolicy, isAnonymous bool) bool {
 		if !isAnonymous && grant.Grantee.URI == backend.AuthenticatedUsersURI {
 			return true
 		}
+		if requesterCanonicalID != "" && grant.Grantee.ID == requesterCanonicalID {
+			return true
+		}
 	}
 	return false
 }
 
-func aclAllowsWrite(acl *backend.AccessControlPolicy, isAnonymous bool) bool {
+func aclAllowsWrite(
+	acl *backend.AccessControlPolicy,
+	requesterCanonicalID string,
+	isAnonymous bool,
+) bool {
 	if acl == nil {
 		return false
 	}
@@ -322,8 +469,182 @@ func aclAllowsWrite(acl *backend.AccessControlPolicy, isAnonymous bool) bool {
 		if !isAnonymous && grant.Grantee.URI == backend.AuthenticatedUsersURI {
 			return true
 		}
+		if requesterCanonicalID != "" && grant.Grantee.ID == requesterCanonicalID {
+			return true
+		}
 	}
 	return false
+}
+
+func aclAllowsACP(
+	acl *backend.AccessControlPolicy,
+	requesterCanonicalID string,
+	isAnonymous bool,
+	permission string,
+) bool {
+	if acl == nil {
+		return false
+	}
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee == nil {
+			continue
+		}
+		if grant.Permission != permission && grant.Permission != backend.PermissionFullControl {
+			continue
+		}
+		if grant.Grantee.URI == backend.AllUsersURI {
+			return true
+		}
+		if !isAnonymous && grant.Grantee.URI == backend.AuthenticatedUsersURI {
+			return true
+		}
+		if requesterCanonicalID != "" && grant.Grantee.ID == requesterCanonicalID {
+			return true
+		}
+	}
+	return false
+}
+
+type aclValidationError struct {
+	code    string
+	message string
+}
+
+func normalizeAndValidateACL(acl *backend.AccessControlPolicy) *aclValidationError {
+	if acl == nil {
+		return nil
+	}
+	if acl.Owner != nil && acl.Owner.ID != "" {
+		owner := backend.OwnerForCanonicalID(acl.Owner.ID)
+		if owner == nil {
+			return &aclValidationError{code: "InvalidArgument", message: "Invalid argument"}
+		}
+		if acl.Owner.DisplayName == "" {
+			acl.Owner.DisplayName = owner.DisplayName
+		}
+	}
+
+	for i := range acl.AccessControlList.Grants {
+		grantee := acl.AccessControlList.Grants[i].Grantee
+		if grantee == nil {
+			continue
+		}
+
+		isEmailGrantee := grantee.Type == "AmazonCustomerByEmail" ||
+			(grantee.Type == "" && grantee.EmailAddress != "")
+		if isEmailGrantee {
+			owner := backend.OwnerForEmail(grantee.EmailAddress)
+			if owner == nil {
+				return &aclValidationError{
+					code:    "UnresolvableGrantByEmailAddress",
+					message: "The e-mail address you provided does not match any account on record.",
+				}
+			}
+			grantee.Type = "CanonicalUser"
+			grantee.ID = owner.ID
+			grantee.DisplayName = owner.DisplayName
+			grantee.EmailAddress = ""
+		}
+
+		isCanonicalGrantee := grantee.Type == "CanonicalUser" ||
+			(grantee.Type == "" && grantee.ID != "")
+		if isCanonicalGrantee {
+			if grantee.ID == "" {
+				return &aclValidationError{code: "InvalidArgument", message: "Invalid argument"}
+			}
+			owner := backend.OwnerForCanonicalID(grantee.ID)
+			if owner == nil {
+				return &aclValidationError{code: "InvalidArgument", message: "Invalid argument"}
+			}
+			grantee.Type = "CanonicalUser"
+			if grantee.DisplayName == "" {
+				grantee.DisplayName = owner.DisplayName
+			}
+		}
+	}
+	return nil
+}
+
+func aclFromGrantHeaders(
+	r *http.Request,
+	owner *backend.Owner,
+) (*backend.AccessControlPolicy, *aclValidationError) {
+	headerPermissions := []struct {
+		header     string
+		permission string
+	}{
+		{header: "x-amz-grant-read", permission: backend.PermissionRead},
+		{header: "x-amz-grant-write", permission: backend.PermissionWrite},
+		{header: "x-amz-grant-read-acp", permission: backend.PermissionReadACP},
+		{header: "x-amz-grant-write-acp", permission: backend.PermissionWriteACP},
+		{header: "x-amz-grant-full-control", permission: backend.PermissionFullControl},
+	}
+
+	grants := make([]backend.Grant, 0)
+	for _, hp := range headerPermissions {
+		raw := r.Header.Get(hp.header)
+		if raw == "" {
+			continue
+		}
+		parts := strings.Split(raw, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			kv := strings.SplitN(part, "=", 2)
+			if len(kv) != 2 {
+				return nil, &aclValidationError{
+					code:    "InvalidArgument",
+					message: "Invalid argument",
+				}
+			}
+			grantKey := strings.ToLower(strings.TrimSpace(kv[0]))
+			grantValue := strings.Trim(strings.TrimSpace(kv[1]), "\"")
+			if grantValue == "" {
+				return nil, &aclValidationError{
+					code:    "InvalidArgument",
+					message: "Invalid argument",
+				}
+			}
+			grant := backend.Grant{
+				Grantee:    &backend.Grantee{},
+				Permission: hp.permission,
+			}
+			switch grantKey {
+			case "id":
+				grant.Grantee.Type = "CanonicalUser"
+				grant.Grantee.ID = grantValue
+			case "uri":
+				grant.Grantee.Type = "Group"
+				grant.Grantee.URI = grantValue
+			case "emailaddress":
+				grant.Grantee.Type = "AmazonCustomerByEmail"
+				grant.Grantee.EmailAddress = grantValue
+			default:
+				return nil, &aclValidationError{
+					code:    "InvalidArgument",
+					message: "Invalid argument",
+				}
+			}
+			grants = append(grants, grant)
+		}
+	}
+
+	if len(grants) == 0 {
+		return nil, nil
+	}
+
+	acl := &backend.AccessControlPolicy{
+		Owner: owner,
+		AccessControlList: backend.AccessControlList{
+			Grants: grants,
+		},
+	}
+	if err := normalizeAndValidateACL(acl); err != nil {
+		return nil, err
+	}
+	return acl, nil
 }
 
 // extractPolicyHeaders extracts relevant headers for policy evaluation.
@@ -364,4 +685,109 @@ func extractBucketAndKey(path string) (string, string) {
 		}
 	}
 	return path, ""
+}
+
+func (h *Handler) setCORSHeadersForRequest(
+	w http.ResponseWriter,
+	bucketName, origin, method, requestHeaders string,
+) bool {
+	if bucketName == "" || origin == "" || method == "" {
+		return false
+	}
+	config, err := h.backend.GetBucketCORS(bucketName)
+	if err != nil || config == nil {
+		return false
+	}
+
+	requestMethod := strings.ToUpper(strings.TrimSpace(method))
+	for _, rule := range config.CORSRules {
+		methodMatch := false
+		for _, allowedMethod := range rule.AllowedMethods {
+			if strings.EqualFold(allowedMethod, requestMethod) {
+				methodMatch = true
+				break
+			}
+		}
+		if !methodMatch {
+			continue
+		}
+		originMatch := false
+		matchedOrigin := ""
+		for _, allowedOrigin := range rule.AllowedOrigins {
+			if corsOriginMatch(allowedOrigin, origin) {
+				originMatch = true
+				matchedOrigin = allowedOrigin
+				break
+			}
+		}
+		if !originMatch {
+			continue
+		}
+		if !corsRequestHeadersAllowed(requestHeaders, rule.AllowedHeaders) {
+			continue
+		}
+		allowOrigin := origin
+		if matchedOrigin == "*" {
+			allowOrigin = "*"
+		}
+		w.Header().Set("access-control-allow-origin", allowOrigin)
+		w.Header().Set("access-control-allow-methods", requestMethod)
+		return true
+	}
+	return false
+}
+
+func corsOriginMatch(pattern, origin string) bool {
+	if pattern == "*" {
+		return true
+	}
+	matched, err := path.Match(pattern, origin)
+	return err == nil && matched
+}
+
+func corsRequestHeadersAllowed(requestHeaders string, allowedHeaders []string) bool {
+	requested := parseCORSRequestHeaders(requestHeaders)
+	if len(requested) == 0 {
+		return true
+	}
+	if len(allowedHeaders) == 0 {
+		return false
+	}
+	for _, header := range requested {
+		allowed := false
+		for _, pattern := range allowedHeaders {
+			if corsHeaderMatch(pattern, header) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false
+		}
+	}
+	return true
+}
+
+func parseCORSRequestHeaders(value string) []string {
+	var headers []string
+	for _, part := range strings.Split(value, ",") {
+		header := strings.ToLower(strings.TrimSpace(part))
+		if header != "" {
+			headers = append(headers, header)
+		}
+	}
+	return headers
+}
+
+func corsHeaderMatch(pattern, header string) bool {
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	header = strings.ToLower(strings.TrimSpace(header))
+	if pattern == "" || header == "" {
+		return false
+	}
+	if pattern == "*" {
+		return true
+	}
+	matched, err := path.Match(pattern, header)
+	return err == nil && matched
 }

@@ -714,6 +714,38 @@ func TestObjectTaggingBranches(t *testing.T) {
 	}
 }
 
+func TestListObjectsHidesKeysWithCurrentDeleteMarker(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("list-delete-marker"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	if err := b.SetBucketVersioning("list-delete-marker", VersioningEnabled, MFADeleteDisabled); err != nil {
+		t.Fatalf("SetBucketVersioning failed: %v", err)
+	}
+	if _, err := b.PutObject("list-delete-marker", "k", []byte("v1"), PutObjectOptions{}); err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+	if _, err := b.DeleteObject("list-delete-marker", "k", false); err != nil {
+		t.Fatalf("DeleteObject failed: %v", err)
+	}
+
+	v1, err := b.ListObjectsV1("list-delete-marker", "", "", "", 1000)
+	if err != nil {
+		t.Fatalf("ListObjectsV1 failed: %v", err)
+	}
+	if len(v1.Objects) != 0 {
+		t.Fatalf("expected no visible objects in ListObjectsV1, got %+v", v1.Objects)
+	}
+
+	v2, err := b.ListObjectsV2("list-delete-marker", "", "", "", "", 1000)
+	if err != nil {
+		t.Fatalf("ListObjectsV2 failed: %v", err)
+	}
+	if len(v2.Objects) != 0 {
+		t.Fatalf("expected no visible objects in ListObjectsV2, got %+v", v2.Objects)
+	}
+}
+
 func ptrTimeForObjectBranch(t time.Time) *time.Time {
 	return &t
 }

@@ -537,6 +537,42 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 
 		// Check if Object Lock is requested
+		requestAccessKey := extractAccessKey(r)
+		if existing, exists := h.backend.GetBucket(bucketName); exists {
+			// Same owner: idempotent success.
+			if existing.OwnerAccessKey == requestAccessKey {
+				// Re-create with ACL intent should fail to avoid ACL overwrite semantics.
+				if r.Header.Get("x-amz-acl") != "" {
+					backend.WriteError(
+						w,
+						http.StatusConflict,
+						"BucketAlreadyExists",
+						"The requested bucket name is not available.",
+					)
+					return
+				}
+				if acl, err := h.backend.GetBucketACL(bucketName); err == nil && isPublicACL(acl) {
+					backend.WriteError(
+						w,
+						http.StatusConflict,
+						"BucketAlreadyExists",
+						"The requested bucket name is not available.",
+					)
+					return
+				}
+				w.Header().Set("Location", "/"+bucketName)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			backend.WriteError(
+				w,
+				http.StatusConflict,
+				"BucketAlreadyExists",
+				"The requested bucket name is not available.",
+			)
+			return
+		}
+
 		var err error
 		if r.Header.Get("x-amz-bucket-object-lock-enabled") == "true" {
 			err = h.backend.CreateBucketWithObjectLock(bucketName)
@@ -559,7 +595,23 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		// Set the owner access key
-		h.backend.SetBucketOwner(bucketName, extractAccessKey(r))
+		h.backend.SetBucketOwner(bucketName, requestAccessKey)
+		owner := backend.OwnerForAccessKey(requestAccessKey)
+		requestedACL := backend.NewDefaultACLForOwner(owner)
+		headerACL, aclErr := aclFromGrantHeaders(r, owner)
+		if aclErr != nil {
+			backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
+			return
+		}
+		if headerACL != nil {
+			requestedACL = headerACL
+		} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+			requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, owner, owner)
+		}
+		if err := h.backend.PutBucketACL(bucketName, requestedACL); err != nil {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
 		w.Header().Set("Location", "/"+bucketName)
 		if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
 			if err := h.backend.PutBucketACL(bucketName, backend.CannedACLToPolicy(cannedACL)); err != nil {
@@ -620,6 +672,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			// S3 returns x-amz-bucket-region header even on 404
 			w.Header().Set("x-amz-bucket-region", "us-east-1")
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if !h.checkAccess(r, bucketName, "s3:ListBucket", "") {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
 		// HeadBucket response headers per S3 API spec
@@ -764,11 +820,14 @@ func (h *Handler) handlePostObjectFormUpload(
 		return
 	}
 
+	requestOwner := requesterOwner(r)
+	objectACL := backend.NewDefaultACLForOwner(requestOwner)
 	if acl := getMultipartFormValue(formFields, "acl"); acl != "" {
-		if err := h.backend.PutObjectACL(bucketName, key, "", backend.CannedACLToPolicy(acl)); err != nil {
-			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-			return
-		}
+		objectACL = backend.CannedACLToPolicyForOwner(acl, requestOwner, h.bucketOwner(bucketName))
+	}
+	if err := h.backend.PutObjectACL(bucketName, key, obj.VersionId, objectACL); err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
 	}
 
 	if redirectURL := getMultipartFormValue(formFields, "success_action_redirect"); redirectURL != "" {
@@ -1701,9 +1760,14 @@ func (h *Handler) handleDeleteBucketPolicy(
 // handleGetBucketACL handles GetBucketAcl requests.
 func (h *Handler) handleGetBucketACL(
 	w http.ResponseWriter,
-	_ *http.Request,
+	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:GetBucketAcl", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	acl, err := h.backend.GetBucketACL(bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -1745,7 +1809,8 @@ func (h *Handler) handlePutBucketACL(
 	// Check for canned ACL header first
 	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
-		acl := backend.CannedACLToPolicy(cannedACL)
+		bucketOwner := h.bucketOwner(bucketName)
+		acl := backend.CannedACLToPolicyForOwner(cannedACL, bucketOwner, bucketOwner)
 		if config != nil && config.BlockPublicAcls && isPublicACL(acl) {
 			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
@@ -1788,6 +1853,10 @@ func (h *Handler) handlePutBucketACL(
 			"MalformedACLError",
 			"The XML you provided was not well-formed or did not validate against our published schema.",
 		)
+		return
+	}
+	if aclErr := normalizeAndValidateACL(&acl); aclErr != nil {
+		backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
 		return
 	}
 	if config != nil && config.BlockPublicAcls && isPublicACL(&acl) {
@@ -1879,6 +1948,10 @@ func (h *Handler) handlePutBucketLifecycleConfiguration(
 		)
 		return
 	}
+	if code, message, ok := validateLifecycleConfiguration(&config); !ok {
+		backend.WriteError(w, http.StatusBadRequest, code, message)
+		return
+	}
 
 	if err := h.backend.PutBucketLifecycleConfiguration(bucketName, &config); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -1895,6 +1968,103 @@ func (h *Handler) handlePutBucketLifecycleConfiguration(
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func validateLifecycleConfiguration(config *backend.LifecycleConfiguration) (string, string, bool) {
+	if config == nil {
+		return "MalformedXML", "The XML you provided was not well-formed or did not validate against our published schema.", false
+	}
+
+	seenIDs := make(map[string]struct{}, len(config.Rules))
+	for _, rule := range config.Rules {
+		if rule.Status != backend.LifecycleStatusEnabled &&
+			rule.Status != backend.LifecycleStatusDisabled {
+			return "MalformedXML", "The XML you provided was not well-formed or did not validate against our published schema.", false
+		}
+
+		if rule.ID != "" {
+			if len(rule.ID) > 255 {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if _, exists := seenIDs[rule.ID]; exists {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			seenIDs[rule.ID] = struct{}{}
+		}
+
+		if rule.Expiration != nil {
+			if rule.Expiration.Days < 0 {
+				return "InvalidArgument", "Invalid argument", false
+			}
+
+			hasDate := strings.TrimSpace(rule.Expiration.Date) != ""
+			hasDays := rule.Expiration.Days > 0
+			hasDeleteMarkerOnly := rule.Expiration.ExpiredObjectDeleteMarker
+
+			if hasDeleteMarkerOnly {
+				if hasDays || hasDate {
+					return "InvalidArgument", "Invalid argument", false
+				}
+			} else {
+				if !hasDays && !hasDate {
+					return "InvalidArgument", "Invalid argument", false
+				}
+				if hasDays && hasDate {
+					return "InvalidArgument", "Invalid argument", false
+				}
+				if hasDate {
+					if _, err := parseLifecycleExpirationDate(rule.Expiration.Date); err != nil {
+						return "InvalidArgument", "Invalid argument", false
+					}
+				}
+			}
+		}
+
+		for _, transition := range rule.Transition {
+			hasDate := strings.TrimSpace(transition.Date) != ""
+			hasDays := transition.Days > 0
+			if transition.Days < 0 {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if !hasDate && !hasDays {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if hasDate && hasDays {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if strings.TrimSpace(transition.StorageClass) == "" {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if hasDate {
+				if _, err := parseLifecycleExpirationDate(transition.Date); err != nil {
+					return "InvalidArgument", "Invalid argument", false
+				}
+			}
+		}
+
+		if rule.NoncurrentVersionExpiration != nil &&
+			rule.NoncurrentVersionExpiration.NoncurrentDays <= 0 {
+			return "InvalidArgument", "Invalid argument", false
+		}
+	}
+
+	return "", "", true
+}
+
+func parseLifecycleExpirationDate(value string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		if t.UTC().Year() < 2000 {
+			return time.Time{}, fmt.Errorf("invalid lifecycle expiration date: %q", value)
+		}
+		return t.UTC(), nil
+	}
+	if t, err := time.Parse("2006-01-02", value); err == nil {
+		if t.UTC().Year() < 2000 {
+			return time.Time{}, fmt.Errorf("invalid lifecycle expiration date: %q", value)
+		}
+		return t.UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("invalid lifecycle expiration date: %q", value)
 }
 
 // handleDeleteBucketLifecycleConfiguration handles DeleteBucketLifecycleConfiguration requests.

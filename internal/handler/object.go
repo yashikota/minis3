@@ -174,6 +174,144 @@ func setStorageAndEncryptionHeaders(w http.ResponseWriter, obj *backend.Object) 
 	}
 }
 
+func (h *Handler) setLifecycleExpirationHeader(
+	w http.ResponseWriter,
+	bucketName, key string,
+	obj *backend.Object,
+) {
+	if obj == nil {
+		return
+	}
+	config, err := h.backend.GetBucketLifecycleConfiguration(bucketName)
+	if err != nil || config == nil {
+		return
+	}
+
+	ruleID, expiryDate, ok := findLifecycleExpirationForObject(config, key, obj)
+	if !ok || ruleID == "" {
+		return
+	}
+	w.Header().Set(
+		"x-amz-expiration",
+		fmt.Sprintf(
+			`expiry-date="%s", rule-id="%s"`,
+			expiryDate.UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"),
+			ruleID,
+		),
+	)
+}
+
+func findLifecycleExpirationForObject(
+	config *backend.LifecycleConfiguration,
+	key string,
+	obj *backend.Object,
+) (string, time.Time, bool) {
+	if config == nil || obj == nil {
+		return "", time.Time{}, false
+	}
+	for _, rule := range config.Rules {
+		if rule.Status != backend.LifecycleStatusEnabled || rule.Expiration == nil {
+			continue
+		}
+		if !lifecycleRuleMatchesObjectForHeader(rule, key, obj) {
+			continue
+		}
+		expiryDate, ok := lifecycleExpiryDate(rule.Expiration, obj.LastModified)
+		if !ok {
+			continue
+		}
+		return rule.ID, expiryDate, true
+	}
+	return "", time.Time{}, false
+}
+
+func lifecycleRuleMatchesObjectForHeader(
+	rule backend.LifecycleRule,
+	key string,
+	obj *backend.Object,
+) bool {
+	if obj == nil {
+		return false
+	}
+	if rule.Prefix != "" && !strings.HasPrefix(key, rule.Prefix) {
+		return false
+	}
+	if rule.Filter == nil {
+		return true
+	}
+	if rule.Filter.Prefix != "" && !strings.HasPrefix(key, rule.Filter.Prefix) {
+		return false
+	}
+	if !lifecycleObjectSizeMatchForHeader(
+		obj.Size,
+		rule.Filter.ObjectSizeGreaterThan,
+		rule.Filter.ObjectSizeLessThan,
+	) {
+		return false
+	}
+	if rule.Filter.Tag != nil && !lifecycleObjectHasTagForHeader(obj, *rule.Filter.Tag) {
+		return false
+	}
+	if rule.Filter.And != nil {
+		if rule.Filter.And.Prefix != "" && !strings.HasPrefix(key, rule.Filter.And.Prefix) {
+			return false
+		}
+		if !lifecycleObjectSizeMatchForHeader(
+			obj.Size,
+			rule.Filter.And.ObjectSizeGreaterThan,
+			rule.Filter.And.ObjectSizeLessThan,
+		) {
+			return false
+		}
+		for _, tag := range rule.Filter.And.Tags {
+			if !lifecycleObjectHasTagForHeader(obj, tag) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func lifecycleObjectHasTagForHeader(obj *backend.Object, tag backend.Tag) bool {
+	if obj == nil || obj.Tags == nil || tag.Key == "" {
+		return false
+	}
+	value, ok := obj.Tags[tag.Key]
+	return ok && value == tag.Value
+}
+
+func lifecycleObjectSizeMatchForHeader(size int64, greaterThan, lessThan int64) bool {
+	if greaterThan > 0 && size <= greaterThan {
+		return false
+	}
+	if lessThan > 0 && size >= lessThan {
+		return false
+	}
+	return true
+}
+
+func lifecycleExpiryDate(
+	expiration *backend.LifecycleExpiration,
+	base time.Time,
+) (time.Time, bool) {
+	if expiration == nil {
+		return time.Time{}, false
+	}
+	if expiration.Days > 0 {
+		// Add one second so second-level header formatting still yields
+		// at least N full days from caller timestamps with sub-second precision.
+		return base.UTC().AddDate(0, 0, expiration.Days).Add(time.Second), true
+	}
+	if expiration.Date != "" {
+		d, err := parseLifecycleExpirationDate(expiration.Date)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return d.UTC(), true
+	}
+	return time.Time{}, false
+}
+
 // validateSSEHeaders validates server-side encryption headers on a write request (PutObject, CreateMultipartUpload).
 // Returns (errorCode, errorMessage) or ("", "") if valid.
 func validateSSEHeaders(r *http.Request) (string, string) {
@@ -659,6 +797,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
+		// Evaluate access before reading body to avoid emitting 100-continue
+		// for unauthorized requests.
+		if !h.checkAccess(r, bucketName, "s3:PutObject", key) {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
+
 		var data []byte
 		var err error
 
@@ -752,12 +897,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.StorageClass = storageClass
 		}
 
-		// Evaluate bucket policy (policy denial takes priority)
-		if !h.checkAccess(r, bucketName, "s3:PutObject", key) {
-			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-			return
-		}
-
 		// Validate Server-Side Encryption headers
 		if errCode, errMsg := validateSSEHeaders(r); errCode != "" {
 			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
@@ -812,14 +951,23 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.ChecksumSHA256 = v
 		}
 
-		var requestedACL *backend.AccessControlPolicy
-		if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
-			requestedACL = backend.CannedACLToPolicy(cannedACL)
-			config := h.getBucketPublicAccessBlock(bucketName)
-			if config != nil && config.BlockPublicAcls && isPublicACL(requestedACL) {
-				backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-				return
-			}
+		requestOwner := requesterOwner(r)
+		bucketOwner := h.bucketOwner(bucketName)
+		requestedACL := backend.NewDefaultACLForOwner(requestOwner)
+		headerACL, aclErr := aclFromGrantHeaders(r, requestOwner)
+		if aclErr != nil {
+			backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
+			return
+		}
+		if headerACL != nil {
+			requestedACL = headerACL
+		} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+			requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, requestOwner, bucketOwner)
+		}
+		config := h.getBucketPublicAccessBlock(bucketName)
+		if config != nil && config.BlockPublicAcls && isPublicACL(requestedACL) {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
 		}
 
 		obj, err := h.backend.PutObject(bucketName, key, data, opts)
@@ -841,11 +989,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
-		if requestedACL != nil {
-			if err := h.backend.PutObjectACL(bucketName, key, obj.VersionId, requestedACL); err != nil {
-				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-				return
-			}
+		if err := h.backend.PutObjectACL(bucketName, key, obj.VersionId, requestedACL); err != nil {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			return
 		}
 		w.Header().Set("ETag", obj.ETag)
 		// Add version ID header if versioning is enabled
@@ -859,6 +1005,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if obj.SSEKMSKeyId != "" {
 			w.Header().Set("x-amz-server-side-encryption-aws-kms-key-id", obj.SSEKMSKeyId)
 		}
+		h.setLifecycleExpirationHeader(w, bucketName, key, obj)
 		// Return checksum headers for PutObject response
 		setChecksumResponseHeaders(w, obj)
 		w.WriteHeader(http.StatusOK)
@@ -1006,6 +1153,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		setObjectLockHeaders(w, obj)
 		// Set StorageClass and SSE headers
 		setStorageAndEncryptionHeaders(w, obj)
+		h.setLifecycleExpirationHeader(w, bucketName, key, obj)
 		// Set Website Redirect Location header
 		if obj.WebsiteRedirectLocation != "" {
 			w.Header().Set("x-amz-website-redirect-location", obj.WebsiteRedirectLocation)
@@ -1166,6 +1314,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 
 		if err != nil {
+			if errors.Is(err, backend.ErrObjectNotFound) {
+				w.Header().Set("x-amz-delete-marker", "false")
+			}
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -1241,6 +1392,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		setObjectLockHeaders(w, obj)
 		// Set StorageClass and SSE headers
 		setStorageAndEncryptionHeaders(w, obj)
+		h.setLifecycleExpirationHeader(w, bucketName, key, obj)
 		// Set Website Redirect Location header
 		if obj.WebsiteRedirectLocation != "" {
 			w.Header().Set("x-amz-website-redirect-location", obj.WebsiteRedirectLocation)
@@ -1598,6 +1750,25 @@ func (h *Handler) handleCopyObject(
 		opts.ChecksumAlgorithm = checksumAlgo
 	}
 
+	requestOwner := requesterOwner(r)
+	bucketOwner := h.bucketOwner(dstBucket)
+	requestedACL := backend.NewDefaultACLForOwner(requestOwner)
+	headerACL, aclErr := aclFromGrantHeaders(r, requestOwner)
+	if aclErr != nil {
+		backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
+		return
+	}
+	if headerACL != nil {
+		requestedACL = headerACL
+	} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+		requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, requestOwner, bucketOwner)
+	}
+	config := h.getBucketPublicAccessBlock(dstBucket)
+	if config != nil && config.BlockPublicAcls && isPublicACL(requestedACL) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	obj, srcVersionIdUsed, err := h.backend.CopyObject(
 		srcBucket,
 		srcKey,
@@ -1629,6 +1800,10 @@ func (h *Handler) handleCopyObject(
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
+		return
+	}
+	if err := h.backend.PutObjectACL(dstBucket, dstKey, obj.VersionId, requestedACL); err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 
@@ -1727,7 +1902,9 @@ func (h *Handler) handlePutObjectACL(
 	// Check for canned ACL header first
 	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
-		acl := backend.CannedACLToPolicy(cannedACL)
+		requestOwner := requesterOwner(r)
+		bucketOwner := h.bucketOwner(bucketName)
+		acl := backend.CannedACLToPolicyForOwner(cannedACL, requestOwner, bucketOwner)
 		if config != nil && config.BlockPublicAcls && isPublicACL(acl) {
 			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
@@ -1761,6 +1938,10 @@ func (h *Handler) handlePutObjectACL(
 			"MalformedACLError",
 			"The XML you provided was not well-formed or did not validate against our published schema.",
 		)
+		return
+	}
+	if aclErr := normalizeAndValidateACL(&acl); aclErr != nil {
+		backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
 		return
 	}
 	if config != nil && config.BlockPublicAcls && isPublicACL(&acl) {
