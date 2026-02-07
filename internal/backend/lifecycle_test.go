@@ -154,3 +154,58 @@ func TestApplyLifecycleExpiresNoncurrentVersions(t *testing.T) {
 		t.Fatal("expected newest version to stay latest")
 	}
 }
+
+func TestApplyLifecycleDeletesExpiredObjectDeleteMarker(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("lifecycle-delete-marker"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	if err := b.SetBucketVersioning("lifecycle-delete-marker", VersioningEnabled, MFADeleteDisabled); err != nil {
+		t.Fatalf("SetBucketVersioning failed: %v", err)
+	}
+
+	if _, err := b.PutObject("lifecycle-delete-marker", "test1/a", []byte("a"), PutObjectOptions{}); err != nil {
+		t.Fatalf("PutObject test1/a failed: %v", err)
+	}
+	if _, err := b.PutObject("lifecycle-delete-marker", "test2/abc", []byte("b"), PutObjectOptions{}); err != nil {
+		t.Fatalf("PutObject test2/abc failed: %v", err)
+	}
+	if _, err := b.DeleteObject("lifecycle-delete-marker", "test1/a", false); err != nil {
+		t.Fatalf("DeleteObject test1/a failed: %v", err)
+	}
+	if _, err := b.DeleteObject("lifecycle-delete-marker", "test2/abc", false); err != nil {
+		t.Fatalf("DeleteObject test2/abc failed: %v", err)
+	}
+
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				ID:     "rule1",
+				Status: LifecycleStatusEnabled,
+				Prefix: "test1/",
+				NoncurrentVersionExpiration: &NoncurrentVersionExpiration{
+					NoncurrentDays: 1,
+				},
+				Expiration: &LifecycleExpiration{
+					ExpiredObjectDeleteMarker: true,
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("lifecycle-delete-marker", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+	}
+
+	b.ApplyLifecycle(time.Now().UTC().Add(70*time.Second), 10*time.Second)
+
+	bucket, ok := b.GetBucket("lifecycle-delete-marker")
+	if !ok || bucket == nil {
+		t.Fatal("GetBucket failed")
+	}
+	if _, exists := bucket.Objects["test1/a"]; exists {
+		t.Fatalf("expected test1/a to be removed after delete marker expiration, objects=%+v", bucket.Objects["test1/a"])
+	}
+	if versions, exists := bucket.Objects["test2/abc"]; !exists || len(versions.Versions) != 2 {
+		t.Fatalf("expected test2/abc to remain with 2 versions, got %+v", versions)
+	}
+}

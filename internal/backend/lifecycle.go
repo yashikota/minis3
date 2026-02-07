@@ -59,6 +59,10 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 			delete(bucket.Objects, key)
 			continue
 		}
+		if shouldDeleteExpiredObjectDeleteMarker(key, updated.Versions, bucket.LifecycleConfiguration.Rules) {
+			delete(bucket.Objects, key)
+			continue
+		}
 		updated.Versions[0].IsLatest = true
 	}
 }
@@ -241,6 +245,39 @@ func lifecycleNoncurrentExpirationDue(
 		return false
 	}
 	return !lastModified.Add(time.Duration(expiration.NoncurrentDays) * dayDuration).After(now)
+}
+
+func shouldDeleteExpiredObjectDeleteMarker(
+	key string,
+	versions []*Object,
+	rules []LifecycleRule,
+) bool {
+	if len(versions) == 0 || !versions[0].IsDeleteMarker {
+		return false
+	}
+	if hasNonDeleteVersion(versions) {
+		return false
+	}
+
+	currentDeleteMarker := versions[0]
+	for _, rule := range rules {
+		if !isLifecycleRuleEnabled(rule) || rule.Expiration == nil || !rule.Expiration.ExpiredObjectDeleteMarker {
+			continue
+		}
+		if lifecycleRuleMatchesObject(rule, key, currentDeleteMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNonDeleteVersion(versions []*Object) bool {
+	for _, version := range versions {
+		if !version.IsDeleteMarker {
+			return true
+		}
+	}
+	return false
 }
 
 func parseLifecycleDate(value string) (time.Time, error) {
