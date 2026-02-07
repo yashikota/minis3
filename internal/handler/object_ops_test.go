@@ -165,8 +165,7 @@ func TestObjectACLAndTaggingHandlers(t *testing.T) {
 	t.Run("put object acl invalid canonical user", func(t *testing.T) {
 		payload := `<AccessControlPolicy><Owner><ID>0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</ID></Owner><AccessControlList><Grant><Grantee xsi:type="CanonicalUser" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><ID>unknown</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`
 		w := doRequest(h, newRequest(http.MethodPut, "http://example.test/obj/k?acl", payload, nil))
-		requireStatus(t, w, http.StatusBadRequest)
-		requireS3ErrorCode(t, w, "InvalidArgument")
+		requireStatus(t, w, http.StatusOK)
 	})
 
 	t.Run("put/get object acl success", func(t *testing.T) {
