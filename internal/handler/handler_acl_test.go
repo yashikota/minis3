@@ -2,7 +2,10 @@ package handler
 
 import (
 	"net/http"
+	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
 )
@@ -52,6 +55,62 @@ func TestACLHelpers(t *testing.T) {
 	if aclAllowsRead(canonicalReadACP, canonical.ID, false) {
 		t.Fatal("read should not be allowed when only read-acp exists")
 	}
+}
+
+func TestACLAllowsACPAdditionalBranches(t *testing.T) {
+	t.Run("all users and authenticated users branches", func(t *testing.T) {
+		acl := &backend.AccessControlPolicy{
+			AccessControlList: backend.AccessControlList{
+				Grants: []backend.Grant{
+					{
+						Grantee:    nil,
+						Permission: backend.PermissionReadACP,
+					},
+					{
+						Grantee:    &backend.Grantee{URI: backend.AllUsersURI},
+						Permission: backend.PermissionReadACP,
+					},
+				},
+			},
+		}
+		if !aclAllowsACP(acl, "", true, backend.PermissionReadACP) {
+			t.Fatal("all-users read-acp grant should allow anonymous")
+		}
+
+		authOnly := &backend.AccessControlPolicy{
+			AccessControlList: backend.AccessControlList{
+				Grants: []backend.Grant{
+					{
+						Grantee:    &backend.Grantee{URI: backend.AuthenticatedUsersURI},
+						Permission: backend.PermissionWriteACP,
+					},
+				},
+			},
+		}
+		if aclAllowsACP(authOnly, "", true, backend.PermissionWriteACP) {
+			t.Fatal("authenticated-users write-acp grant should deny anonymous")
+		}
+		if !aclAllowsACP(authOnly, "", false, backend.PermissionWriteACP) {
+			t.Fatal("authenticated-users write-acp grant should allow authenticated")
+		}
+	})
+
+	t.Run("canonical user mismatch", func(t *testing.T) {
+		owner := backend.OwnerForAccessKey("minis3-access-key")
+		acl := &backend.AccessControlPolicy{
+			AccessControlList: backend.AccessControlList{
+				Grants: []backend.Grant{
+					{
+						Grantee:    &backend.Grantee{ID: owner.ID},
+						Permission: backend.PermissionReadACP,
+					},
+				},
+			},
+		}
+		if aclAllowsACP(acl, "different-id", false, backend.PermissionReadACP) {
+			t.Fatal("canonical ID mismatch should not be allowed")
+		}
+	})
 }
 
 func TestNormalizeAndValidateACL(t *testing.T) {
@@ -201,5 +260,56 @@ func TestHandlerMiscBranches(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusForbidden)
 		requireS3ErrorCode(t, w, "AccessDenied")
+	})
+}
+
+func TestCORSOriginMatchBranches(t *testing.T) {
+	if !corsOriginMatch("*", "https://example.com") {
+		t.Fatal("wildcard origin should match")
+	}
+	if !corsOriginMatch("https://*.example.com", "https://a.example.com") {
+		t.Fatal("glob origin pattern should match")
+	}
+	if corsOriginMatch("[", "https://example.com") {
+		t.Fatal("invalid glob pattern must not match")
+	}
+}
+
+func TestLifecycleDebugIntervalBranches(t *testing.T) {
+	reset := func() {
+		lifecycleIntervalOnce = sync.Once{}
+		lifecycleIntervalValue = 0
+	}
+	orig, had := os.LookupEnv("MINIS3_LC_DEBUG_INTERVAL_SECONDS")
+	defer func() {
+		if had {
+			_ = os.Setenv("MINIS3_LC_DEBUG_INTERVAL_SECONDS", orig)
+		} else {
+			_ = os.Unsetenv("MINIS3_LC_DEBUG_INTERVAL_SECONDS")
+		}
+	}()
+
+	t.Run("default interval", func(t *testing.T) {
+		reset()
+		_ = os.Unsetenv("MINIS3_LC_DEBUG_INTERVAL_SECONDS")
+		if got := lifecycleDebugInterval(); got != 10*time.Second {
+			t.Fatalf("default interval = %v, want 10s", got)
+		}
+	})
+
+	t.Run("valid env override", func(t *testing.T) {
+		reset()
+		_ = os.Setenv("MINIS3_LC_DEBUG_INTERVAL_SECONDS", "3")
+		if got := lifecycleDebugInterval(); got != 3*time.Second {
+			t.Fatalf("env interval = %v, want 3s", got)
+		}
+	})
+
+	t.Run("invalid env fallback", func(t *testing.T) {
+		reset()
+		_ = os.Setenv("MINIS3_LC_DEBUG_INTERVAL_SECONDS", "invalid")
+		if got := lifecycleDebugInterval(); got != 10*time.Second {
+			t.Fatalf("invalid env should fallback to default, got %v", got)
+		}
 	})
 }
