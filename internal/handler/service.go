@@ -49,6 +49,15 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 		Owner:  &backend.Owner{ID: "minis3", DisplayName: "minis3"},
 		Prefix: opts.Prefix,
 	}
+	if query.Has("usage") {
+		resp.Summary = &backend.UsageSummary{
+			QuotaMaxBytes:             "-1",
+			QuotaMaxBuckets:           "1000",
+			QuotaMaxObjCount:          "-1",
+			QuotaMaxBytesPerBucket:    "-1",
+			QuotaMaxObjCountPerBucket: "-1",
+		}
+	}
 
 	for _, b := range result.Buckets {
 		resp.Buckets = append(resp.Buckets, backend.BucketInfo{

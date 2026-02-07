@@ -27,7 +27,7 @@ func (h *Handler) handleGetObjectLockConfiguration(
 		} else if errors.Is(err, backend.ErrObjectLockNotEnabled) {
 			backend.WriteError(
 				w,
-				http.StatusBadRequest,
+				http.StatusNotFound,
 				"ObjectLockConfigurationNotFoundError",
 				"Object Lock configuration does not exist for this bucket.",
 			)
@@ -86,6 +86,27 @@ func (h *Handler) handlePutObjectLockConfiguration(
 				"NoSuchBucket",
 				"The specified bucket does not exist.",
 			)
+		} else if errors.Is(err, backend.ErrObjectLockNotEnabled) {
+			backend.WriteError(
+				w,
+				http.StatusConflict,
+				"InvalidBucketState",
+				"Object Lock configuration cannot be enabled on existing buckets.",
+			)
+		} else if errors.Is(err, backend.ErrInvalidRetentionPeriod) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRetentionPeriod",
+				"The retention period must be a positive integer value.",
+			)
+		} else if errors.Is(err, backend.ErrInvalidObjectLockConfig) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"MalformedXML",
+				"The XML you provided was not well-formed or did not validate against our published schema.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -131,6 +152,13 @@ func (h *Handler) handleGetObjectRetention(
 				http.StatusNotFound,
 				"NoSuchObjectLockConfiguration",
 				"The specified object does not have an Object Lock configuration.",
+			)
+		} else if errors.Is(err, backend.ErrObjectLockNotEnabled) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"Bucket is missing Object Lock Configuration.",
 			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -217,6 +245,13 @@ func (h *Handler) handlePutObjectRetention(
 				http.StatusForbidden,
 				"AccessDenied",
 				"Object is locked.",
+			)
+		} else if errors.Is(err, backend.ErrInvalidObjectLockConfig) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"MalformedXML",
+				"The XML you provided was not well-formed or did not validate against our published schema.",
 			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -341,6 +376,13 @@ func (h *Handler) handlePutObjectLegalHold(
 				http.StatusBadRequest,
 				"InvalidRequest",
 				"Bucket is missing Object Lock Configuration.",
+			)
+		} else if errors.Is(err, backend.ErrInvalidObjectLockConfig) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"MalformedXML",
+				"The XML you provided was not well-formed or did not validate against our published schema.",
 			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
