@@ -17,6 +17,7 @@ type PolicyStatement struct {
 	Effect    string                       `json:"Effect"`
 	Action    PolicyStringOrSlice          `json:"Action"`
 	Resource  PolicyStringOrSlice          `json:"Resource"`
+	Principal any                          `json:"Principal,omitempty"`
 	Condition map[string]map[string]string `json:"Condition,omitempty"`
 }
 
@@ -53,6 +54,8 @@ type PolicyEvalContext struct {
 	Headers            map[string]string
 	ExistingObjectTags map[string]string
 	RequestObjectTags  map[string]string
+	AccessKey          string
+	IsAnonymous        bool
 }
 
 // EvaluateBucketPolicy evaluates a bucket policy against the given context.
@@ -81,6 +84,9 @@ func EvaluateBucketPolicyAccess(policyJSON string, ctx PolicyEvalContext) Policy
 		if stmt.Effect != "Deny" {
 			continue
 		}
+		if !matchesPrincipal(stmt.Principal, ctx) {
+			continue
+		}
 		if !matchesAction(stmt.Action, ctx.Action) {
 			continue
 		}
@@ -95,6 +101,9 @@ func EvaluateBucketPolicyAccess(policyJSON string, ctx PolicyEvalContext) Policy
 	// Second pass: check for explicit Allow
 	for _, stmt := range policy.Statement {
 		if stmt.Effect != "Allow" {
+			continue
+		}
+		if !matchesPrincipal(stmt.Principal, ctx) {
 			continue
 		}
 		if !matchesAction(stmt.Action, ctx.Action) {
@@ -112,6 +121,94 @@ func EvaluateBucketPolicyAccess(policyJSON string, ctx PolicyEvalContext) Policy
 		return PolicyEffectAllow
 	}
 	return PolicyEffectDefault
+}
+
+func matchesPrincipal(principal any, ctx PolicyEvalContext) bool {
+	// Backward-compat: statements without Principal are treated as matching.
+	if principal == nil {
+		return true
+	}
+
+	values, ok := extractAWSPrincipals(principal)
+	if !ok {
+		return false
+	}
+	for _, value := range values {
+		switch value {
+		case "*":
+			return true
+		default:
+			if ctx.AccessKey != "" && value == ctx.AccessKey {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func extractAWSPrincipals(principal any) ([]string, bool) {
+	switch p := principal.(type) {
+	case string:
+		return []string{p}, true
+	case []any:
+		values := make([]string, 0, len(p))
+		for _, item := range p {
+			s, ok := item.(string)
+			if !ok {
+				return nil, false
+			}
+			values = append(values, s)
+		}
+		return values, true
+	case map[string]any:
+		rawAWS, ok := p["AWS"]
+		if !ok {
+			return nil, false
+		}
+		return extractAWSPrincipals(rawAWS)
+	default:
+		return nil, false
+	}
+}
+
+func isPublicPrincipal(principal any) bool {
+	values, ok := extractAWSPrincipals(principal)
+	if !ok {
+		return false
+	}
+	for _, value := range values {
+		if value == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+// IsPolicyPublic returns true when policy contains an unconditional public Allow.
+func IsPolicyPublic(policyJSON string) bool {
+	if policyJSON == "" {
+		return false
+	}
+
+	var policy BucketPolicy
+	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
+		return false
+	}
+
+	for _, stmt := range policy.Statement {
+		if stmt.Effect != "Allow" {
+			continue
+		}
+		if !isPublicPrincipal(stmt.Principal) {
+			continue
+		}
+		// Conservative behavior: any condition makes it non-public.
+		if len(stmt.Condition) > 0 {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func matchesAction(actions PolicyStringOrSlice, target string) bool {

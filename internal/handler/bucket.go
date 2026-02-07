@@ -427,6 +427,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleGetBucketPolicy(w, r, bucketName)
 			return
 		}
+		if r.URL.Query().Has("policyStatus") {
+			h.handleGetBucketPolicyStatus(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Has("uploads") {
 			h.handleListMultipartUploads(w, r, bucketName)
 			return
@@ -1574,6 +1578,11 @@ func (h *Handler) handlePutBucketPolicy(
 	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:PutBucketPolicy", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -1583,6 +1592,12 @@ func (h *Handler) handlePutBucketPolicy(
 			"InvalidRequest",
 			"Failed to read request body.",
 		)
+		return
+	}
+
+	config := h.getBucketPublicAccessBlock(bucketName)
+	if config != nil && config.BlockPublicPolicy && backend.IsPolicyPublic(string(body)) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
 
@@ -1609,6 +1624,54 @@ func (h *Handler) handlePutBucketPolicy(
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetBucketPolicyStatus handles GetBucketPolicyStatus requests.
+func (h *Handler) handleGetBucketPolicyStatus(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:GetBucketPolicyStatus", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
+	bucket, ok := h.backend.GetBucket(bucketName)
+	if !ok {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+		return
+	}
+
+	config := h.getBucketPublicAccessBlock(bucketName)
+	ignorePublicACLs := config != nil && config.IgnorePublicAcls
+
+	isPublic := backend.IsPolicyPublic(bucket.Policy)
+	if !ignorePublicACLs {
+		acl, err := h.backend.GetBucketACL(bucketName)
+		if err == nil && isPublicACL(acl) {
+			isPublic = true
+		}
+	}
+
+	resp := backend.PolicyStatus{
+		Xmlns:    backend.S3Xmlns,
+		IsPublic: isPublic,
+	}
+
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xml.Marshal(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
 }
 
 // handleDeleteBucketPolicy handles DeleteBucketPolicy requests.
@@ -1672,10 +1735,21 @@ func (h *Handler) handlePutBucketACL(
 	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:PutBucketAcl", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
+	config := h.getBucketPublicAccessBlock(bucketName)
+
 	// Check for canned ACL header first
 	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
 		acl := backend.CannedACLToPolicy(cannedACL)
+		if config != nil && config.BlockPublicAcls && isPublicACL(acl) {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
 		if err := h.backend.PutBucketACL(bucketName, acl); err != nil {
 			if errors.Is(err, backend.ErrBucketNotFound) {
 				backend.WriteError(
@@ -1714,6 +1788,10 @@ func (h *Handler) handlePutBucketACL(
 			"MalformedACLError",
 			"The XML you provided was not well-formed or did not validate against our published schema.",
 		)
+		return
+	}
+	if config != nil && config.BlockPublicAcls && isPublicACL(&acl) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
 
@@ -2173,9 +2251,14 @@ func (h *Handler) handleDeleteBucketWebsite(
 // handleGetPublicAccessBlock handles GetPublicAccessBlock requests.
 func (h *Handler) handleGetPublicAccessBlock(
 	w http.ResponseWriter,
-	_ *http.Request,
+	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:GetBucketPublicAccessBlock", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	config, err := h.backend.GetPublicAccessBlock(bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2215,6 +2298,11 @@ func (h *Handler) handlePutPublicAccessBlock(
 	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:PutBucketPublicAccessBlock", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -2258,9 +2346,14 @@ func (h *Handler) handlePutPublicAccessBlock(
 // handleDeletePublicAccessBlock handles DeletePublicAccessBlock requests.
 func (h *Handler) handleDeletePublicAccessBlock(
 	w http.ResponseWriter,
-	_ *http.Request,
+	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:DeleteBucketPublicAccessBlock", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	err := h.backend.DeletePublicAccessBlock(bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {

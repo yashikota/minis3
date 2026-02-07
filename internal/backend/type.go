@@ -676,3 +676,10 @@ type PublicAccessBlockConfiguration struct {
 	BlockPublicPolicy     bool     `xml:"BlockPublicPolicy"`
 	RestrictPublicBuckets bool     `xml:"RestrictPublicBuckets"`
 }
+
+// PolicyStatus represents bucket policy status (public/non-public).
+type PolicyStatus struct {
+	XMLName  xml.Name `xml:"PolicyStatus"`
+	Xmlns    string   `xml:"xmlns,attr,omitempty"`
+	IsPublic bool     `xml:"IsPublic"`
+}

@@ -121,12 +121,9 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		return true // bucket doesn't exist yet, allow
 	}
 
-	if bucket.Policy == "" {
-		return true // no policy, allow all (mock behavior)
-	}
-
 	accessKey := extractAccessKey(r)
-	isOwner := (accessKey == bucket.OwnerAccessKey)
+	isAnonymous := isAnonymousRequest(r)
+	isOwner := accessKey == bucket.OwnerAccessKey
 
 	// Build resource ARN
 	var resource string
@@ -137,9 +134,11 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 	}
 
 	ctx := backend.PolicyEvalContext{
-		Action:   action,
-		Resource: resource,
-		Headers:  extractPolicyHeaders(r),
+		Action:      action,
+		Resource:    resource,
+		Headers:     extractPolicyHeaders(r),
+		AccessKey:   accessKey,
+		IsAnonymous: isAnonymous,
 	}
 
 	effect := backend.EvaluateBucketPolicyAccess(bucket.Policy, ctx)
@@ -154,8 +153,51 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		return true
 	}
 
-	// Non-owner needs explicit Allow
-	return effect == backend.PolicyEffectAllow
+	publicBlock := h.getBucketPublicAccessBlock(bucketName)
+	ignorePublicACLs := publicBlock != nil && publicBlock.IgnorePublicAcls
+	restrictPublicBuckets := publicBlock != nil && publicBlock.RestrictPublicBuckets
+	hasPublicPolicy := backend.IsPolicyPublic(bucket.Policy)
+
+	// RestrictPublicBuckets blocks non-owner access granted by public policy.
+	if restrictPublicBuckets && hasPublicPolicy {
+		return false
+	}
+
+	// Non-owner can be allowed by explicit policy allow.
+	if effect == backend.PolicyEffectAllow {
+		return true
+	}
+
+	// ACL-based fallback when no explicit policy allow.
+	if ignorePublicACLs {
+		return false
+	}
+
+	switch action {
+	case "s3:ListBucket", "s3:ListBucketVersions":
+		acl, err := h.backend.GetBucketACL(bucketName)
+		if err != nil {
+			return false
+		}
+		return aclAllowsRead(acl, isAnonymous)
+	case "s3:PutObject":
+		acl, err := h.backend.GetBucketACL(bucketName)
+		if err != nil {
+			return false
+		}
+		return aclAllowsWrite(acl, isAnonymous)
+	case "s3:GetObject", "s3:GetObjectVersion":
+		if key == "" {
+			return false
+		}
+		acl, err := h.backend.GetObjectACL(bucketName, key, "")
+		if err != nil {
+			return false
+		}
+		return aclAllowsRead(acl, isAnonymous)
+	default:
+		return false
+	}
 }
 
 // checkAccessWithContext evaluates bucket policy with additional context (tags, etc.).
@@ -169,12 +211,8 @@ func (h *Handler) checkAccessWithContext(
 		return true
 	}
 
-	if bucket.Policy == "" {
-		return true
-	}
-
 	accessKey := extractAccessKey(r)
-	isOwner := (accessKey == bucket.OwnerAccessKey)
+	isOwner := accessKey == bucket.OwnerAccessKey
 
 	// Build resource ARN if not already set
 	if ctx.Resource == "" {
@@ -192,6 +230,10 @@ func (h *Handler) checkAccessWithContext(
 	if ctx.Headers == nil {
 		ctx.Headers = extractPolicyHeaders(r)
 	}
+	if ctx.AccessKey == "" {
+		ctx.AccessKey = accessKey
+	}
+	ctx.IsAnonymous = isAnonymousRequest(r)
 
 	effect := backend.EvaluateBucketPolicyAccess(bucket.Policy, ctx)
 
@@ -203,7 +245,85 @@ func (h *Handler) checkAccessWithContext(
 		return true
 	}
 
-	return effect == backend.PolicyEffectAllow
+	if effect == backend.PolicyEffectAllow {
+		return true
+	}
+
+	return h.checkAccess(r, bucketName, action, key)
+}
+
+func (h *Handler) getBucketPublicAccessBlock(
+	bucketName string,
+) *backend.PublicAccessBlockConfiguration {
+	config, err := h.backend.GetPublicAccessBlock(bucketName)
+	if err != nil {
+		return nil
+	}
+	return config
+}
+
+func isPublicACL(acl *backend.AccessControlPolicy) bool {
+	if acl == nil {
+		return false
+	}
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee == nil {
+			continue
+		}
+		if grant.Grantee.URI != backend.AllUsersURI &&
+			grant.Grantee.URI != backend.AuthenticatedUsersURI {
+			continue
+		}
+		switch grant.Permission {
+		case backend.PermissionRead, backend.PermissionWrite, backend.PermissionFullControl:
+			return true
+		}
+	}
+	return false
+}
+
+func aclAllowsRead(acl *backend.AccessControlPolicy, isAnonymous bool) bool {
+	if acl == nil {
+		return false
+	}
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee == nil {
+			continue
+		}
+		if grant.Permission != backend.PermissionRead &&
+			grant.Permission != backend.PermissionFullControl {
+			continue
+		}
+		if grant.Grantee.URI == backend.AllUsersURI {
+			return true
+		}
+		if !isAnonymous && grant.Grantee.URI == backend.AuthenticatedUsersURI {
+			return true
+		}
+	}
+	return false
+}
+
+func aclAllowsWrite(acl *backend.AccessControlPolicy, isAnonymous bool) bool {
+	if acl == nil {
+		return false
+	}
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee == nil {
+			continue
+		}
+		if grant.Permission != backend.PermissionWrite &&
+			grant.Permission != backend.PermissionFullControl {
+			continue
+		}
+		if grant.Grantee.URI == backend.AllUsersURI {
+			return true
+		}
+		if !isAnonymous && grant.Grantee.URI == backend.AuthenticatedUsersURI {
+			return true
+		}
+	}
+	return false
 }
 
 // extractPolicyHeaders extracts relevant headers for policy evaluation.

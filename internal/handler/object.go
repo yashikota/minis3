@@ -812,6 +812,16 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.ChecksumSHA256 = v
 		}
 
+		var requestedACL *backend.AccessControlPolicy
+		if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+			requestedACL = backend.CannedACLToPolicy(cannedACL)
+			config := h.getBucketPublicAccessBlock(bucketName)
+			if config != nil && config.BlockPublicAcls && isPublicACL(requestedACL) {
+				backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+				return
+			}
+		}
+
 		obj, err := h.backend.PutObject(bucketName, key, data, opts)
 		if err != nil {
 			if errors.Is(err, backend.ErrInvalidRequest) {
@@ -831,8 +841,8 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
-		if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
-			if err := h.backend.PutObjectACL(bucketName, key, obj.VersionId, backend.CannedACLToPolicy(cannedACL)); err != nil {
+		if requestedACL != nil {
+			if err := h.backend.PutObjectACL(bucketName, key, obj.VersionId, requestedACL); err != nil {
 				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 				return
 			}
@@ -1712,11 +1722,16 @@ func (h *Handler) handlePutObjectACL(
 	}
 
 	versionId := r.URL.Query().Get("versionId")
+	config := h.getBucketPublicAccessBlock(bucketName)
 
 	// Check for canned ACL header first
 	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
 		acl := backend.CannedACLToPolicy(cannedACL)
+		if config != nil && config.BlockPublicAcls && isPublicACL(acl) {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
 		if err := h.backend.PutObjectACL(bucketName, key, versionId, acl); err != nil {
 			h.writePutObjectACLError(w, err)
 			return
@@ -1746,6 +1761,10 @@ func (h *Handler) handlePutObjectACL(
 			"MalformedACLError",
 			"The XML you provided was not well-formed or did not validate against our published schema.",
 		)
+		return
+	}
+	if config != nil && config.BlockPublicAcls && isPublicACL(&acl) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
 

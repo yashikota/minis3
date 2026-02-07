@@ -449,36 +449,35 @@ func newGroupGrant(uri, permission string) Grant {
 // CannedACLToPolicy converts a canned ACL string to an AccessControlPolicy.
 func CannedACLToPolicy(cannedACL string) *AccessControlPolicy {
 	owner := DefaultOwner()
-	acl := &AccessControlPolicy{
-		Xmlns: S3Xmlns,
-		Owner: owner,
-		AccessControlList: AccessControlList{
-			Grants: []Grant{
-				{
-					Grantee: &Grantee{
-						Xmlns:       "http://www.w3.org/2001/XMLSchema-instance",
-						Type:        "CanonicalUser",
-						ID:          owner.ID,
-						DisplayName: owner.DisplayName,
-					},
-					Permission: PermissionFullControl,
-				},
-			},
+	ownerGrant := Grant{
+		Grantee: &Grantee{
+			Xmlns:       "http://www.w3.org/2001/XMLSchema-instance",
+			Type:        "CanonicalUser",
+			ID:          owner.ID,
+			DisplayName: owner.DisplayName,
 		},
+		Permission: PermissionFullControl,
+	}
+	grants := []Grant{}
+
+	acl := &AccessControlPolicy{
+		Xmlns:             S3Xmlns,
+		Owner:             owner,
+		AccessControlList: AccessControlList{Grants: grants},
 	}
 
 	switch CannedACL(cannedACL) {
 	case ACLPublicRead:
-		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
-			newGroupGrant(AllUsersURI, PermissionRead))
+		grants = append(grants, newGroupGrant(AllUsersURI, PermissionRead))
 	case ACLPublicReadWrite:
-		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
+		grants = append(grants,
 			newGroupGrant(AllUsersURI, PermissionRead),
 			newGroupGrant(AllUsersURI, PermissionWrite))
 	case ACLAuthenticatedRead:
-		acl.AccessControlList.Grants = append(acl.AccessControlList.Grants,
-			newGroupGrant(AuthenticatedUsersURI, PermissionRead))
+		grants = append(grants, newGroupGrant(AuthenticatedUsersURI, PermissionRead))
 	}
+	grants = append(grants, ownerGrant)
+	acl.AccessControlList.Grants = grants
 
 	return acl
 }
