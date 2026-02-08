@@ -21,6 +21,155 @@ import (
 	"github.com/yashikota/minis3/internal/backend"
 )
 
+var (
+	getBucketACLFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.AccessControlPolicy, error) {
+		return h.backend.GetBucketACL(bucketName)
+	}
+	createBucketWithObjectLockFn = func(h *Handler, bucketName string) error {
+		return h.backend.CreateBucketWithObjectLock(bucketName)
+	}
+	createBucketFn = func(h *Handler, bucketName string) error {
+		return h.backend.CreateBucket(bucketName)
+	}
+	putBucketACLFn = func(
+		h *Handler,
+		bucketName string,
+		acl *backend.AccessControlPolicy,
+	) error {
+		return h.backend.PutBucketACL(bucketName, acl)
+	}
+	deleteBucketFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucket(bucketName)
+	}
+	getBucketUsageFn = func(h *Handler, bucketName string) (int, int64, error) {
+		return h.backend.GetBucketUsage(bucketName)
+	}
+	postObjectPutFn = func(
+		h *Handler,
+		bucketName, key string,
+		body []byte,
+		opts backend.PutObjectOptions,
+	) (*backend.Object, error) {
+		return h.backend.PutObject(bucketName, key, body, opts)
+	}
+	postObjectPutACLFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+		acl *backend.AccessControlPolicy,
+	) error {
+		return h.backend.PutObjectACL(bucketName, key, versionID, acl)
+	}
+	setBucketVersioningFn = func(
+		h *Handler,
+		bucketName string,
+		status backend.VersioningStatus,
+		mfaDelete backend.MFADeleteStatus,
+	) error {
+		return h.backend.SetBucketVersioning(bucketName, status, mfaDelete)
+	}
+	getBucketLocationFn = func(h *Handler, bucketName string) (string, error) {
+		return h.backend.GetBucketLocation(bucketName)
+	}
+	getBucketTaggingFn = func(h *Handler, bucketName string) (map[string]string, error) {
+		return h.backend.GetBucketTagging(bucketName)
+	}
+	putBucketTaggingFn = func(h *Handler, bucketName string, tags map[string]string) error {
+		return h.backend.PutBucketTagging(bucketName, tags)
+	}
+	deleteBucketTaggingFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucketTagging(bucketName)
+	}
+	getBucketPolicyFn = func(h *Handler, bucketName string) (string, error) {
+		return h.backend.GetBucketPolicy(bucketName)
+	}
+	putBucketPolicyFn = func(h *Handler, bucketName, policy string) error {
+		return h.backend.PutBucketPolicy(bucketName, policy)
+	}
+	deleteBucketPolicyFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucketPolicy(bucketName)
+	}
+	getBucketLifecycleConfigurationFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.LifecycleConfiguration, error) {
+		return h.backend.GetBucketLifecycleConfiguration(bucketName)
+	}
+	putBucketLifecycleConfigurationFn = func(
+		h *Handler,
+		bucketName string,
+		config *backend.LifecycleConfiguration,
+	) error {
+		return h.backend.PutBucketLifecycleConfiguration(bucketName, config)
+	}
+	deleteBucketLifecycleConfigurationFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucketLifecycleConfiguration(bucketName)
+	}
+	getBucketEncryptionFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.ServerSideEncryptionConfiguration, error) {
+		return h.backend.GetBucketEncryption(bucketName)
+	}
+	putBucketEncryptionFn = func(
+		h *Handler,
+		bucketName string,
+		config *backend.ServerSideEncryptionConfiguration,
+	) error {
+		return h.backend.PutBucketEncryption(bucketName, config)
+	}
+	deleteBucketEncryptionFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucketEncryption(bucketName)
+	}
+	getBucketCORSFn = func(h *Handler, bucketName string) (*backend.CORSConfiguration, error) {
+		return h.backend.GetBucketCORS(bucketName)
+	}
+	putBucketCORSFn = func(
+		h *Handler,
+		bucketName string,
+		config *backend.CORSConfiguration,
+	) error {
+		return h.backend.PutBucketCORS(bucketName, config)
+	}
+	deleteBucketCORSFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucketCORS(bucketName)
+	}
+	getBucketWebsiteFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.WebsiteConfiguration, error) {
+		return h.backend.GetBucketWebsite(bucketName)
+	}
+	putBucketWebsiteFn = func(
+		h *Handler,
+		bucketName string,
+		config *backend.WebsiteConfiguration,
+	) error {
+		return h.backend.PutBucketWebsite(bucketName, config)
+	}
+	deleteBucketWebsiteFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucketWebsite(bucketName)
+	}
+	getPublicAccessBlockFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.PublicAccessBlockConfiguration, error) {
+		return h.backend.GetPublicAccessBlock(bucketName)
+	}
+	putPublicAccessBlockFn = func(
+		h *Handler,
+		bucketName string,
+		config *backend.PublicAccessBlockConfiguration,
+	) error {
+		return h.backend.PutPublicAccessBlock(bucketName, config)
+	}
+	deletePublicAccessBlockFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeletePublicAccessBlock(bucketName)
+	}
+)
+
 func isAnonymousRequest(r *http.Request) bool {
 	if r.Header.Get("Authorization") != "" {
 		return false
@@ -56,7 +205,7 @@ func parseMultipartFormFields(r *http.Request) map[string]string {
 		if err != nil {
 			continue
 		}
-		valueBytes, err := io.ReadAll(io.LimitReader(f, 1<<20))
+		valueBytes, err := readAllFn(io.LimitReader(f, 1<<20))
 		_ = f.Close()
 		if err != nil {
 			continue
@@ -510,7 +659,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		// Parse CreateBucketConfiguration from request body if present
 		if r.Body != nil && r.ContentLength > 0 {
 			defer func() { _ = r.Body.Close() }()
-			body, err := io.ReadAll(r.Body)
+			body, err := readAllFn(r.Body)
 			if err != nil {
 				backend.WriteError(
 					w,
@@ -551,7 +700,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 					)
 					return
 				}
-				if acl, err := h.backend.GetBucketACL(bucketName); err == nil && isPublicACL(acl) {
+				if acl, err := getBucketACLFn(h, bucketName); err == nil && isPublicACL(acl) {
 					backend.WriteError(
 						w,
 						http.StatusConflict,
@@ -575,9 +724,9 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 
 		var err error
 		if r.Header.Get("x-amz-bucket-object-lock-enabled") == "true" {
-			err = h.backend.CreateBucketWithObjectLock(bucketName)
+			err = createBucketWithObjectLockFn(h, bucketName)
 		} else {
-			err = h.backend.CreateBucket(bucketName)
+			err = createBucketFn(h, bucketName)
 		}
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketAlreadyOwnedByYou) {
@@ -608,13 +757,13 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
 			requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, owner, owner)
 		}
-		if err := h.backend.PutBucketACL(bucketName, requestedACL); err != nil {
+		if err := putBucketACLFn(h, bucketName, requestedACL); err != nil {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		w.Header().Set("Location", "/"+bucketName)
 		if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
-			if err := h.backend.PutBucketACL(bucketName, backend.CannedACLToPolicy(cannedACL)); err != nil {
+			if err := putBucketACLFn(h, bucketName, backend.CannedACLToPolicy(cannedACL)); err != nil {
 				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 				return
 			}
@@ -649,7 +798,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleDeletePublicAccessBlock(w, r, bucketName)
 			return
 		}
-		err := h.backend.DeleteBucket(bucketName)
+		err := deleteBucketFn(h, bucketName)
 		if err != nil {
 			if errors.Is(err, backend.ErrBucketNotEmpty) {
 				backend.WriteError(w, http.StatusConflict, "BucketNotEmpty", err.Error())
@@ -682,7 +831,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		w.Header().Set("x-amz-bucket-region", "us-east-1")
 		w.Header().Set("x-amz-access-point-alias", "false")
 		if r.URL.Query().Get("read-stats") == "true" {
-			objectCount, bytesUsed, err := h.backend.GetBucketUsage(bucketName)
+			objectCount, bytesUsed, err := getBucketUsageFn(h, bucketName)
 			if err != nil {
 				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 				return
@@ -731,7 +880,7 @@ func (h *Handler) handlePostObjectFormUpload(
 	}
 	defer func() { _ = file.Close() }()
 
-	body, err := io.ReadAll(file)
+	body, err := readAllFn(file)
 	if err != nil {
 		backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Failed to read file")
 		return
@@ -743,10 +892,6 @@ func (h *Handler) handlePostObjectFormUpload(
 		return
 	}
 	key = strings.ReplaceAll(key, "${filename}", fileHeader.Filename)
-	if key == "" {
-		backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Missing key field")
-		return
-	}
 
 	contentType := getMultipartFormValue(formFields, "Content-Type")
 	if contentType == "" {
@@ -805,7 +950,7 @@ func (h *Handler) handlePostObjectFormUpload(
 		return
 	}
 
-	obj, err := h.backend.PutObject(bucketName, key, body, opts)
+	obj, err := postObjectPutFn(h, bucketName, key, body, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -825,7 +970,7 @@ func (h *Handler) handlePostObjectFormUpload(
 	if acl := getMultipartFormValue(formFields, "acl"); acl != "" {
 		objectACL = backend.CannedACLToPolicyForOwner(acl, requestOwner, h.bucketOwner(bucketName))
 	}
-	if err := h.backend.PutObjectACL(bucketName, key, obj.VersionId, objectACL); err != nil {
+	if err := postObjectPutACLFn(h, bucketName, key, obj.VersionId, objectACL); err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -878,7 +1023,7 @@ func (h *Handler) handlePostObjectFormUpload(
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(xml.Header))
-		output, marshalErr := xml.Marshal(resp)
+		output, marshalErr := xmlMarshalFn(resp)
 		if marshalErr == nil {
 			_, _ = w.Write(output)
 		}
@@ -1013,7 +1158,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1128,7 +1273,7 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1246,7 +1391,7 @@ func (h *Handler) handleListObjectVersions(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1287,7 +1432,7 @@ func (h *Handler) handleGetBucketVersioning(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1302,7 +1447,7 @@ func (h *Handler) handlePutBucketVersioning(
 	bucketName string,
 ) {
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1352,7 +1497,7 @@ func (h *Handler) handlePutBucketVersioning(
 		}
 	}
 
-	err = h.backend.SetBucketVersioning(bucketName, status, mfaDelete)
+	err = setBucketVersioningFn(h, bucketName, status, mfaDelete)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1431,7 +1576,7 @@ func (h *Handler) handleGetBucketLocation(
 	_ *http.Request,
 	bucketName string,
 ) {
-	location, err := h.backend.GetBucketLocation(bucketName)
+	location, err := getBucketLocationFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1453,7 +1598,7 @@ func (h *Handler) handleGetBucketLocation(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1467,7 +1612,7 @@ func (h *Handler) handleGetBucketTagging(
 	_ *http.Request,
 	bucketName string,
 ) {
-	tags, err := h.backend.GetBucketTagging(bucketName)
+	tags, err := getBucketTaggingFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1504,7 +1649,7 @@ func (h *Handler) handleGetBucketTagging(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1519,7 +1664,7 @@ func (h *Handler) handlePutBucketTagging(
 	bucketName string,
 ) {
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1556,7 +1701,7 @@ func (h *Handler) handlePutBucketTagging(
 		tags[tag.Key] = tag.Value
 	}
 
-	err = h.backend.PutBucketTagging(bucketName, tags)
+	err = putBucketTaggingFn(h, bucketName, tags)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1580,7 +1725,7 @@ func (h *Handler) handleDeleteBucketTagging(
 	_ *http.Request,
 	bucketName string,
 ) {
-	err := h.backend.DeleteBucketTagging(bucketName)
+	err := deleteBucketTaggingFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1604,7 +1749,7 @@ func (h *Handler) handleGetBucketPolicy(
 	_ *http.Request,
 	bucketName string,
 ) {
-	policy, err := h.backend.GetBucketPolicy(bucketName)
+	policy, err := getBucketPolicyFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1643,7 +1788,7 @@ func (h *Handler) handlePutBucketPolicy(
 	}
 
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1660,7 +1805,7 @@ func (h *Handler) handlePutBucketPolicy(
 		return
 	}
 
-	err = h.backend.PutBucketPolicy(bucketName, string(body))
+	err = putBucketPolicyFn(h, bucketName, string(body))
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1725,7 +1870,7 @@ func (h *Handler) handleGetBucketPolicyStatus(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1739,7 +1884,7 @@ func (h *Handler) handleDeleteBucketPolicy(
 	_ *http.Request,
 	bucketName string,
 ) {
-	err := h.backend.DeleteBucketPolicy(bucketName)
+	err := deleteBucketPolicyFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1768,7 +1913,7 @@ func (h *Handler) handleGetBucketACL(
 		return
 	}
 
-	acl, err := h.backend.GetBucketACL(bucketName)
+	acl, err := getBucketACLFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1785,7 +1930,7 @@ func (h *Handler) handleGetBucketACL(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(acl)
+	output, err := xmlMarshalFn(acl)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1815,7 +1960,7 @@ func (h *Handler) handlePutBucketACL(
 			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
-		if err := h.backend.PutBucketACL(bucketName, acl); err != nil {
+		if err := putBucketACLFn(h, bucketName, acl); err != nil {
 			if errors.Is(err, backend.ErrBucketNotFound) {
 				backend.WriteError(
 					w,
@@ -1834,7 +1979,7 @@ func (h *Handler) handlePutBucketACL(
 
 	// Parse ACL from request body
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1864,7 +2009,7 @@ func (h *Handler) handlePutBucketACL(
 		return
 	}
 
-	if err := h.backend.PutBucketACL(bucketName, &acl); err != nil {
+	if err := putBucketACLFn(h, bucketName, &acl); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
 				w,
@@ -1887,7 +2032,7 @@ func (h *Handler) handleGetBucketLifecycleConfiguration(
 	_ *http.Request,
 	bucketName string,
 ) {
-	config, err := h.backend.GetBucketLifecycleConfiguration(bucketName)
+	config, err := getBucketLifecycleConfigurationFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1912,7 +2057,7 @@ func (h *Handler) handleGetBucketLifecycleConfiguration(
 	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(config)
+	output, err := xmlMarshalFn(config)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1927,7 +2072,7 @@ func (h *Handler) handlePutBucketLifecycleConfiguration(
 	bucketName string,
 ) {
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1953,7 +2098,7 @@ func (h *Handler) handlePutBucketLifecycleConfiguration(
 		return
 	}
 
-	if err := h.backend.PutBucketLifecycleConfiguration(bucketName, &config); err != nil {
+	if err := putBucketLifecycleConfigurationFn(h, bucketName, &config); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
 				w,
@@ -2073,7 +2218,7 @@ func (h *Handler) handleDeleteBucketLifecycleConfiguration(
 	_ *http.Request,
 	bucketName string,
 ) {
-	err := h.backend.DeleteBucketLifecycleConfiguration(bucketName)
+	err := deleteBucketLifecycleConfigurationFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2097,7 +2242,7 @@ func (h *Handler) handleGetBucketEncryption(
 	_ *http.Request,
 	bucketName string,
 ) {
-	config, err := h.backend.GetBucketEncryption(bucketName)
+	config, err := getBucketEncryptionFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2122,7 +2267,7 @@ func (h *Handler) handleGetBucketEncryption(
 	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(config)
+	output, err := xmlMarshalFn(config)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2137,7 +2282,7 @@ func (h *Handler) handlePutBucketEncryption(
 	bucketName string,
 ) {
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2159,7 +2304,7 @@ func (h *Handler) handlePutBucketEncryption(
 		return
 	}
 
-	if err := h.backend.PutBucketEncryption(bucketName, &config); err != nil {
+	if err := putBucketEncryptionFn(h, bucketName, &config); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
 				w,
@@ -2182,7 +2327,7 @@ func (h *Handler) handleDeleteBucketEncryption(
 	_ *http.Request,
 	bucketName string,
 ) {
-	err := h.backend.DeleteBucketEncryption(bucketName)
+	err := deleteBucketEncryptionFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2206,7 +2351,7 @@ func (h *Handler) handleGetBucketCORS(
 	_ *http.Request,
 	bucketName string,
 ) {
-	config, err := h.backend.GetBucketCORS(bucketName)
+	config, err := getBucketCORSFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2231,7 +2376,7 @@ func (h *Handler) handleGetBucketCORS(
 	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(config)
+	output, err := xmlMarshalFn(config)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2246,7 +2391,7 @@ func (h *Handler) handlePutBucketCORS(
 	bucketName string,
 ) {
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2268,7 +2413,7 @@ func (h *Handler) handlePutBucketCORS(
 		return
 	}
 
-	if err := h.backend.PutBucketCORS(bucketName, &config); err != nil {
+	if err := putBucketCORSFn(h, bucketName, &config); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
 				w,
@@ -2291,7 +2436,7 @@ func (h *Handler) handleDeleteBucketCORS(
 	_ *http.Request,
 	bucketName string,
 ) {
-	err := h.backend.DeleteBucketCORS(bucketName)
+	err := deleteBucketCORSFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2315,7 +2460,7 @@ func (h *Handler) handleGetBucketWebsite(
 	_ *http.Request,
 	bucketName string,
 ) {
-	config, err := h.backend.GetBucketWebsite(bucketName)
+	config, err := getBucketWebsiteFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2340,7 +2485,7 @@ func (h *Handler) handleGetBucketWebsite(
 	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(config)
+	output, err := xmlMarshalFn(config)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2355,7 +2500,7 @@ func (h *Handler) handlePutBucketWebsite(
 	bucketName string,
 ) {
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2377,7 +2522,7 @@ func (h *Handler) handlePutBucketWebsite(
 		return
 	}
 
-	if err := h.backend.PutBucketWebsite(bucketName, &config); err != nil {
+	if err := putBucketWebsiteFn(h, bucketName, &config); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
 				w,
@@ -2400,7 +2545,7 @@ func (h *Handler) handleDeleteBucketWebsite(
 	_ *http.Request,
 	bucketName string,
 ) {
-	err := h.backend.DeleteBucketWebsite(bucketName)
+	err := deleteBucketWebsiteFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2429,7 +2574,7 @@ func (h *Handler) handleGetPublicAccessBlock(
 		return
 	}
 
-	config, err := h.backend.GetPublicAccessBlock(bucketName)
+	config, err := getPublicAccessBlockFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2454,7 +2599,7 @@ func (h *Handler) handleGetPublicAccessBlock(
 	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(config)
+	output, err := xmlMarshalFn(config)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2474,7 +2619,7 @@ func (h *Handler) handlePutPublicAccessBlock(
 	}
 
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2496,7 +2641,7 @@ func (h *Handler) handlePutPublicAccessBlock(
 		return
 	}
 
-	if err := h.backend.PutPublicAccessBlock(bucketName, &config); err != nil {
+	if err := putPublicAccessBlockFn(h, bucketName, &config); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
 				w,
@@ -2524,7 +2669,7 @@ func (h *Handler) handleDeletePublicAccessBlock(
 		return
 	}
 
-	err := h.backend.DeletePublicAccessBlock(bucketName)
+	err := deletePublicAccessBlockFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(

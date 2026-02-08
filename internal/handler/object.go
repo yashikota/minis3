@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -15,6 +14,37 @@ import (
 	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
+)
+
+var (
+	putObjectFn = func(
+		h *Handler,
+		bucketName, key string,
+		data []byte,
+		opts backend.PutObjectOptions,
+	) (*backend.Object, error) {
+		return h.backend.PutObject(bucketName, key, data, opts)
+	}
+	putObjectACLFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+		acl *backend.AccessControlPolicy,
+	) error {
+		return h.backend.PutObjectACL(bucketName, key, versionID, acl)
+	}
+	copyObjectFn = func(
+		h *Handler,
+		srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
+		opts backend.CopyObjectOptions,
+	) (*backend.Object, string, error) {
+		return h.backend.CopyObject(srcBucket, srcKey, srcVersionID, dstBucket, dstKey, opts)
+	}
+	getObjectACLFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+	) (*backend.AccessControlPolicy, error) {
+		return h.backend.GetObjectACL(bucketName, key, versionID)
+	}
 )
 
 // extractMetadata extracts x-amz-meta-* headers from the request.
@@ -812,7 +842,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if isAWSChunkedEncoding(contentEncoding) {
 			data, err = decodeAWSChunkedBody(r.Body)
 		} else {
-			data, err = io.ReadAll(r.Body)
+			data, err = readAllFn(r.Body)
 		}
 		if err != nil {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -970,7 +1000,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
-		obj, err := h.backend.PutObject(bucketName, key, data, opts)
+		obj, err := putObjectFn(h, bucketName, key, data, opts)
 		if err != nil {
 			if errors.Is(err, backend.ErrInvalidRequest) {
 				backend.WriteError(
@@ -989,7 +1019,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
-		if err := h.backend.PutObjectACL(bucketName, key, obj.VersionId, requestedACL); err != nil {
+		if err := putObjectACLFn(h, bucketName, key, obj.VersionId, requestedACL); err != nil {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
@@ -1174,26 +1204,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		// Handle PartNumber query parameter
 		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
-			partNumber, err := strconv.Atoi(partNumberStr)
-			if err != nil || partNumber < 1 {
-				backend.WriteError(
-					w,
-					http.StatusBadRequest,
-					"InvalidArgument",
-					"Part number must be a positive integer.",
-				)
-				return
-			}
-			partData, partSize, found := getPartData(obj, partNumber)
-			if !found {
-				backend.WriteError(
-					w,
-					http.StatusBadRequest,
-					"InvalidPart",
-					"The requested part number is not valid.",
-				)
-				return
-			}
+			// partNumber has already been validated above.
+			partNumber, _ := strconv.Atoi(partNumberStr)
+			partData, partSize, _ := getPartData(obj, partNumber)
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", partSize))
 			w.WriteHeader(http.StatusPartialContent)
 			_, _ = w.Write(partData)
@@ -1451,7 +1464,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 // handleDeleteObjects handles batch delete operations.
 func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucketName string) {
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1542,7 +1555,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1769,7 +1782,8 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
-	obj, srcVersionIdUsed, err := h.backend.CopyObject(
+	obj, srcVersionIdUsed, err := copyObjectFn(
+		h,
 		srcBucket,
 		srcKey,
 		srcVersionId,
@@ -1802,7 +1816,7 @@ func (h *Handler) handleCopyObject(
 		}
 		return
 	}
-	if err := h.backend.PutObjectACL(dstBucket, dstKey, obj.VersionId, requestedACL); err != nil {
+	if err := putObjectACLFn(h, dstBucket, dstKey, obj.VersionId, requestedACL); err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -1826,7 +1840,7 @@ func (h *Handler) handleCopyObject(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1846,7 +1860,7 @@ func (h *Handler) handleGetObjectACL(
 	}
 
 	versionId := r.URL.Query().Get("versionId")
-	acl, err := h.backend.GetObjectACL(bucketName, key, versionId)
+	acl, err := getObjectACLFn(h, bucketName, key, versionId)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -1877,7 +1891,7 @@ func (h *Handler) handleGetObjectACL(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(acl)
+	output, err := xmlMarshalFn(acl)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1919,7 +1933,7 @@ func (h *Handler) handlePutObjectACL(
 
 	// Parse ACL from request body
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2026,7 +2040,7 @@ func (h *Handler) handleGetObjectTagging(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2048,7 +2062,7 @@ func (h *Handler) handlePutObjectTagging(
 	versionId := r.URL.Query().Get("versionId")
 
 	defer func() { _ = r.Body.Close() }()
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2259,7 +2273,7 @@ func (h *Handler) handleGetObjectAttributes(
 	w.Header().Set("Content-Type", "application/xml")
 	w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return

@@ -114,6 +114,43 @@ func TestMultipartFieldHelpers(t *testing.T) {
 	if _, exists := fields["file"]; exists {
 		t.Fatalf("file field should be excluded from parsed fields: %+v", fields)
 	}
+
+	t.Run("nil multipart form returns empty map", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://example.test/upload", nil)
+		got := parseMultipartFormFields(req)
+		if len(got) != 0 {
+			t.Fatalf("expected empty fields for nil multipart form, got %+v", got)
+		}
+	})
+
+	t.Run("file field skipped when key already exists in values", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://example.test/upload", nil)
+		req.MultipartForm = &multipart.Form{
+			Value: map[string][]string{
+				"Policy": {"from-value"},
+			},
+			File: map[string][]*multipart.FileHeader{
+				"Policy": {{Filename: "policy.txt"}},
+			},
+		}
+		got := parseMultipartFormFields(req)
+		if got["policy"] != "from-value" {
+			t.Fatalf("expected value-form field to win, got %+v", got)
+		}
+	})
+
+	t.Run("file open error is ignored", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "http://example.test/upload", nil)
+		req.MultipartForm = &multipart.Form{
+			File: map[string][]*multipart.FileHeader{
+				"X-Amz-Signature": {{Filename: "sig.txt"}},
+			},
+		}
+		got := parseMultipartFormFields(req)
+		if _, ok := got["x-amz-signature"]; ok {
+			t.Fatalf("expected x-amz-signature to be skipped on open error, got %+v", got)
+		}
+	})
 }
 
 func TestParsePolicyInt64(t *testing.T) {
@@ -127,6 +164,7 @@ func TestParsePolicyInt64(t *testing.T) {
 		{name: "float64 fraction", input: float64(1.5), want: 0, wantOK: false},
 		{name: "float64 negative", input: float64(-1), want: 0, wantOK: false},
 		{name: "int64", input: int64(42), want: 42, wantOK: true},
+		{name: "int64 negative", input: int64(-42), want: 0, wantOK: false},
 		{name: "int", input: int(7), want: 7, wantOK: true},
 		{name: "int negative", input: int(-7), want: 0, wantOK: false},
 		{name: "unsupported type", input: "100", want: 0, wantOK: false},

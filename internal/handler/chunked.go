@@ -75,12 +75,9 @@ func (cr *chunkedReader) readChunk() ([]byte, error) {
 
 	// Read chunk data
 	data := make([]byte, size)
-	n, err := io.ReadFull(cr.r, data)
+	_, err = io.ReadFull(cr.r, data)
 	if err != nil {
 		return nil, err
-	}
-	if int64(n) != size {
-		return nil, io.ErrUnexpectedEOF
 	}
 
 	// Read trailing \r\n

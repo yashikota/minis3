@@ -27,6 +27,21 @@ type Handler struct {
 var (
 	lifecycleIntervalOnce  sync.Once
 	lifecycleIntervalValue time.Duration
+
+	verifyPresignedURLFn         = verifyPresignedURL
+	verifyAuthorizationHeaderFn  = verifyAuthorizationHeader
+	getBucketACLForAccessCheckFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.AccessControlPolicy, error) {
+		return h.backend.GetBucketACL(bucketName)
+	}
+	getObjectACLForAccessCheckFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+	) (*backend.AccessControlPolicy, error) {
+		return h.backend.GetObjectACL(bucketName, key, versionID)
+	}
 )
 
 // New creates a new Handler with the given backend.
@@ -87,7 +102,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Verify presigned URL if applicable
 	if isPresignedURL(r) {
-		if err := verifyPresignedURL(r); err != nil {
+		if err := verifyPresignedURLFn(r); err != nil {
 			if pe, ok := err.(*presignedError); ok {
 				backend.WriteError(w, http.StatusForbidden, pe.code, pe.message)
 			} else {
@@ -96,7 +111,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := verifyAuthorizationHeader(r); err != nil {
+	if err := verifyAuthorizationHeaderFn(r); err != nil {
 		if pe, ok := err.(*presignedError); ok {
 			backend.WriteError(w, http.StatusForbidden, pe.code, pe.message)
 		} else {
@@ -257,25 +272,25 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 
 	switch action {
 	case "s3:ListBucket", "s3:ListBucketVersions":
-		acl, err := h.backend.GetBucketACL(bucketName)
+		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
 		}
 		return aclAllowsRead(acl, requesterCanonicalID, isAnonymous)
 	case "s3:PutObject":
-		acl, err := h.backend.GetBucketACL(bucketName)
+		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
 		}
 		return aclAllowsWrite(acl, requesterCanonicalID, isAnonymous)
 	case "s3:GetBucketAcl":
-		acl, err := h.backend.GetBucketACL(bucketName)
+		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
 		}
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
 	case "s3:PutBucketAcl":
-		acl, err := h.backend.GetBucketACL(bucketName)
+		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
 		}
@@ -284,7 +299,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := h.backend.GetObjectACL(bucketName, key, "")
+		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
 		if err != nil {
 			return false
 		}
@@ -293,7 +308,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := h.backend.GetObjectACL(bucketName, key, "")
+		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
 		if err != nil {
 			return false
 		}
@@ -302,21 +317,18 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := h.backend.GetObjectACL(bucketName, key, "")
+		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
 		if err == nil {
 			return aclAllowsRead(acl, requesterCanonicalID, isAnonymous)
 		}
 		// Missing objects (including latest delete marker) should be authorized
 		// by bucket read ACL so the caller gets 404 instead of 403.
 		if errors.Is(err, backend.ErrObjectNotFound) || errors.Is(err, backend.ErrVersionNotFound) {
-			bucketACL, bucketErr := h.backend.GetBucketACL(bucketName)
+			bucketACL, bucketErr := getBucketACLForAccessCheckFn(h, bucketName)
 			if bucketErr != nil {
 				return false
 			}
 			return aclAllowsRead(bucketACL, requesterCanonicalID, isAnonymous)
-		}
-		if err != nil {
-			return false
 		}
 		return false
 	default:

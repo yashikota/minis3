@@ -69,4 +69,74 @@ func TestChunkedHelpers(t *testing.T) {
 			t.Fatalf("chunk len = %d, want 0", len(chunk))
 		}
 	})
+
+	t.Run("decode zero chunk without trailing headers", func(t *testing.T) {
+		got, err := decodeAWSChunkedBody(strings.NewReader("0\r\n"))
+		if err != nil {
+			t.Fatalf("decodeAWSChunkedBody returned error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("decoded body len = %d, want 0", len(got))
+		}
+	})
+
+	t.Run("readChunk empty header line returns EOF", func(t *testing.T) {
+		cr := &chunkedReader{r: strings.NewReader("\r\n")}
+		chunk, err := cr.readChunk()
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("err = %v, want EOF", err)
+		}
+		if len(chunk) != 0 {
+			t.Fatalf("chunk len = %d, want 0", len(chunk))
+		}
+	})
+
+	t.Run("readLine continues on zero-byte read", func(t *testing.T) {
+		cr := &chunkedReader{r: &zeroThenDataReader{
+			parts: []readResult{
+				{n: 0, err: nil},
+				{b: []byte("a")},
+				{b: []byte("b")},
+				{b: []byte("\r")},
+				{b: []byte("\n")},
+			},
+		}}
+		line, err := cr.readLine()
+		if err != nil {
+			t.Fatalf("readLine error: %v", err)
+		}
+		if line != "ab" {
+			t.Fatalf("line = %q, want %q", line, "ab")
+		}
+	})
+}
+
+type readResult struct {
+	b   []byte
+	n   int
+	err error
+}
+
+type zeroThenDataReader struct {
+	idx   int
+	parts []readResult
+}
+
+func (r *zeroThenDataReader) Read(p []byte) (int, error) {
+	if r.idx >= len(r.parts) {
+		return 0, io.EOF
+	}
+	part := r.parts[r.idx]
+	r.idx++
+	if part.n == 0 && part.err == nil && len(part.b) == 0 {
+		return 0, nil
+	}
+	if len(part.b) > 0 {
+		copy(p, part.b)
+		return len(part.b), part.err
+	}
+	if part.n > 0 {
+		return part.n, part.err
+	}
+	return 0, part.err
 }
