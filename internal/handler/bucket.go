@@ -220,6 +220,17 @@ func getMultipartFormValue(fields map[string]string, name string) string {
 	return fields[strings.ToLower(name)]
 }
 
+func resolvePostObjectFormKey(rawKey, fileName string) (string, bool) {
+	if rawKey == "" {
+		return "", false
+	}
+	key := strings.ReplaceAll(rawKey, "${filename}", fileName)
+	if key == "" {
+		return "", false
+	}
+	return key, true
+}
+
 func parsePolicyInt64(v any) (int64, bool) {
 	switch value := v.(type) {
 	case float64:
@@ -886,12 +897,14 @@ func (h *Handler) handlePostObjectFormUpload(
 		return
 	}
 
-	key := getMultipartFormValue(formFields, "key")
-	if key == "" {
+	key, ok := resolvePostObjectFormKey(
+		getMultipartFormValue(formFields, "key"),
+		fileHeader.Filename,
+	)
+	if !ok {
 		backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Missing key field")
 		return
 	}
-	key = strings.ReplaceAll(key, "${filename}", fileHeader.Filename)
 
 	contentType := getMultipartFormValue(formFields, "Content-Type")
 	if contentType == "" {

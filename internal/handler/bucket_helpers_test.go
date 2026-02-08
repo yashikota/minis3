@@ -218,3 +218,59 @@ func TestParseOptionalObjectAttributes(t *testing.T) {
 		t.Fatalf("unexpected parsed attributes: %+v", attrs)
 	}
 }
+
+func TestResolvePostObjectFormKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		rawKey    string
+		fileName  string
+		wantKey   string
+		wantValid bool
+	}{
+		{
+			name:      "missing key",
+			rawKey:    "",
+			fileName:  "upload.txt",
+			wantKey:   "",
+			wantValid: false,
+		},
+		{
+			name:      "plain key",
+			rawKey:    "path/object.txt",
+			fileName:  "upload.txt",
+			wantKey:   "path/object.txt",
+			wantValid: true,
+		},
+		{
+			name:      "filename substitution",
+			rawKey:    "uploads/${filename}",
+			fileName:  "upload.txt",
+			wantKey:   "uploads/upload.txt",
+			wantValid: true,
+		},
+		{
+			name:      "empty after substitution",
+			rawKey:    "${filename}",
+			fileName:  "",
+			wantKey:   "",
+			wantValid: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotKey, gotValid := resolvePostObjectFormKey(tt.rawKey, tt.fileName)
+			if gotValid != tt.wantValid || gotKey != tt.wantKey {
+				t.Fatalf(
+					"resolvePostObjectFormKey(%q, %q) = (%q, %v), want (%q, %v)",
+					tt.rawKey,
+					tt.fileName,
+					gotKey,
+					gotValid,
+					tt.wantKey,
+					tt.wantValid,
+				)
+			}
+		})
+	}
+}
