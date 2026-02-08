@@ -825,3 +825,15 @@ type PolicyStatus struct {
 	Xmlns    string   `xml:"xmlns,attr,omitempty"`
 	IsPublic bool     `xml:"IsPublic"`
 }
+
+// PostBucketLoggingResult is the XML response for POST ?logging flush.
+type PostBucketLoggingResult struct {
+	XMLName              xml.Name `xml:"PostBucketLoggingResult"`
+	Xmlns                string   `xml:"xmlns,attr,omitempty"`
+	FlushedLoggingObject string   `xml:"FlushedLoggingObject,omitempty"`
+}
+
+// IsArchivedStorageClass returns true if the storage class is an archived tier.
+func IsArchivedStorageClass(sc string) bool {
+	return sc == "GLACIER" || sc == "DEEP_ARCHIVE"
+}

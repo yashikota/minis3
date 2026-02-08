@@ -490,7 +490,7 @@ func (h *Handler) flushServerAccessLogsIfDue(sourceBucketName string) error {
 		if !matchesSource {
 			continue
 		}
-		if err := h.flushServerAccessLogBatch(batch, now); err != nil {
+		if _, err := h.flushServerAccessLogBatch(batch, now); err != nil {
 			return err
 		}
 		delete(h.pendingLogBatches, key)
@@ -498,9 +498,12 @@ func (h *Handler) flushServerAccessLogsIfDue(sourceBucketName string) error {
 	return nil
 }
 
-func (h *Handler) flushServerAccessLogBatch(batch *serverAccessLogBatch, now time.Time) error {
+func (h *Handler) flushServerAccessLogBatch(
+	batch *serverAccessLogBatch,
+	now time.Time,
+) (string, error) {
 	if batch == nil || len(batch.Entries) == 0 {
-		return nil
+		return "", nil
 	}
 	seenSource := make(map[string]struct{})
 	for _, entry := range batch.Entries {
@@ -517,14 +520,14 @@ func (h *Handler) flushServerAccessLogBatch(batch *serverAccessLogBatch, now tim
 			batch.TargetPrefix,
 		)
 		if !allowed {
-			return fmt.Errorf("access denied")
+			return "", fmt.Errorf("access denied")
 		}
 	}
 
 	sourceBucketName := batch.Entries[0].SourceBucket
 	sourceBucket, ok := h.backend.GetBucket(sourceBucketName)
 	if !ok {
-		return backend.ErrBucketNotFound
+		return "", backend.ErrBucketNotFound
 	}
 	sourceAccount := ""
 	if owner := backend.OwnerForAccessKey(sourceBucket.OwnerAccessKey); owner != nil {
@@ -565,7 +568,42 @@ func (h *Handler) flushServerAccessLogBatch(batch *serverAccessLogBatch, now tim
 			Owner:       h.bucketOwner(batch.TargetBucket),
 		},
 	)
-	return err
+	if err != nil {
+		return "", err
+	}
+	return logKey, nil
+}
+
+// forceFlushServerAccessLogs flushes all pending log batches for the given
+// source bucket unconditionally (ignoring the roll interval).
+func (h *Handler) forceFlushServerAccessLogs(sourceBucketName string) (string, error) {
+	now := time.Now().UTC()
+
+	h.loggingMu.Lock()
+	defer h.loggingMu.Unlock()
+
+	var flushedKey string
+	for key, batch := range h.pendingLogBatches {
+		matchesSource := false
+		for _, entry := range batch.Entries {
+			if entry.SourceBucket == sourceBucketName {
+				matchesSource = true
+				break
+			}
+		}
+		if !matchesSource {
+			continue
+		}
+		logKey, err := h.flushServerAccessLogBatch(batch, now)
+		if err != nil {
+			return "", err
+		}
+		if logKey != "" {
+			flushedKey = logKey
+		}
+		delete(h.pendingLogBatches, key)
+	}
+	return flushedKey, nil
 }
 
 func mapRequestToLoggingOperation(r *http.Request, key string) string {
@@ -784,7 +822,8 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionWriteACP)
-	case "s3:GetBucketOwnershipControls", "s3:GetBucketLogging", "s3:GetBucketRequestPayment":
+	case "s3:GetBucketOwnershipControls", "s3:GetBucketLogging", "s3:GetBucketRequestPayment",
+		"s3:GetBucketPolicy":
 		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
@@ -794,7 +833,8 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 	case "s3:PutBucketOwnershipControls",
 		"s3:DeleteBucketOwnershipControls",
 		"s3:PutBucketLogging",
-		"s3:PutBucketRequestPayment":
+		"s3:PutBucketRequestPayment",
+		"s3:DeleteBucketPolicy":
 		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
@@ -887,6 +927,16 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 			return aclAllowsRead(bucketACL, requesterCanonicalID, isAnonymous)
 		}
 		return false
+	case "s3:RestoreObject":
+		if key == "" {
+			return false
+		}
+		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
+		if err != nil {
+			return false
+		}
+		acl = effectiveACLForResponse(acl, ignorePublicACLs)
+		return aclAllowsWrite(acl, requesterCanonicalID, isAnonymous)
 	case "s3:PutObjectTagging",
 		"s3:DeleteObjectTagging",
 		"s3:DeleteObject",

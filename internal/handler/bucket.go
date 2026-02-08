@@ -722,6 +722,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		h.handleListObjectsV1(w, r, bucketName)
 	case http.MethodPost:
+		if r.URL.Query().Has("logging") {
+			h.handlePostBucketLogging(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Has("delete") {
 			h.handleDeleteObjects(w, r, bucketName)
 			return
@@ -1979,9 +1983,14 @@ func (h *Handler) handleDeleteBucketTagging(
 // handleGetBucketPolicy handles GetBucketPolicy requests.
 func (h *Handler) handleGetBucketPolicy(
 	w http.ResponseWriter,
-	_ *http.Request,
+	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:GetBucketPolicy", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	policy, err := getBucketPolicyFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2114,9 +2123,14 @@ func (h *Handler) handleGetBucketPolicyStatus(
 // handleDeleteBucketPolicy handles DeleteBucketPolicy requests.
 func (h *Handler) handleDeleteBucketPolicy(
 	w http.ResponseWriter,
-	_ *http.Request,
+	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:DeleteBucketPolicy", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	err := deleteBucketPolicyFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2639,6 +2653,50 @@ func (h *Handler) handlePutBucketLogging(
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostBucketLogging handles POST ?logging requests to force-flush
+// server access log batches for the given bucket.
+func (h *Handler) handlePostBucketLogging(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:PutBucketLogging", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
+	_, exists := h.backend.GetBucket(bucketName)
+	if !exists {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
+		return
+	}
+
+	flushedKey, err := h.forceFlushServerAccessLogs(bucketName)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	result := backend.PostBucketLoggingResult{
+		Xmlns:                backend.S3Xmlns,
+		FlushedLoggingObject: flushedKey,
+	}
+	output, err := xml.Marshal(result)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(xml.Header))
+	_, _ = w.Write(output)
 }
 
 func (h *Handler) handleDeleteBucketLogging(

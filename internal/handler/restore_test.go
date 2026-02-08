@@ -100,7 +100,7 @@ func TestHandleRestoreObject(t *testing.T) {
 	})
 }
 
-func TestGetObjectGlacierBlocked(t *testing.T) {
+func TestGetObjectGlacierAutoRestore(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "bucket")
 
@@ -111,25 +111,16 @@ func TestGetObjectGlacierBlocked(t *testing.T) {
 		t.Fatalf("PutObject: %v", err)
 	}
 
-	t.Run("GET un-restored GLACIER object returns 403 InvalidObjectState", func(t *testing.T) {
+	t.Run("GET un-restored GLACIER object auto-restores (read-through)", func(t *testing.T) {
 		req := newRequest(http.MethodGet, "/bucket/glacier-key", "", nil)
 		w := doRequest(h, req)
-		requireStatus(t, w, http.StatusForbidden)
-		requireS3ErrorCode(t, w, "InvalidObjectState")
-	})
-
-	t.Run("HEAD un-restored GLACIER object returns 403 InvalidObjectState", func(t *testing.T) {
-		req := newRequest(http.MethodHead, "/bucket/glacier-key", "", nil)
-		w := doRequest(h, req)
-		requireStatus(t, w, http.StatusForbidden)
-	})
-
-	t.Run("GET restored GLACIER object succeeds", func(t *testing.T) {
-		_, err := b.RestoreObject("bucket", "glacier-key", "", 1)
-		if err != nil {
-			t.Fatalf("RestoreObject: %v", err)
+		requireStatus(t, w, http.StatusOK)
+		if w.Body.String() != "data" {
+			t.Fatalf("unexpected body: %s", w.Body.String())
 		}
+	})
 
+	t.Run("GET restored GLACIER object has x-amz-restore header", func(t *testing.T) {
 		req := newRequest(http.MethodGet, "/bucket/glacier-key", "", nil)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusOK)

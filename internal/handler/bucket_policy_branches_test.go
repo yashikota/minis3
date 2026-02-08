@@ -94,13 +94,13 @@ func TestBucketPolicyBranchCoverage(t *testing.T) {
 
 		wGet := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/policy-branch?policy", "", nil),
+			newRequest(http.MethodGet, "http://example.test/policy-branch?policy", "", headers),
 		)
 		requireStatus(t, wGet, http.StatusOK)
 
 		wDelete := doRequest(
 			h,
-			newRequest(http.MethodDelete, "http://example.test/policy-branch?policy", "", nil),
+			newRequest(http.MethodDelete, "http://example.test/policy-branch?policy", "", headers),
 		)
 		requireStatus(t, wDelete, http.StatusNoContent)
 	})
@@ -120,6 +120,68 @@ func TestBucketPolicyBranchCoverage(t *testing.T) {
 		)
 		requireStatus(t, wNoPolicy, http.StatusNotFound)
 		requireS3ErrorCode(t, wNoPolicy, "NoSuchBucketPolicy")
+	})
+}
+
+func TestGetDeleteBucketPolicyDenySelf(t *testing.T) {
+	h, b := newTestHandler(t)
+	mustCreateBucket(t, b, "deny-policy")
+	b.SetBucketOwner("deny-policy", "minis3-access-key")
+
+	ownerHeaders := map[string]string{"Authorization": authHeader("minis3-access-key")}
+
+	// Set a policy that denies GetBucketPolicy and DeleteBucketPolicy for the owner
+	denyPolicy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*","Action":["s3:GetBucketPolicy","s3:DeleteBucketPolicy"],"Resource":"arn:aws:s3:::deny-policy"}]}`
+	wPut := doRequest(
+		h,
+		newRequest(
+			http.MethodPut,
+			"http://example.test/deny-policy?policy",
+			denyPolicy,
+			ownerHeaders,
+		),
+	)
+	requireStatus(t, wPut, http.StatusNoContent)
+
+	t.Run("GET policy denied by bucket policy", func(t *testing.T) {
+		w := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/deny-policy?policy", "", ownerHeaders),
+		)
+		requireStatus(t, w, http.StatusForbidden)
+		requireS3ErrorCode(t, w, "AccessDenied")
+	})
+
+	t.Run("DELETE policy denied by bucket policy", func(t *testing.T) {
+		w := doRequest(
+			h,
+			newRequest(
+				http.MethodDelete,
+				"http://example.test/deny-policy?policy",
+				"",
+				ownerHeaders,
+			),
+		)
+		requireStatus(t, w, http.StatusForbidden)
+		requireS3ErrorCode(t, w, "AccessDenied")
+	})
+
+	t.Run("GET policy access denied for non-owner", func(t *testing.T) {
+		w := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/deny-policy?policy", "", nil),
+		)
+		requireStatus(t, w, http.StatusForbidden)
+		requireS3ErrorCode(t, w, "AccessDenied")
+	})
+
+	t.Run("DELETE policy access denied for non-owner", func(t *testing.T) {
+		w := doRequest(
+			h,
+			newRequest(http.MethodDelete, "http://example.test/deny-policy?policy", "", nil),
+		)
+		requireStatus(t, w, http.StatusForbidden)
+		requireS3ErrorCode(t, w, "AccessDenied")
 	})
 }
 

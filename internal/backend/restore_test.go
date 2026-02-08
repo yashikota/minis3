@@ -212,3 +212,21 @@ func TestRestoreObjectWithVersionId(t *testing.T) {
 		t.Fatalf("expected 202, got %d", result.StatusCode)
 	}
 }
+
+func TestIsArchivedStorageClass(t *testing.T) {
+	tests := []struct {
+		sc   string
+		want bool
+	}{
+		{"GLACIER", true},
+		{"DEEP_ARCHIVE", true},
+		{"STANDARD", false},
+		{"", false},
+		{"REDUCED_REDUNDANCY", false},
+	}
+	for _, tt := range tests {
+		if got := IsArchivedStorageClass(tt.sc); got != tt.want {
+			t.Errorf("IsArchivedStorageClass(%q) = %v, want %v", tt.sc, got, tt.want)
+		}
+	}
+}

@@ -758,7 +758,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		getBucketPolicyFn = func(*Handler, string) (string, error) { return "", errors.New("policy get boom") }
 		wGetPolicy := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/cfg-err?policy", "", nil),
+			newRequest(http.MethodGet, "http://example.test/cfg-err?policy", "", ownerHeaders),
 		)
 		requireStatus(t, wGetPolicy, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetPolicy, "InternalError")
@@ -783,7 +783,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		deleteBucketPolicyFn = func(*Handler, string) error { return errors.New("policy del boom") }
 		wDeletePolicy := doRequest(
 			h,
-			newRequest(http.MethodDelete, "http://example.test/cfg-err?policy", "", nil),
+			newRequest(http.MethodDelete, "http://example.test/cfg-err?policy", "", ownerHeaders),
 		)
 		requireStatus(t, wDeletePolicy, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeletePolicy, "InternalError")

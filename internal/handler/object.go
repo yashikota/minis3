@@ -1355,11 +1355,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
-		// Block access to un-restored GLACIER/DEEP_ARCHIVE objects
+		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
-			backend.WriteError(w, http.StatusForbidden, "InvalidObjectState",
-				"The operation is not valid for the object's storage class.")
-			return
+			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
 		}
 
 		// Check PartNumber validity before SSE-C access (invalid part takes priority)
@@ -1635,11 +1633,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		// Block access to un-restored GLACIER/DEEP_ARCHIVE objects
+		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
-			backend.WriteError(w, http.StatusForbidden, "InvalidObjectState",
-				"The operation is not valid for the object's storage class.")
-			return
+			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
 		}
 
 		// Validate SSE-C access
@@ -2849,6 +2845,11 @@ func (h *Handler) handleRestoreObject(
 	r *http.Request,
 	bucketName, key string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:RestoreObject", key) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	versionId := r.URL.Query().Get("versionId")
 
 	body, err := readAllFn(r.Body)
