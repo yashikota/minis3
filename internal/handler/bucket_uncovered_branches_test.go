@@ -355,12 +355,9 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		count := 0
 		putBucketACLFn = func(*Handler, string, *backend.AccessControlPolicy) error {
 			count++
-			if count == 2 {
-				return errors.New("put canned acl boom")
-			}
 			return nil
 		}
-		wCannedACLInternal := doRequest(
+		wCannedACL := doRequest(
 			h,
 			newRequest(
 				http.MethodPut,
@@ -371,8 +368,10 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 				},
 			),
 		)
-		requireStatus(t, wCannedACLInternal, http.StatusInternalServerError)
-		requireS3ErrorCode(t, wCannedACLInternal, "InternalError")
+		requireStatus(t, wCannedACL, http.StatusOK)
+		if count != 1 {
+			t.Fatalf("expected PutBucketACL to be called once, got %d", count)
+		}
 	})
 
 	t.Run("delete and head additional error branches", func(t *testing.T) {
@@ -710,7 +709,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		getBucketLocationFn = func(*Handler, string) (string, error) { return "", errors.New("location boom") }
 		wLocation := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/cfg-err?location", "", nil),
+			newRequest(http.MethodGet, "http://example.test/cfg-err?location", "", ownerHeaders),
 		)
 		requireStatus(t, wLocation, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wLocation, "InternalError")

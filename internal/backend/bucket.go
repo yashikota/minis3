@@ -299,6 +299,20 @@ func (b *Backend) GetBucketLocation(bucketName string) (string, error) {
 	return bucket.Location, nil
 }
 
+// SetBucketLocation sets the location constraint of a bucket.
+func (b *Backend) SetBucketLocation(bucketName, location string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+
+	bucket.Location = strings.TrimSpace(location)
+	return nil
+}
+
 // GetBucketTagging returns the tag set of a bucket.
 func (b *Backend) GetBucketTagging(bucketName string) (map[string]string, error) {
 	b.mu.RLock()

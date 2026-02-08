@@ -377,6 +377,139 @@ func TestValidatePostPolicyAdditionalScenarios(t *testing.T) {
 			},
 			wantStatus: 400,
 		},
+		{
+			name: "condition object with non-string value is invalid",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": 123},
+				},
+			},
+			wantStatus: 400,
+		},
+		{
+			name: "empty array condition is invalid",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					[]any{},
+				},
+			},
+			wantStatus: 400,
+		},
+		{
+			name: "array condition with non-string operator is invalid",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					[]any{1, "$key", "foo"},
+				},
+			},
+			wantStatus: 400,
+		},
+		{
+			name: "eq condition with non-string field is invalid",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					[]any{"eq", 1, "foo"},
+				},
+			},
+			wantStatus: 400,
+		},
+		{
+			name: "eq condition with non-string expected value is invalid",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					[]any{"eq", "$key", 1},
+				},
+			},
+			wantStatus: 400,
+		},
+		{
+			name: "content-length-range with non-numeric max is invalid",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					[]any{"content-length-range", 0, "100"},
+				},
+			},
+			wantStatus: 400,
+		},
+		{
+			name: "non-object condition entry is invalid",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					"invalid-condition-entry",
+				},
+			},
+			wantStatus: 400,
+		},
+		{
+			name: "content-type starts-with supports comma-separated lists",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					[]any{"starts-with", "$key", "img/"},
+					[]any{"starts-with", "$Content-Type", "image/"},
+				},
+			},
+			key:         "img/file",
+			contentType: "image/jpeg,image/png",
+			wantOK:      true,
+		},
+		{
+			name: "content-type starts-with fails when one comma-separated value does not match",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					[]any{"starts-with", "$key", "img/"},
+					[]any{"starts-with", "$Content-Type", "image/"},
+				},
+			},
+			key:         "img/file",
+			contentType: "image/jpeg,text/plain",
+			wantStatus:  403,
+		},
+		{
+			name: "form field missing from policy conditions is rejected",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					[]any{"starts-with", "$key", "foo"},
+				},
+			},
+			formFields: map[string]string{
+				"x-amz-meta-extra": "value",
+			},
+			key:        "foo.txt",
+			wantStatus: 403,
+		},
+		{
+			name: "x-ignore fields are exempt from condition requirement",
+			policy: map[string]any{
+				"expiration": expiration,
+				"conditions": []any{
+					map[string]any{"bucket": "bucket-a"},
+					[]any{"starts-with", "$key", "foo"},
+				},
+			},
+			formFields: map[string]string{
+				"x-ignore-client-hint": "1",
+			},
+			key:    "foo.txt",
+			wantOK: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -398,6 +531,39 @@ func TestValidatePostPolicyAdditionalScenarios(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPostPolicyHelperFunctions(t *testing.T) {
+	t.Run("postPolicyFieldConditionExempt", func(t *testing.T) {
+		for _, tc := range []struct {
+			field string
+			want  bool
+		}{
+			{field: "file", want: true},
+			{field: "policy", want: true},
+			{field: "x-amz-signature", want: true},
+			{field: "signature", want: true},
+			{field: "awsaccesskeyid", want: true},
+			{field: "x-ignore-anything", want: true},
+			{field: "x-amz-meta-user", want: false},
+		} {
+			if got := postPolicyFieldConditionExempt(tc.field); got != tc.want {
+				t.Fatalf("field=%q got=%v want=%v", tc.field, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("startsWithPostPolicyValue", func(t *testing.T) {
+		if !startsWithPostPolicyValue("content-type", "image/jpeg,image/png", "image/") {
+			t.Fatal("expected comma-separated content-type match to pass")
+		}
+		if startsWithPostPolicyValue("content-type", "image/jpeg,text/plain", "image/") {
+			t.Fatal("expected mixed comma-separated content-type match to fail")
+		}
+		if !startsWithPostPolicyValue("key", "foo/bar", "foo/") {
+			t.Fatal("expected generic starts-with to pass")
+		}
+	})
 }
 
 func TestValidatePostPolicyRejectsInvalidBase64(t *testing.T) {

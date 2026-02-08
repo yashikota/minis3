@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/yashikota/minis3/internal/backend"
@@ -197,6 +198,29 @@ func TestBucketOperationHandlers(t *testing.T) {
 			newRequest(http.MethodGet, "http://example.test/bucket?location", "", nil),
 		)
 		requireStatus(t, w, http.StatusOK)
+	})
+
+	t.Run("create bucket with location constraint and get bucket location", func(t *testing.T) {
+		payload := `<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`
+		wPut := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/region-bucket", payload, nil),
+		)
+		requireStatus(t, wPut, http.StatusOK)
+
+		wGet := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/region-bucket?location", "", nil),
+		)
+		requireStatus(t, wGet, http.StatusOK)
+
+		var resp backend.LocationConstraint
+		if err := xml.Unmarshal(wGet.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse location response: %v body=%s", err, wGet.Body.String())
+		}
+		if strings.TrimSpace(resp.LocationConstraint) != "us-west-2" {
+			t.Fatalf("expected location us-west-2, got %q", resp.LocationConstraint)
+		}
 	})
 
 	t.Run("tagging put/get/delete", func(t *testing.T) {

@@ -106,6 +106,26 @@ func TestGetBucketLocation(t *testing.T) {
 			t.Errorf("expected ErrBucketNotFound, got %v", err)
 		}
 	})
+
+	t.Run("set location constraint", func(t *testing.T) {
+		if err := b.SetBucketLocation("test-bucket", "us-west-2"); err != nil {
+			t.Fatalf("SetBucketLocation failed: %v", err)
+		}
+		location, err := b.GetBucketLocation("test-bucket")
+		if err != nil {
+			t.Fatalf("GetBucketLocation failed: %v", err)
+		}
+		if location != "us-west-2" {
+			t.Fatalf("expected us-west-2, got %q", location)
+		}
+	})
+
+	t.Run("set location non-existent bucket", func(t *testing.T) {
+		err := b.SetBucketLocation("non-existent", "ap-northeast-1")
+		if !errors.Is(err, ErrBucketNotFound) {
+			t.Errorf("expected ErrBucketNotFound, got %v", err)
+		}
+	})
 }
 
 func TestBucketTagging(t *testing.T) {

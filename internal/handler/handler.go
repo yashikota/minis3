@@ -430,6 +430,31 @@ func isPublicACL(acl *backend.AccessControlPolicy) bool {
 	return false
 }
 
+func effectiveACLForResponse(
+	acl *backend.AccessControlPolicy,
+	ignorePublicACLs bool,
+) *backend.AccessControlPolicy {
+	if acl == nil || !ignorePublicACLs {
+		return acl
+	}
+
+	filtered := *acl
+	filtered.AccessControlList = backend.AccessControlList{
+		Grants: make([]backend.Grant, 0, len(acl.AccessControlList.Grants)),
+	}
+
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee != nil &&
+			(grant.Grantee.URI == backend.AllUsersURI ||
+				grant.Grantee.URI == backend.AuthenticatedUsersURI) {
+			continue
+		}
+		filtered.AccessControlList.Grants = append(filtered.AccessControlList.Grants, grant)
+	}
+
+	return &filtered
+}
+
 func aclAllowsRead(
 	acl *backend.AccessControlPolicy,
 	requesterCanonicalID string,

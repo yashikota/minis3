@@ -5,6 +5,8 @@ services:
       dockerfile: integration/s3-test/Dockerfile.minis3
     ports:
       - "9000:9000"
+    environment:
+      - MINIS3_LC_DEBUG_INTERVAL_SECONDS=1
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9000/"]
       interval: 2s

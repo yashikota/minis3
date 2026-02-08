@@ -257,7 +257,7 @@ func resolvePostPolicyFieldValue(
 	fieldName, bucketName, key, contentType string,
 	formFields map[string]string,
 ) string {
-	fieldName = strings.ToLower(strings.TrimPrefix(fieldName, "$"))
+	fieldName = normalizePostPolicyFieldName(fieldName)
 	switch fieldName {
 	case "bucket":
 		return bucketName
@@ -268,6 +268,31 @@ func resolvePostPolicyFieldValue(
 	default:
 		return formFields[fieldName]
 	}
+}
+
+func normalizePostPolicyFieldName(fieldName string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(fieldName), "$"))
+}
+
+func postPolicyFieldConditionExempt(fieldName string) bool {
+	switch fieldName {
+	case "", "file", "policy", "x-amz-signature", "signature", "awsaccesskeyid":
+		return true
+	default:
+		return strings.HasPrefix(fieldName, "x-ignore-")
+	}
+}
+
+func startsWithPostPolicyValue(fieldName, actual, expected string) bool {
+	if fieldName == "content-type" && strings.Contains(actual, ",") {
+		for _, part := range strings.Split(actual, ",") {
+			if !strings.HasPrefix(strings.TrimSpace(part), expected) {
+				return false
+			}
+		}
+		return true
+	}
+	return strings.HasPrefix(actual, expected)
 }
 
 func validatePostPolicy(
@@ -309,6 +334,7 @@ func validatePostPolicy(
 	}
 
 	hasBucketCondition := false
+	conditionFields := make(map[string]struct{})
 	for _, conditionRaw := range conditions {
 		switch condition := conditionRaw.(type) {
 		case map[string]any:
@@ -320,6 +346,8 @@ func validatePostPolicy(
 				if !ok {
 					return http.StatusBadRequest, false
 				}
+				fieldName := normalizePostPolicyFieldName(condKey)
+				conditionFields[fieldName] = struct{}{}
 				actual := resolvePostPolicyFieldValue(
 					condKey,
 					bucketName,
@@ -327,7 +355,7 @@ func validatePostPolicy(
 					contentType,
 					formFields,
 				)
-				if strings.EqualFold(condKey, "bucket") {
+				if fieldName == "bucket" {
 					hasBucketCondition = true
 				}
 				if actual != condExpected {
@@ -355,7 +383,8 @@ func validatePostPolicy(
 				if !ok {
 					return http.StatusBadRequest, false
 				}
-				fieldName := strings.ToLower(strings.TrimPrefix(fieldRaw, "$"))
+				fieldName := normalizePostPolicyFieldName(fieldRaw)
+				conditionFields[fieldName] = struct{}{}
 				if fieldName == "bucket" {
 					hasBucketCondition = true
 				}
@@ -370,7 +399,7 @@ func validatePostPolicy(
 					if actual != expected {
 						return http.StatusForbidden, false
 					}
-				} else if !strings.HasPrefix(actual, expected) {
+				} else if !startsWithPostPolicyValue(fieldName, actual, expected) {
 					return http.StatusForbidden, false
 				}
 			case "content-length-range":
@@ -398,6 +427,16 @@ func validatePostPolicy(
 
 	if !hasBucketCondition {
 		return http.StatusForbidden, false
+	}
+
+	for formField := range formFields {
+		fieldName := normalizePostPolicyFieldName(formField)
+		if postPolicyFieldConditionExempt(fieldName) {
+			continue
+		}
+		if _, ok := conditionFields[fieldName]; !ok {
+			return http.StatusForbidden, false
+		}
 	}
 
 	return 0, true
@@ -667,6 +706,8 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handlePutPublicAccessBlock(w, r, bucketName)
 			return
 		}
+		locationConstraint := ""
+
 		// Parse CreateBucketConfiguration from request body if present
 		if r.Body != nil && r.ContentLength > 0 {
 			defer func() { _ = r.Body.Close() }()
@@ -692,7 +733,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 					)
 					return
 				}
-				// LocationConstraint is accepted but ignored (single-region mock)
+				locationConstraint = strings.TrimSpace(config.LocationConstraint)
 			}
 		}
 
@@ -754,6 +795,11 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			}
 			return
 		}
+
+		if err := h.backend.SetBucketLocation(bucketName, locationConstraint); err != nil {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			return
+		}
 		// Set the owner access key
 		h.backend.SetBucketOwner(bucketName, requestAccessKey)
 		owner := backend.OwnerForAccessKey(requestAccessKey)
@@ -773,12 +819,6 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		w.Header().Set("Location", "/"+bucketName)
-		if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
-			if err := putBucketACLFn(h, bucketName, backend.CannedACLToPolicy(cannedACL)); err != nil {
-				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-				return
-			}
-		}
 		w.WriteHeader(http.StatusOK)
 	case http.MethodDelete:
 		if r.URL.Query().Has("tagging") {
@@ -1586,9 +1626,14 @@ func validateMFAHeader(header string) error {
 // handleGetBucketLocation handles GetBucketLocation requests.
 func (h *Handler) handleGetBucketLocation(
 	w http.ResponseWriter,
-	_ *http.Request,
+	r *http.Request,
 	bucketName string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:GetBucketLocation", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	location, err := getBucketLocationFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -1941,6 +1986,10 @@ func (h *Handler) handleGetBucketACL(
 		return
 	}
 
+	config := h.getBucketPublicAccessBlock(bucketName)
+	ignorePublicACLs := config != nil && config.IgnorePublicAcls
+	acl = effectiveACLForResponse(acl, ignorePublicACLs)
+
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xmlMarshalFn(acl)
@@ -2197,6 +2246,18 @@ func validateLifecycleConfiguration(config *backend.LifecycleConfiguration) (str
 				if _, err := parseLifecycleExpirationDate(transition.Date); err != nil {
 					return "InvalidArgument", "Invalid argument", false
 				}
+			}
+		}
+
+		for _, transition := range rule.NoncurrentVersionTransition {
+			if transition.NoncurrentDays <= 0 {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if strings.TrimSpace(transition.StorageClass) == "" {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if transition.NewerNoncurrentVersions < 0 {
+				return "InvalidArgument", "Invalid argument", false
 			}
 		}
 

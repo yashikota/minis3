@@ -322,3 +322,149 @@ func TestApplyLifecycleAbortsIncompleteMultipartUpload(t *testing.T) {
 		t.Fatal("expected test2/ multipart upload to remain")
 	}
 }
+
+func TestApplyLifecycleTransitionsCurrentObjectStorageClass(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("lifecycle-current-transition"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	if _, err := b.PutObject(
+		"lifecycle-current-transition",
+		"obj",
+		[]byte("data"),
+		PutObjectOptions{},
+	); err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				ID:     "transition-rule",
+				Status: LifecycleStatusEnabled,
+				Transition: []LifecycleTransition{
+					{Days: 1, StorageClass: "STANDARD_IA"},
+					{Days: 3, StorageClass: "GLACIER"},
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("lifecycle-current-transition", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+	}
+
+	obj, err := b.GetObject("lifecycle-current-transition", "obj")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	base := obj.LastModified
+
+	b.ApplyLifecycle(base.Add(11*time.Second), 10*time.Second)
+
+	obj, err = b.GetObject("lifecycle-current-transition", "obj")
+	if err != nil {
+		t.Fatalf("GetObject after first transition failed: %v", err)
+	}
+	if obj.StorageClass != "STANDARD_IA" {
+		t.Fatalf("expected STANDARD_IA after first transition, got %q", obj.StorageClass)
+	}
+
+	b.ApplyLifecycle(base.Add(31*time.Second), 10*time.Second)
+
+	obj, err = b.GetObject("lifecycle-current-transition", "obj")
+	if err != nil {
+		t.Fatalf("GetObject after second transition failed: %v", err)
+	}
+	if obj.StorageClass != "GLACIER" {
+		t.Fatalf("expected GLACIER after second transition, got %q", obj.StorageClass)
+	}
+}
+
+func TestApplyLifecycleTransitionsNoncurrentVersionsStorageClass(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("lifecycle-noncurrent-transition"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	if err := b.SetBucketVersioning(
+		"lifecycle-noncurrent-transition",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
+		t.Fatalf("SetBucketVersioning failed: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if _, err := b.PutObject(
+			"lifecycle-noncurrent-transition",
+			"obj",
+			[]byte{byte('a' + i)},
+			PutObjectOptions{},
+		); err != nil {
+			t.Fatalf("PutObject version %d failed: %v", i, err)
+		}
+	}
+
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				ID:     "noncurrent-transition-rule",
+				Status: LifecycleStatusEnabled,
+				NoncurrentVersionTransition: []NoncurrentVersionTransition{
+					{
+						NoncurrentDays:          1,
+						StorageClass:            "STANDARD_IA",
+						NewerNoncurrentVersions: 1,
+					},
+					{
+						NoncurrentDays: 2,
+						StorageClass:   "GLACIER",
+					},
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("lifecycle-noncurrent-transition", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+	}
+
+	bucket, ok := b.GetBucket("lifecycle-noncurrent-transition")
+	if !ok || bucket == nil {
+		t.Fatal("GetBucket failed")
+	}
+	base := bucket.Objects["obj"].Versions[0].LastModified
+
+	b.ApplyLifecycle(base.Add(11*time.Second), 10*time.Second)
+
+	versions := bucket.Objects["obj"].Versions
+	if len(versions) != 3 {
+		t.Fatalf("expected 3 versions, got %d", len(versions))
+	}
+	if versions[1].StorageClass != "STANDARD" {
+		t.Fatalf(
+			"expected newest noncurrent to remain STANDARD, got %q",
+			versions[1].StorageClass,
+		)
+	}
+	if versions[2].StorageClass != "STANDARD_IA" {
+		t.Fatalf(
+			"expected oldest noncurrent to transition to STANDARD_IA, got %q",
+			versions[2].StorageClass,
+		)
+	}
+
+	b.ApplyLifecycle(base.Add(21*time.Second), 10*time.Second)
+
+	versions = bucket.Objects["obj"].Versions
+	if versions[1].StorageClass != "GLACIER" {
+		t.Fatalf(
+			"expected newest noncurrent to transition to GLACIER, got %q",
+			versions[1].StorageClass,
+		)
+	}
+	if versions[2].StorageClass != "GLACIER" {
+		t.Fatalf(
+			"expected oldest noncurrent to transition to GLACIER, got %q",
+			versions[2].StorageClass,
+		)
+	}
+}
