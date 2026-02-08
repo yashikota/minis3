@@ -163,6 +163,12 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Admin endpoints (no S3 auth required)
+	if strings.HasPrefix(r.URL.Path, "/_minis3/") {
+		h.handleAdmin(w, r)
+		return
+	}
+
 	// Verify presigned URL if applicable
 	if isPresignedURL(r) {
 		if err := verifyPresignedURLFn(r); err != nil {
@@ -238,6 +244,26 @@ func lifecycleDebugInterval() time.Duration {
 		lifecycleIntervalValue = time.Duration(seconds) * time.Second
 	})
 	return lifecycleIntervalValue
+}
+
+// handleAdmin handles non-S3 admin endpoints for test server management.
+func (h *Handler) handleAdmin(w http.ResponseWriter, r *http.Request) {
+	const bucketPrefix = "/_minis3/buckets/"
+	if r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, bucketPrefix) {
+		name := strings.TrimPrefix(r.URL.Path, bucketPrefix)
+		if name == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := h.backend.ForceDeleteBucket(name); err != nil {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 // extractAccessKey extracts the AWS access key from the Authorization header.
