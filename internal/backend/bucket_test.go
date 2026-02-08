@@ -3,6 +3,7 @@ package backend
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestValidateBucketName(t *testing.T) {
@@ -328,6 +329,74 @@ func TestGetBucketUsage(t *testing.T) {
 				count,
 				bytesUsed,
 			)
+		}
+	})
+}
+
+func TestForceDeleteBucket(t *testing.T) {
+	t.Run("deletes empty bucket", func(t *testing.T) {
+		b := New()
+		if err := b.CreateBucket("test-bucket"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.ForceDeleteBucket("test-bucket"); err != nil {
+			t.Fatalf("ForceDeleteBucket() = %v, want nil", err)
+		}
+		if _, ok := b.GetBucket("test-bucket"); ok {
+			t.Fatal("bucket still exists after ForceDeleteBucket")
+		}
+	})
+
+	t.Run("deletes non-empty bucket", func(t *testing.T) {
+		b := New()
+		if err := b.CreateBucket("test-bucket"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.PutObject("test-bucket", "key1", []byte("data"), PutObjectOptions{}); err != nil {
+			t.Fatal(err)
+		}
+
+		// Normal DeleteBucket should fail
+		if err := b.DeleteBucket("test-bucket"); !errors.Is(err, ErrBucketNotEmpty) {
+			t.Fatalf("DeleteBucket() = %v, want ErrBucketNotEmpty", err)
+		}
+
+		// ForceDeleteBucket should succeed
+		if err := b.ForceDeleteBucket("test-bucket"); err != nil {
+			t.Fatalf("ForceDeleteBucket() = %v, want nil", err)
+		}
+		if _, ok := b.GetBucket("test-bucket"); ok {
+			t.Fatal("bucket still exists after ForceDeleteBucket")
+		}
+	})
+
+	t.Run("deletes bucket with locked objects", func(t *testing.T) {
+		b := New()
+		if err := b.CreateBucketWithObjectLock("lock-bucket"); err != nil {
+			t.Fatal(err)
+		}
+		retain := time.Now().Add(24 * 365 * time.Hour) // 1 year from now
+		if _, err := b.PutObject("lock-bucket", "locked-key", []byte("data"), PutObjectOptions{
+			RetentionMode:   RetentionModeCompliance,
+			RetainUntilDate: &retain,
+			LegalHoldStatus: LegalHoldStatusOn,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// ForceDeleteBucket should succeed even with locked objects
+		if err := b.ForceDeleteBucket("lock-bucket"); err != nil {
+			t.Fatalf("ForceDeleteBucket() = %v, want nil", err)
+		}
+		if _, ok := b.GetBucket("lock-bucket"); ok {
+			t.Fatal("bucket still exists after ForceDeleteBucket")
+		}
+	})
+
+	t.Run("returns error for nonexistent bucket", func(t *testing.T) {
+		b := New()
+		if err := b.ForceDeleteBucket("no-such-bucket"); !errors.Is(err, ErrBucketNotFound) {
+			t.Fatalf("ForceDeleteBucket() = %v, want ErrBucketNotFound", err)
 		}
 	})
 }

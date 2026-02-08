@@ -1,4 +1,6 @@
 minis3
+!minis3/
+s3-test
+!s3-test/
 *.exe
 *.log
-s3-test

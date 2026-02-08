@@ -171,6 +171,21 @@ func (b *Backend) DeleteBucket(name string) error {
 	return nil
 }
 
+// ForceDeleteBucket deletes a bucket and all its objects unconditionally,
+// ignoring Object Lock, retention, legal hold, and non-empty checks.
+// This is intended for test server cleanup only.
+func (b *Backend) ForceDeleteBucket(name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, exists := b.buckets[name]; !exists {
+		return ErrBucketNotFound
+	}
+
+	delete(b.buckets, name)
+	return nil
+}
+
 // ListBuckets returns all buckets.
 func (b *Backend) ListBuckets() []*Bucket {
 	b.mu.RLock()
