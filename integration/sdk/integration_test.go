@@ -3579,6 +3579,18 @@ func TestStorageClassHeader(t *testing.T) {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
 
+	// Use STANDARD_IA for GetObject test (accessible storage class)
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:       aws.String(bucket),
+		Key:          aws.String("standard-ia.txt"),
+		Body:         strings.NewReader("data"),
+		StorageClass: types.StorageClassStandardIa,
+	})
+	if err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	// Use GLACIER for ListObjectsV2 test (archived storage class)
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:       aws.String(bucket),
 		Key:          aws.String("glacier.txt"),
@@ -3592,21 +3604,22 @@ func TestStorageClassHeader(t *testing.T) {
 	t.Run("GetObject returns storage class", func(t *testing.T) {
 		resp, err := client.GetObject(ctx, &s3.GetObjectInput{
 			Bucket: aws.String(bucket),
-			Key:    aws.String("glacier.txt"),
+			Key:    aws.String("standard-ia.txt"),
 		})
 		if err != nil {
 			t.Fatalf("GetObject failed: %v", err)
 		}
 		defer resp.Body.Close()
 
-		if resp.StorageClass != types.StorageClassGlacier {
-			t.Errorf("expected StorageClass GLACIER, got %v", resp.StorageClass)
+		if resp.StorageClass != types.StorageClassStandardIa {
+			t.Errorf("expected StorageClass STANDARD_IA, got %v", resp.StorageClass)
 		}
 	})
 
 	t.Run("ListObjectsV2 returns storage class", func(t *testing.T) {
 		resp, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket: aws.String(bucket),
+			Prefix: aws.String("glacier"),
 		})
 		if err != nil {
 			t.Fatalf("ListObjectsV2 failed: %v", err)
