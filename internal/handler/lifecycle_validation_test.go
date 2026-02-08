@@ -200,4 +200,66 @@ func TestValidateLifecycleConfiguration(t *testing.T) {
 			t.Fatal("expected lifecycle configuration with transition date to be valid")
 		}
 	})
+
+	t.Run("rejects noncurrent transition without noncurrent days", func(t *testing.T) {
+		cfg := &backend.LifecycleConfiguration{
+			Rules: []backend.LifecycleRule{
+				{
+					ID:     "rule1",
+					Status: backend.LifecycleStatusEnabled,
+					NoncurrentVersionTransition: []backend.NoncurrentVersionTransition{
+						{
+							StorageClass: "GLACIER",
+						},
+					},
+				},
+			},
+		}
+		code, _, ok := validateLifecycleConfiguration(cfg)
+		if ok || code != "InvalidArgument" {
+			t.Fatalf("expected InvalidArgument, got ok=%v code=%q", ok, code)
+		}
+	})
+
+	t.Run("rejects noncurrent transition without storage class", func(t *testing.T) {
+		cfg := &backend.LifecycleConfiguration{
+			Rules: []backend.LifecycleRule{
+				{
+					ID:     "rule1",
+					Status: backend.LifecycleStatusEnabled,
+					NoncurrentVersionTransition: []backend.NoncurrentVersionTransition{
+						{
+							NoncurrentDays: 1,
+						},
+					},
+				},
+			},
+		}
+		code, _, ok := validateLifecycleConfiguration(cfg)
+		if ok || code != "InvalidArgument" {
+			t.Fatalf("expected InvalidArgument, got ok=%v code=%q", ok, code)
+		}
+	})
+
+	t.Run("accepts valid noncurrent transition", func(t *testing.T) {
+		cfg := &backend.LifecycleConfiguration{
+			Rules: []backend.LifecycleRule{
+				{
+					ID:     "rule1",
+					Status: backend.LifecycleStatusEnabled,
+					NoncurrentVersionTransition: []backend.NoncurrentVersionTransition{
+						{
+							NoncurrentDays:          1,
+							StorageClass:            "STANDARD_IA",
+							NewerNoncurrentVersions: 1,
+						},
+					},
+				},
+			},
+		}
+		_, _, ok := validateLifecycleConfiguration(cfg)
+		if !ok {
+			t.Fatal("expected noncurrent transition configuration to be valid")
+		}
+	})
 }

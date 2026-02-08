@@ -706,6 +706,8 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handlePutPublicAccessBlock(w, r, bucketName)
 			return
 		}
+		locationConstraint := ""
+
 		// Parse CreateBucketConfiguration from request body if present
 		if r.Body != nil && r.ContentLength > 0 {
 			defer func() { _ = r.Body.Close() }()
@@ -731,7 +733,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 					)
 					return
 				}
-				// LocationConstraint is accepted but ignored (single-region mock)
+				locationConstraint = strings.TrimSpace(config.LocationConstraint)
 			}
 		}
 
@@ -791,6 +793,11 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			} else {
 				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			}
+			return
+		}
+
+		if err := h.backend.SetBucketLocation(bucketName, locationConstraint); err != nil {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			return
 		}
 		// Set the owner access key
@@ -2239,6 +2246,18 @@ func validateLifecycleConfiguration(config *backend.LifecycleConfiguration) (str
 				if _, err := parseLifecycleExpirationDate(transition.Date); err != nil {
 					return "InvalidArgument", "Invalid argument", false
 				}
+			}
+		}
+
+		for _, transition := range rule.NoncurrentVersionTransition {
+			if transition.NoncurrentDays <= 0 {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if strings.TrimSpace(transition.StorageClass) == "" {
+				return "InvalidArgument", "Invalid argument", false
+			}
+			if transition.NewerNoncurrentVersions < 0 {
+				return "InvalidArgument", "Invalid argument", false
 			}
 		}
 

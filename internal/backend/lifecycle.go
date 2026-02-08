@@ -45,6 +45,20 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 		}
 
 		updated := bucket.Objects[key]
+		applyCurrentTransitionRules(
+			key,
+			updated.Versions,
+			bucket.LifecycleConfiguration.Rules,
+			now,
+			dayDuration,
+		)
+		applyNoncurrentTransitionRules(
+			key,
+			updated.Versions,
+			bucket.LifecycleConfiguration.Rules,
+			now,
+			dayDuration,
+		)
 		updated.Versions = applyNoncurrentExpirationRules(
 			key,
 			updated.Versions,
@@ -68,6 +82,157 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 		}
 		updated.Versions[0].IsLatest = true
 	}
+}
+
+func applyCurrentTransitionRules(
+	key string,
+	versions []*Object,
+	rules []LifecycleRule,
+	now time.Time,
+	dayDuration time.Duration,
+) {
+	if len(versions) == 0 || versions[0] == nil || versions[0].IsDeleteMarker {
+		return
+	}
+
+	current := versions[0]
+	for _, rule := range rules {
+		if !isLifecycleRuleEnabled(rule) || len(rule.Transition) == 0 {
+			continue
+		}
+		if !lifecycleRuleMatchesObject(rule, key, current) {
+			continue
+		}
+		targetStorageClass, ok := dueLifecycleTransitionStorageClass(
+			rule.Transition,
+			current.LastModified,
+			now,
+			dayDuration,
+		)
+		if ok {
+			current.StorageClass = targetStorageClass
+		}
+	}
+}
+
+func dueLifecycleTransitionStorageClass(
+	transitions []LifecycleTransition,
+	lastModified, now time.Time,
+	dayDuration time.Duration,
+) (string, bool) {
+	bestClass := ""
+	bestDueAt := time.Time{}
+	found := false
+
+	for _, transition := range transitions {
+		if strings.TrimSpace(transition.StorageClass) == "" {
+			continue
+		}
+
+		dueAt, ok := lifecycleTransitionDueAt(transition, lastModified, dayDuration)
+		if !ok || dueAt.After(now) {
+			continue
+		}
+		if !found || !dueAt.Before(bestDueAt) {
+			bestClass = transition.StorageClass
+			bestDueAt = dueAt
+			found = true
+		}
+	}
+
+	return bestClass, found
+}
+
+func lifecycleTransitionDueAt(
+	transition LifecycleTransition,
+	lastModified time.Time,
+	dayDuration time.Duration,
+) (time.Time, bool) {
+	if transition.Days > 0 {
+		return lastModified.Add(time.Duration(transition.Days) * dayDuration), true
+	}
+	if transition.Date == "" {
+		return time.Time{}, false
+	}
+
+	transitionDate, err := parseLifecycleDate(transition.Date)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return transitionDate, true
+}
+
+func applyNoncurrentTransitionRules(
+	key string,
+	versions []*Object,
+	rules []LifecycleRule,
+	now time.Time,
+	dayDuration time.Duration,
+) {
+	if len(versions) == 0 {
+		return
+	}
+
+	for _, rule := range rules {
+		if !isLifecycleRuleEnabled(rule) || len(rule.NoncurrentVersionTransition) == 0 {
+			continue
+		}
+
+		seenMatchingNoncurrent := 0
+		for _, obj := range versions {
+			if obj == nil || obj.IsLatest || obj.IsDeleteMarker {
+				continue
+			}
+			if !lifecycleRuleMatchesObject(rule, key, obj) {
+				continue
+			}
+			seenMatchingNoncurrent++
+
+			targetStorageClass, ok := dueNoncurrentTransitionStorageClass(
+				rule.NoncurrentVersionTransition,
+				obj.LastModified,
+				now,
+				dayDuration,
+				seenMatchingNoncurrent,
+			)
+			if ok {
+				obj.StorageClass = targetStorageClass
+			}
+		}
+	}
+}
+
+func dueNoncurrentTransitionStorageClass(
+	transitions []NoncurrentVersionTransition,
+	lastModified, now time.Time,
+	dayDuration time.Duration,
+	seenMatchingNoncurrent int,
+) (string, bool) {
+	bestClass := ""
+	bestDueAt := time.Time{}
+	found := false
+
+	for _, transition := range transitions {
+		if transition.NoncurrentDays <= 0 || strings.TrimSpace(transition.StorageClass) == "" {
+			continue
+		}
+		if transition.NewerNoncurrentVersions > 0 &&
+			seenMatchingNoncurrent <= transition.NewerNoncurrentVersions {
+			continue
+		}
+
+		dueAt := lastModified.Add(time.Duration(transition.NoncurrentDays) * dayDuration)
+		if dueAt.After(now) {
+			continue
+		}
+		if !found || !dueAt.Before(bestDueAt) {
+			bestClass = transition.StorageClass
+			bestDueAt = dueAt
+			found = true
+		}
+	}
+
+	return bestClass, found
 }
 
 func (b *Backend) shouldExpireCurrentVersion(
