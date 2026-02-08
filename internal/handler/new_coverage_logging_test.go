@@ -813,15 +813,15 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 	})
 
 	t.Run("flushServerAccessLogBatch branches", func(t *testing.T) {
-		if err := h.flushServerAccessLogBatch(nil, time.Now().UTC()); err != nil {
+		if _, err := h.flushServerAccessLogBatch(nil, time.Now().UTC()); err != nil {
 			t.Fatalf("flush nil batch failed: %v", err)
 		}
-		if err := h.flushServerAccessLogBatch(&serverAccessLogBatch{}, time.Now().UTC()); err != nil {
+		if _, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{}, time.Now().UTC()); err != nil {
 			t.Fatalf("flush empty batch failed: %v", err)
 		}
 
 		// Source bucket missing after skipping empty-source ACL checks.
-		err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
+		_, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
 			TargetBucket: "dst-access-log",
 			TargetPrefix: "logs/",
 			Entries: []serverAccessLogEntry{{
@@ -839,7 +839,7 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		mustCreateBucket(t, b, "dst-denied")
 		b.SetBucketOwner("dst-denied", "minis3-access-key")
 		mustPutBucketPolicy(t, b, "dst-denied", `{"Statement":[]}`)
-		err = h.flushServerAccessLogBatch(&serverAccessLogBatch{
+		_, err = h.flushServerAccessLogBatch(&serverAccessLogBatch{
 			TargetBucket: "dst-denied",
 			TargetPrefix: "logs/",
 			Entries: []serverAccessLogEntry{{

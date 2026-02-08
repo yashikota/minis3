@@ -87,6 +87,9 @@ type Object struct {
 	LegalHoldStatus string     // ON or OFF
 	// Storage class
 	StorageClass string // e.g., STANDARD, REDUCED_REDUNDANCY, etc.
+	// Restore fields (for GLACIER / DEEP_ARCHIVE)
+	Restored          bool       // true after RestoreObject has been called
+	RestoreExpiryDate *time.Time // non-nil for temporary restores
 	// Server-Side Encryption fields
 	ServerSideEncryption string // AES256, aws:kms, etc.
 	SSEKMSKeyId          string // KMS key ID (only for aws:kms)
@@ -207,6 +210,9 @@ var (
 	ErrPreconditionFailed = errors.New("precondition failed")
 	ErrBadDigest          = errors.New(
 		"the content-md5 you specified did not match what we received",
+	)
+	ErrInvalidObjectState = errors.New(
+		"the operation is not valid for the object's storage class",
 	)
 )
 

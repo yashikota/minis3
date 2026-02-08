@@ -985,7 +985,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		}
 
 		// flush partitioned object key path
-		if err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
+		if _, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
 			TargetBucket: "dst-h2",
 			TargetPrefix: "logs/",
 			ObjectKeyFormat: &backend.TargetObjectKeyFormat{
