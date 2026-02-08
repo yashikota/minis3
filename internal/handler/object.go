@@ -213,6 +213,28 @@ func setStorageAndEncryptionHeaders(w http.ResponseWriter, obj *backend.Object) 
 	}
 }
 
+// isArchivedStorageClass returns true for storage classes that require restore before access.
+func isArchivedStorageClass(sc string) bool {
+	return sc == "GLACIER" || sc == "DEEP_ARCHIVE"
+}
+
+// isObjectRestored returns true if the object has been restored and the restore has not expired.
+func isObjectRestored(obj *backend.Object) bool {
+	return obj.RestoreExpiryDate != nil && obj.RestoreExpiryDate.After(time.Now().UTC())
+}
+
+// setRestoreHeader sets the x-amz-restore header for objects with restore information.
+func setRestoreHeader(w http.ResponseWriter, obj *backend.Object) {
+	if obj.RestoreExpiryDate != nil {
+		if obj.RestoreOngoing {
+			w.Header().Set("x-amz-restore", `ongoing-request="true"`)
+		} else {
+			expiry := obj.RestoreExpiryDate.Format(http.TimeFormat)
+			w.Header().Set("x-amz-restore", fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`, expiry))
+		}
+	}
+}
+
 func (h *Handler) setLifecycleExpirationHeader(
 	w http.ResponseWriter,
 	bucketName, key string,
@@ -970,6 +992,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		return
 	}
 
+	// Handle RestoreObject (POST with ?restore)
+	if r.Method == http.MethodPost && query.Has("restore") {
+		h.handleRestoreObject(w, r, bucketName, key)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodPut:
 		if err := h.flushServerAccessLogsIfDue(bucketName); err != nil {
@@ -1327,6 +1355,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
+		// Block access to un-restored GLACIER/DEEP_ARCHIVE objects
+		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
+			backend.WriteError(w, http.StatusForbidden, "InvalidObjectState",
+				"The operation is not valid for the object's storage class.")
+			return
+		}
+
 		// Check PartNumber validity before SSE-C access (invalid part takes priority)
 		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
 			partNumber, parseErr := strconv.Atoi(partNumberStr)
@@ -1405,6 +1440,8 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		setObjectLockHeaders(w, obj)
 		// Set StorageClass and SSE headers
 		setStorageAndEncryptionHeaders(w, obj)
+		// Set x-amz-restore header for archived objects
+		setRestoreHeader(w, obj)
 		h.setLifecycleExpirationHeader(w, bucketName, key, obj)
 		// Set Website Redirect Location header
 		if obj.WebsiteRedirectLocation != "" {
@@ -1598,6 +1635,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		// Block access to un-restored GLACIER/DEEP_ARCHIVE objects
+		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
+			backend.WriteError(w, http.StatusForbidden, "InvalidObjectState",
+				"The operation is not valid for the object's storage class.")
+			return
+		}
+
 		// Validate SSE-C access
 		if validateSSECAccess(w, r, obj) {
 			return
@@ -1659,6 +1703,8 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		setObjectLockHeaders(w, obj)
 		// Set StorageClass and SSE headers
 		setStorageAndEncryptionHeaders(w, obj)
+		// Set x-amz-restore header for archived objects
+		setRestoreHeader(w, obj)
 		h.setLifecycleExpirationHeader(w, bucketName, key, obj)
 		// Set Website Redirect Location header
 		if obj.WebsiteRedirectLocation != "" {
@@ -2795,4 +2841,55 @@ func (h *Handler) handleGetObjectAttributes(
 		return
 	}
 	_, _ = w.Write(output)
+}
+
+// handleRestoreObject handles POST /{key}?restore requests.
+func (h *Handler) handleRestoreObject(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName, key string,
+) {
+	versionId := r.URL.Query().Get("versionId")
+
+	body, err := readAllFn(r.Body)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	var restoreReq backend.RestoreRequest
+	if len(body) > 0 {
+		if xmlErr := xml.Unmarshal(body, &restoreReq); xmlErr != nil {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"MalformedXML",
+				"The XML you provided was not well-formed or did not validate against our published schema.",
+			)
+			return
+		}
+	}
+
+	result, err := h.backend.RestoreObject(bucketName, key, versionId, restoreReq.Days)
+	if err != nil {
+		switch {
+		case errors.Is(err, backend.ErrBucketNotFound):
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
+		case errors.Is(err, backend.ErrObjectNotFound):
+			backend.WriteError(w, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
+		case errors.Is(err, backend.ErrVersionNotFound):
+			backend.WriteError(w, http.StatusNotFound, "NoSuchVersion",
+				"The specified version does not exist.")
+		case errors.Is(err, backend.ErrInvalidObjectState):
+			backend.WriteError(w, http.StatusForbidden, "InvalidObjectState",
+				"The operation is not valid for the object's storage class.")
+		default:
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(result.StatusCode)
 }

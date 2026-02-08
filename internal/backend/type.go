@@ -148,6 +148,18 @@ type RestoreStatus struct {
 	RestoreExpiryDate   string `xml:"RestoreExpiryDate,omitempty"`
 }
 
+// RestoreRequest represents the XML body for POST /{key}?restore.
+type RestoreRequest struct {
+	XMLName              xml.Name              `xml:"RestoreRequest"`
+	Days                 int                   `xml:"Days,omitempty"`
+	GlacierJobParameters *GlacierJobParameters `xml:"GlacierJobParameters,omitempty"`
+}
+
+// GlacierJobParameters configures the retrieval tier for GLACIER restores.
+type GlacierJobParameters struct {
+	Tier string `xml:"Tier"` // Standard, Expedited, Bulk
+}
+
 type CommonPrefix struct {
 	Prefix string `xml:"Prefix"`
 }
