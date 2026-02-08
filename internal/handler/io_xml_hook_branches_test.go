@@ -338,19 +338,63 @@ func TestXMLMarshalErrorHookBranches(t *testing.T) {
 	})
 
 	t.Run("bucket marshal errors", func(t *testing.T) {
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?list-type=2", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?versions", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?versioning", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?location", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?tagging", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?policyStatus", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?acl", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?lifecycle", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?encryption", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?cors", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?website", "", nil))
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket?publicAccessBlock", "", nil))
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?list-type=2", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?versions", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?versioning", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?location", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?tagging", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?policyStatus", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?acl", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?lifecycle", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?encryption", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?cors", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket?website", "", nil),
+		)
+		assertInternalError(
+			t,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/marshal-bucket?publicAccessBlock",
+				"",
+				nil,
+			),
+		)
 	})
 
 	t.Run("object marshal errors", func(t *testing.T) {
@@ -372,7 +416,10 @@ func TestXMLMarshalErrorHookBranches(t *testing.T) {
 				map[string]string{"x-amz-copy-source": "/marshal-src/src"},
 			),
 		)
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-bucket/obj?acl", "", nil))
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-bucket/obj?acl", "", nil),
+		)
 		assertInternalError(
 			t,
 			newRequest(http.MethodGet, "http://example.test/marshal-bucket/obj?tagging", "", nil),
@@ -383,7 +430,9 @@ func TestXMLMarshalErrorHookBranches(t *testing.T) {
 				http.MethodGet,
 				"http://example.test/marshal-bucket/obj?attributes",
 				"",
-				map[string]string{"x-amz-object-attributes": "ETag,ObjectSize,StorageClass,Checksum"},
+				map[string]string{
+					"x-amz-object-attributes": "ETag,ObjectSize,StorageClass,Checksum",
+				},
 			),
 		)
 	})
@@ -391,7 +440,12 @@ func TestXMLMarshalErrorHookBranches(t *testing.T) {
 	t.Run("multipart marshal errors", func(t *testing.T) {
 		assertInternalError(
 			t,
-			newRequest(http.MethodPost, "http://example.test/marshal-bucket/mp-new?uploads", "", nil),
+			newRequest(
+				http.MethodPost,
+				"http://example.test/marshal-bucket/mp-new?uploads",
+				"",
+				nil,
+			),
 		)
 		assertInternalError(
 			t,
@@ -439,7 +493,10 @@ func TestXMLMarshalErrorHookBranches(t *testing.T) {
 	})
 
 	t.Run("object lock marshal errors", func(t *testing.T) {
-		assertInternalError(t, newRequest(http.MethodGet, "http://example.test/marshal-lock?object-lock", "", nil))
+		assertInternalError(
+			t,
+			newRequest(http.MethodGet, "http://example.test/marshal-lock?object-lock", "", nil),
+		)
 		assertInternalError(
 			t,
 			newRequest(http.MethodGet, "http://example.test/marshal-lock/obj?retention", "", nil),

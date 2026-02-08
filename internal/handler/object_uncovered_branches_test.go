@@ -66,24 +66,27 @@ func TestHandleObjectPutAdditionalBranchesUncovered(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-put-branch")
 
-	t.Run("put object with legal-hold and checksum headers then acl parse error", func(t *testing.T) {
-		req := newRequest(
-			http.MethodPut,
-			"http://example.test/obj-put-branch/key",
-			"body",
-			map[string]string{
-				"x-amz-object-lock-legal-hold": "ON",
-				"x-amz-checksum-crc32":         "AAAAAA==",
-				"x-amz-checksum-crc32c":        "AAAAAA==",
-				"x-amz-checksum-sha1":          "AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-				"x-amz-checksum-sha256":        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-				"x-amz-grant-read":             "badformat",
-			},
-		)
-		w := doRequest(h, req)
-		requireStatus(t, w, http.StatusBadRequest)
-		requireS3ErrorCode(t, w, "InvalidArgument")
-	})
+	t.Run(
+		"put object with legal-hold and checksum headers then acl parse error",
+		func(t *testing.T) {
+			req := newRequest(
+				http.MethodPut,
+				"http://example.test/obj-put-branch/key",
+				"body",
+				map[string]string{
+					"x-amz-object-lock-legal-hold": "ON",
+					"x-amz-checksum-crc32":         "AAAAAA==",
+					"x-amz-checksum-crc32c":        "AAAAAA==",
+					"x-amz-checksum-sha1":          "AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+					"x-amz-checksum-sha256":        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+					"x-amz-grant-read":             "badformat",
+				},
+			)
+			w := doRequest(h, req)
+			requireStatus(t, w, http.StatusBadRequest)
+			requireS3ErrorCode(t, w, "InvalidArgument")
+		},
+	)
 
 	t.Run("put object ACL write failure after put", func(t *testing.T) {
 		origPutACL := putObjectACLFn
@@ -129,7 +132,10 @@ func TestHandleObjectReadDeleteHeadAdditionalBranchesUncovered(t *testing.T) {
 	etag := putW.Header().Get("ETag")
 
 	t.Run("get object missing key returns NoSuchKey", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/obj-rdh/missing", "", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/obj-rdh/missing", "", nil),
+		)
 		requireStatus(t, w, http.StatusNotFound)
 		requireS3ErrorCode(t, w, "NoSuchKey")
 	})
@@ -484,31 +490,36 @@ func TestObjectACLAndAttributesAdditionalBranchesUncovered(t *testing.T) {
 		requireS3ErrorCode(t, w, "NoSuchKey")
 	})
 
-	t.Run("get object attributes checksum, storage default, and version header", func(t *testing.T) {
-		obj, err := b.GetObject("obj-acl-attr", "k")
-		if err != nil {
-			t.Fatalf("GetObject failed: %v", err)
-		}
-		obj.StorageClass = ""
+	t.Run(
+		"get object attributes checksum, storage default, and version header",
+		func(t *testing.T) {
+			obj, err := b.GetObject("obj-acl-attr", "k")
+			if err != nil {
+				t.Fatalf("GetObject failed: %v", err)
+			}
+			obj.StorageClass = ""
 
-		w := doRequest(
-			h,
-			newRequest(
-				http.MethodGet,
-				"http://example.test/obj-acl-attr/k?attributes",
-				"",
-				map[string]string{"x-amz-object-attributes": "Checksum,ObjectSize,StorageClass"},
-			),
-		)
-		requireStatus(t, w, http.StatusOK)
-		if got := w.Header().Get("x-amz-version-id"); got == "" {
-			t.Fatal("x-amz-version-id should be set")
-		}
-		if !strings.Contains(w.Body.String(), "<Checksum>") {
-			t.Fatalf("response should include Checksum block: %s", w.Body.String())
-		}
-		if !strings.Contains(w.Body.String(), "<StorageClass>STANDARD</StorageClass>") {
-			t.Fatalf("response should include default StorageClass: %s", w.Body.String())
-		}
-	})
+			w := doRequest(
+				h,
+				newRequest(
+					http.MethodGet,
+					"http://example.test/obj-acl-attr/k?attributes",
+					"",
+					map[string]string{
+						"x-amz-object-attributes": "Checksum,ObjectSize,StorageClass",
+					},
+				),
+			)
+			requireStatus(t, w, http.StatusOK)
+			if got := w.Header().Get("x-amz-version-id"); got == "" {
+				t.Fatal("x-amz-version-id should be set")
+			}
+			if !strings.Contains(w.Body.String(), "<Checksum>") {
+				t.Fatalf("response should include Checksum block: %s", w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "<StorageClass>STANDARD</StorageClass>") {
+				t.Fatalf("response should include default StorageClass: %s", w.Body.String())
+			}
+		},
+	)
 }

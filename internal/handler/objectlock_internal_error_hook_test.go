@@ -110,7 +110,12 @@ func TestObjectLockInternalErrorBranchesWithHooks(t *testing.T) {
 		body := `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
 		w := doRequest(
 			h,
-			newRequest(http.MethodPut, "http://example.test/hook-lock-errors?object-lock", body, nil),
+			newRequest(
+				http.MethodPut,
+				"http://example.test/hook-lock-errors?object-lock",
+				body,
+				nil,
+			),
 		)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")

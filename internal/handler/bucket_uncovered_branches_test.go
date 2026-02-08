@@ -241,7 +241,8 @@ func TestBucketHelperUncoveredBranches(t *testing.T) {
 			},
 		}
 		for i, cfg := range cases {
-			if code, _, ok := validateLifecycleConfiguration(&cfg); ok || code != "InvalidArgument" {
+			if code, _, ok := validateLifecycleConfiguration(&cfg); ok ||
+				code != "InvalidArgument" {
 				t.Fatalf("case %d should fail InvalidArgument: ok=%v code=%s", i, ok, code)
 			}
 		}
@@ -304,25 +305,39 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		}()
 
 		createBucketFn = func(*Handler, string) error { return backend.ErrBucketAlreadyOwnedByYou }
-		wOwned := doRequest(h, newRequest(http.MethodPut, "http://example.test/create-owned", "", nil))
+		wOwned := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/create-owned", "", nil),
+		)
 		requireStatus(t, wOwned, http.StatusOK)
 
 		createBucketFn = func(*Handler, string) error { return backend.ErrBucketAlreadyExists }
-		wExists := doRequest(h, newRequest(http.MethodPut, "http://example.test/create-exists", "", nil))
+		wExists := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/create-exists", "", nil),
+		)
 		requireStatus(t, wExists, http.StatusConflict)
 		requireS3ErrorCode(t, wExists, "BucketAlreadyExists")
 
 		createBucketFn = func(*Handler, string) error { return errors.New("create boom") }
-		wInternal := doRequest(h, newRequest(http.MethodPut, "http://example.test/create-internal", "", nil))
+		wInternal := doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/create-internal", "", nil),
+		)
 		requireStatus(t, wInternal, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wInternal, "InternalError")
 
 		createBucketFn = origCreate
 		wACLParse := doRequest(
 			h,
-			newRequest(http.MethodPut, "http://example.test/create-acl-parse", "", map[string]string{
-				"x-amz-grant-read": "badformat",
-			}),
+			newRequest(
+				http.MethodPut,
+				"http://example.test/create-acl-parse",
+				"",
+				map[string]string{
+					"x-amz-grant-read": "badformat",
+				},
+			),
 		)
 		requireStatus(t, wACLParse, http.StatusBadRequest)
 		requireS3ErrorCode(t, wACLParse, "InvalidArgument")
@@ -347,9 +362,14 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		}
 		wCannedACLInternal := doRequest(
 			h,
-			newRequest(http.MethodPut, "http://example.test/create-canned-acl", "", map[string]string{
-				"x-amz-acl": "public-read",
-			}),
+			newRequest(
+				http.MethodPut,
+				"http://example.test/create-canned-acl",
+				"",
+				map[string]string{
+					"x-amz-acl": "public-read",
+				},
+			),
 		)
 		requireStatus(t, wCannedACLInternal, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wCannedACLInternal, "InternalError")
@@ -369,7 +389,10 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 
 		mustCreateBucket(t, b, "head-denied")
 		b.SetBucketOwner("head-denied", "owner-ak")
-		wDenied := doRequest(h, newRequest(http.MethodHead, "http://example.test/head-denied", "", nil))
+		wDenied := doRequest(
+			h,
+			newRequest(http.MethodHead, "http://example.test/head-denied", "", nil),
+		)
 		requireStatus(t, wDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wDenied, "AccessDenied")
 
@@ -685,7 +708,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 
 		origGetLocation := getBucketLocationFn
 		getBucketLocationFn = func(*Handler, string) (string, error) { return "", errors.New("location boom") }
-		wLocation := doRequest(h, newRequest(http.MethodGet, "http://example.test/cfg-err?location", "", nil))
+		wLocation := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/cfg-err?location", "", nil),
+		)
 		requireStatus(t, wLocation, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wLocation, "InternalError")
 		getBucketLocationFn = origGetLocation
@@ -694,7 +720,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		getBucketTaggingFn = func(*Handler, string) (map[string]string, error) {
 			return nil, errors.New("tagging get boom")
 		}
-		wGetTag := doRequest(h, newRequest(http.MethodGet, "http://example.test/cfg-err?tagging", "", nil))
+		wGetTag := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/cfg-err?tagging", "", nil),
+		)
 		requireStatus(t, wGetTag, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetTag, "InternalError")
 		getBucketTaggingFn = origGetTagging
@@ -728,7 +757,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 
 		origGetPolicy := getBucketPolicyFn
 		getBucketPolicyFn = func(*Handler, string) (string, error) { return "", errors.New("policy get boom") }
-		wGetPolicy := doRequest(h, newRequest(http.MethodGet, "http://example.test/cfg-err?policy", "", nil))
+		wGetPolicy := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/cfg-err?policy", "", nil),
+		)
 		requireStatus(t, wGetPolicy, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetPolicy, "InternalError")
 		getBucketPolicyFn = origGetPolicy
@@ -758,7 +790,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		requireS3ErrorCode(t, wDeletePolicy, "InternalError")
 		deleteBucketPolicyFn = origDeletePolicy
 
-		wGetACLDenied := doRequest(h, newRequest(http.MethodGet, "http://example.test/cfg-err?acl", "", nil))
+		wGetACLDenied := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/cfg-err?acl", "", nil),
+		)
 		requireStatus(t, wGetACLDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wGetACLDenied, "AccessDenied")
 
@@ -831,7 +866,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		) (*backend.LifecycleConfiguration, error) {
 			return nil, errors.New("lc get boom")
 		}
-		wGetLC := doRequest(h, newRequest(http.MethodGet, "http://example.test/cfg-err?lifecycle", "", nil))
+		wGetLC := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/cfg-err?lifecycle", "", nil),
+		)
 		requireStatus(t, wGetLC, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetLC, "InternalError")
 		getBucketLifecycleConfigurationFn = origGetLifecycle
@@ -880,7 +918,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		getBucketEncryptionFn = func(*Handler, string) (*backend.ServerSideEncryptionConfiguration, error) {
 			return nil, errors.New("enc get boom")
 		}
-		wGetEnc := doRequest(h, newRequest(http.MethodGet, "http://example.test/cfg-err?encryption", "", nil))
+		wGetEnc := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/cfg-err?encryption", "", nil),
+		)
 		requireStatus(t, wGetEnc, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetEnc, "InternalError")
 		getBucketEncryptionFn = origGetEnc
@@ -920,7 +961,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		getBucketCORSFn = func(*Handler, string) (*backend.CORSConfiguration, error) {
 			return nil, errors.New("cors get boom")
 		}
-		wGetCORS := doRequest(h, newRequest(http.MethodGet, "http://example.test/cfg-err?cors", "", nil))
+		wGetCORS := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/cfg-err?cors", "", nil),
+		)
 		requireStatus(t, wGetCORS, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetCORS, "InternalError")
 		getBucketCORSFn = origGetCORS
@@ -956,7 +1000,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		getBucketWebsiteFn = func(*Handler, string) (*backend.WebsiteConfiguration, error) {
 			return nil, errors.New("website get boom")
 		}
-		wGetWebsite := doRequest(h, newRequest(http.MethodGet, "http://example.test/cfg-err?website", "", nil))
+		wGetWebsite := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/cfg-err?website", "", nil),
+		)
 		requireStatus(t, wGetWebsite, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetWebsite, "InternalError")
 		getBucketWebsiteFn = origGetWebsite
@@ -994,7 +1041,12 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		}
 		wGetPAB := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/cfg-err?publicAccessBlock", "", ownerHeaders),
+			newRequest(
+				http.MethodGet,
+				"http://example.test/cfg-err?publicAccessBlock",
+				"",
+				ownerHeaders,
+			),
 		)
 		requireStatus(t, wGetPAB, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetPAB, "InternalError")

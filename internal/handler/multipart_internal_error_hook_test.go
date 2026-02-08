@@ -34,10 +34,15 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("create multipart consumes legal-hold and storage-class headers", func(t *testing.T) {
-		req := newRequest(http.MethodPost, "http://example.test/mp-hook/k?uploads", "", map[string]string{
-			"x-amz-object-lock-legal-hold": "ON",
-			"x-amz-storage-class":          "STANDARD_IA",
-		})
+		req := newRequest(
+			http.MethodPost,
+			"http://example.test/mp-hook/k?uploads",
+			"",
+			map[string]string{
+				"x-amz-object-lock-legal-hold": "ON",
+				"x-amz-storage-class":          "STANDARD_IA",
+			},
+		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusOK)
 	})
@@ -51,7 +56,12 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		) (*backend.MultipartUpload, error) {
 			return nil, errors.New("create boom")
 		}
-		req := newRequest(http.MethodPost, "http://example.test/mp-hook/create-err?uploads", "", nil)
+		req := newRequest(
+			http.MethodPost,
+			"http://example.test/mp-hook/create-err?uploads",
+			"",
+			nil,
+		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
@@ -59,7 +69,11 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("upload part invalid sse-c headers", func(t *testing.T) {
-		up, err := b.CreateMultipartUpload("mp-hook", "sse-invalid", backend.CreateMultipartUploadOptions{})
+		up, err := b.CreateMultipartUpload(
+			"mp-hook",
+			"sse-invalid",
+			backend.CreateMultipartUploadOptions{},
+		)
 		if err != nil {
 			t.Fatalf("CreateMultipartUpload failed: %v", err)
 		}

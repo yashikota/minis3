@@ -134,19 +134,22 @@ func TestHandleRequestAuthAndCORSBranches(t *testing.T) {
 		requireS3ErrorCode(t, w, "AccessDenied")
 	})
 
-	t.Run("origin without access-control-request-method falls back to request method", func(t *testing.T) {
-		req := newRequest(
-			http.MethodGet,
-			"http://example.test/req-branch",
-			"",
-			map[string]string{"Origin": "https://example.test"},
-		)
-		w := doRequest(h, req)
-		requireStatus(t, w, http.StatusOK)
-		if got := w.Header().Get("access-control-allow-origin"); got != "*" {
-			t.Fatalf("access-control-allow-origin = %q, want *", got)
-		}
-	})
+	t.Run(
+		"origin without access-control-request-method falls back to request method",
+		func(t *testing.T) {
+			req := newRequest(
+				http.MethodGet,
+				"http://example.test/req-branch",
+				"",
+				map[string]string{"Origin": "https://example.test"},
+			)
+			w := doRequest(h, req)
+			requireStatus(t, w, http.StatusOK)
+			if got := w.Header().Get("access-control-allow-origin"); got != "*" {
+				t.Fatalf("access-control-allow-origin = %q, want *", got)
+			}
+		},
+	)
 }
 
 func TestExtractAccessKeyAdditionalBranches(t *testing.T) {
@@ -304,7 +307,8 @@ func TestACLAndGrantHelperEdgeBranches(t *testing.T) {
 		"",
 		map[string]string{"x-amz-grant-read": `id=""`},
 	)
-	if _, err := aclFromGrantHeaders(reqEmptyValue, owner); err == nil || err.code != "InvalidArgument" {
+	if _, err := aclFromGrantHeaders(reqEmptyValue, owner); err == nil ||
+		err.code != "InvalidArgument" {
 		t.Fatalf("empty grant value should fail with InvalidArgument, got %+v", err)
 	}
 
@@ -314,7 +318,8 @@ func TestACLAndGrantHelperEdgeBranches(t *testing.T) {
 		"",
 		map[string]string{"x-amz-grant-read": "foo=bar"},
 	)
-	if _, err := aclFromGrantHeaders(reqUnknownGrantKey, owner); err == nil || err.code != "InvalidArgument" {
+	if _, err := aclFromGrantHeaders(reqUnknownGrantKey, owner); err == nil ||
+		err.code != "InvalidArgument" {
 		t.Fatalf("unknown grant key should fail with InvalidArgument, got %+v", err)
 	}
 
@@ -324,7 +329,8 @@ func TestACLAndGrantHelperEdgeBranches(t *testing.T) {
 		"",
 		map[string]string{"x-amz-grant-read": "id=unknown-canonical-id"},
 	)
-	if _, err := aclFromGrantHeaders(reqNormalizeError, owner); err == nil || err.code != "InvalidArgument" {
+	if _, err := aclFromGrantHeaders(reqNormalizeError, owner); err == nil ||
+		err.code != "InvalidArgument" {
 		t.Fatalf("normalize error should propagate InvalidArgument, got %+v", err)
 	}
 }
