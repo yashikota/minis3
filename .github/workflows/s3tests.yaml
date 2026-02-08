@@ -58,13 +58,12 @@ jobs:
             exit 0
           fi
 
-          result_line=$(grep -oE '[0-9]+ failed, [0-9]+ passed, [0-9]+ skipped(, [0-9]+ errors?)?' s3-test.log | tail -1)
+          result_line=$(grep -oE '[0-9]+ (failed|passed|skipped|deselected|warnings?|errors?)(, [0-9]+ (failed|passed|skipped|deselected|warnings?|errors?))*' s3-test.log | tail -1)
           if [ -n "$result_line" ]; then
-            failed=$(echo "$result_line" | awk '{print $1}')
-            passed=$(echo "$result_line" | awk '{print $3}')
-            skipped=$(echo "$result_line" | awk '{print $5}')
-            errors=$(echo "$result_line" | awk '{print $7}')
-            errors=${errors:-0}
+            failed=$(echo "$result_line" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo 0)
+            passed=$(echo "$result_line" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo 0)
+            skipped=$(echo "$result_line" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' || echo 0)
+            errors=$(echo "$result_line" | grep -oE '[0-9]+ errors?' | grep -oE '[0-9]+' || echo 0)
             total=$((passed + failed + errors))
             if [ "$total" -gt 0 ]; then
               pass_rate=$(echo "scale=2; $passed * 100 / $total" | bc)
