@@ -1357,7 +1357,18 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
-			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
+			_, _ = h.backend.RestoreObject(bucketName, key, versionId, 0)
+			// Re-fetch object to get updated state after restore
+			if versionId != "" {
+				obj, err = h.backend.GetObjectVersion(bucketName, key, versionId)
+			} else {
+				obj, err = h.backend.GetObject(bucketName, key)
+			}
+			if err != nil {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError",
+					"Failed to retrieve restored object")
+				return
+			}
 		}
 
 		// Check PartNumber validity before SSE-C access (invalid part takes priority)
@@ -1635,7 +1646,18 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
-			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
+			_, _ = h.backend.RestoreObject(bucketName, key, versionId, 0)
+			// Re-fetch object to get updated state after restore
+			if versionId != "" {
+				obj, err = h.backend.GetObjectVersion(bucketName, key, versionId)
+			} else {
+				obj, err = h.backend.GetObject(bucketName, key)
+			}
+			if err != nil {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError",
+					"Failed to retrieve restored object")
+				return
+			}
 		}
 
 		// Validate SSE-C access
