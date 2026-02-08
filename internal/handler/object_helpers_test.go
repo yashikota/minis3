@@ -380,7 +380,8 @@ func TestGetPartData(t *testing.T) {
 			{PartNumber: 2, Size: 4},
 		},
 	}
-	if data, size, _, ok := getPartData(multipartObj, 2); !ok || string(data) != "cdef" || size != 4 {
+	if data, size, _, ok := getPartData(multipartObj, 2); !ok || string(data) != "cdef" ||
+		size != 4 {
 		t.Fatalf("unexpected multipart part result: data=%q size=%d ok=%v", string(data), size, ok)
 	}
 

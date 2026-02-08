@@ -38,10 +38,18 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 	if owner == nil {
 		t.Fatal("owner for minis3-access-key must exist")
 	}
-	mustPutBucketPolicy(t, b, "dst-log", allowLoggingPolicy("src-log", "dst-log", "logs/", owner.ID))
+	mustPutBucketPolicy(
+		t,
+		b,
+		"dst-log",
+		allowLoggingPolicy("src-log", "dst-log", "logs/", owner.ID),
+	)
 
 	t.Run("ownership controls handlers", func(t *testing.T) {
-		wDenied := doRequest(h, newRequest(http.MethodGet, "http://example.test/src-log?ownershipControls", "", nil))
+		wDenied := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/src-log?ownershipControls", "", nil),
+		)
 		requireStatus(t, wDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wDenied, "AccessDenied")
 
@@ -151,7 +159,10 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 	})
 
 	t.Run("request payment handlers", func(t *testing.T) {
-		wGetDenied := doRequest(h, newRequest(http.MethodGet, "http://example.test/src-log?requestPayment", "", nil))
+		wGetDenied := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/src-log?requestPayment", "", nil),
+		)
 		requireStatus(t, wGetDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wGetDenied, "AccessDenied")
 
@@ -238,7 +249,10 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 	})
 
 	t.Run("bucket logging handlers", func(t *testing.T) {
-		wGetDenied := doRequest(h, newRequest(http.MethodGet, "http://example.test/src-log?logging", "", nil))
+		wGetDenied := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/src-log?logging", "", nil),
+		)
 		requireStatus(t, wGetDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wGetDenied, "AccessDenied")
 
@@ -344,7 +358,12 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 		requireS3ErrorCode(t, wDeniedPolicy, "AccessDenied")
 
 		// Allowed by policy but backend rejects requester-pays target.
-		mustPutBucketPolicy(t, b, "dst-log", allowLoggingPolicy("src-log", "dst-log", "logs/", owner.ID))
+		mustPutBucketPolicy(
+			t,
+			b,
+			"dst-log",
+			allowLoggingPolicy("src-log", "dst-log", "logs/", owner.ID),
+		)
 		if err := b.PutBucketRequestPayment(
 			"dst-log",
 			&backend.RequestPaymentConfiguration{Payer: backend.RequestPayerRequester},
@@ -369,7 +388,12 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 		); err != nil {
 			t.Fatalf("PutBucketRequestPayment reset failed: %v", err)
 		}
-		mustPutBucketPolicy(t, b, "dst-log", allowLoggingPolicy("src-log", "dst-log", "logs/", owner.ID))
+		mustPutBucketPolicy(
+			t,
+			b,
+			"dst-log",
+			allowLoggingPolicy("src-log", "dst-log", "logs/", owner.ID),
+		)
 		wPutOK := doRequest(
 			h,
 			newRequest(
@@ -424,7 +448,8 @@ func TestBucketLoggingHelperFunctions(t *testing.T) {
 	if got := policyValueToStrings("x"); len(got) != 1 || got[0] != "x" {
 		t.Fatalf("policyValueToStrings(string) = %#v", got)
 	}
-	if got := policyValueToStrings([]any{"x", 1, "y"}); len(got) != 2 || got[0] != "x" || got[1] != "y" {
+	if got := policyValueToStrings([]any{"x", 1, "y"}); len(got) != 2 || got[0] != "x" ||
+		got[1] != "y" {
 		t.Fatalf("policyValueToStrings([]any) = %#v", got)
 	}
 	if got := policyValueToStrings(123); got != nil {
@@ -450,7 +475,9 @@ func TestBucketLoggingHelperFunctions(t *testing.T) {
 	if !principalHasLoggingService(map[string]any{"Service": "logging.s3.amazonaws.com"}) {
 		t.Fatal("service principal string should allow")
 	}
-	if !principalHasLoggingService(map[string]any{"Service": []any{"x", "logging.s3.amazonaws.com"}}) {
+	if !principalHasLoggingService(
+		map[string]any{"Service": []any{"x", "logging.s3.amazonaws.com"}},
+	) {
 		t.Fatal("service principal list should allow")
 	}
 	if principalHasLoggingService(map[string]any{"Service": "other"}) {
@@ -506,10 +533,12 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 	}
 
 	t.Run("source or target missing", func(t *testing.T) {
-		if ok, code := h.bucketLoggingTargetAllowed("missing", "dst-policy", "logs/"); ok || code != "NoSuchBucket" {
+		if ok, code := h.bucketLoggingTargetAllowed("missing", "dst-policy", "logs/"); ok ||
+			code != "NoSuchBucket" {
 			t.Fatalf("missing source result = (%v,%q), want (false,NoSuchBucket)", ok, code)
 		}
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "missing", "logs/"); ok || code != "NoSuchKey" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "missing", "logs/"); ok ||
+			code != "NoSuchKey" {
 			t.Fatalf("missing target result = (%v,%q), want (false,NoSuchKey)", ok, code)
 		}
 	})
@@ -518,24 +547,28 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 		if dst, ok := b.GetBucket("dst-policy"); ok {
 			dst.Policy = ""
 		}
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("empty policy result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
 		if dst, ok := b.GetBucket("dst-policy"); ok {
 			dst.Policy = "{bad json"
 		}
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("invalid json result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
 		mustPutBucketPolicy(t, b, "dst-policy", `{"Version":"2012-10-17"}`)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("missing statement result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
 		mustPutBucketPolicy(t, b, "dst-policy", `{"Statement":"invalid"}`)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("invalid statement type result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
@@ -545,7 +578,8 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 			"dst-policy",
 			`{"Statement":[{"Effect":"Deny","Principal":{"Service":"logging.s3.amazonaws.com"},"Action":"s3:PutObject","Resource":"*"}]}`,
 		)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("deny effect result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
@@ -555,7 +589,8 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 			"dst-policy",
 			`{"Statement":[{"Effect":"Allow","Principal":{"Service":"not-logging"},"Action":"s3:PutObject","Resource":"*"}]}`,
 		)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("wrong principal result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
@@ -565,7 +600,8 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 			"dst-policy",
 			`{"Statement":[{"Effect":"Allow","Principal":{"Service":"logging.s3.amazonaws.com"},"Action":"s3:GetObject","Resource":"*"}]}`,
 		)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("wrong action result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
@@ -575,7 +611,8 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 			"dst-policy",
 			`{"Statement":[{"Effect":"Allow","Principal":{"Service":"logging.s3.amazonaws.com"},"Action":"s3:PutObject","Resource":"arn:aws:s3:::another/*"}]}`,
 		)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("resource mismatch result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
@@ -589,7 +626,8 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 				owner.ID,
 			),
 		)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("arnlike mismatch result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
@@ -603,14 +641,21 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 				qualifiedBucketARN("src-policy", ""),
 			),
 		)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("account mismatch result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 	})
 
 	t.Run("success", func(t *testing.T) {
-		mustPutBucketPolicy(t, b, "dst-policy", allowLoggingPolicy("src-policy", "dst-policy", "logs/", owner.ID))
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); !ok || code != "" {
+		mustPutBucketPolicy(
+			t,
+			b,
+			"dst-policy",
+			allowLoggingPolicy("src-policy", "dst-policy", "logs/", owner.ID),
+		)
+		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); !ok ||
+			code != "" {
 			t.Fatalf("success result = (%v,%q), want (true,\"\")", ok, code)
 		}
 	})
@@ -692,7 +737,8 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		}
 		for _, tc := range cases {
 			req := newRequest(tc.method, tc.url, "", nil)
-			if tc.key != "" && tc.method == http.MethodPut && !strings.Contains(tc.url, "uploadId") {
+			if tc.key != "" && tc.method == http.MethodPut &&
+				!strings.Contains(tc.url, "uploadId") {
 				req.Header.Set("x-amz-copy-source", "/src/k")
 			}
 			_ = mapRequestToLoggingOperation(req, tc.key)

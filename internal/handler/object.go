@@ -837,7 +837,12 @@ func parseRangeHeader(rangeHeader string, size int64) (int64, int64, error) {
 // handleObject handles object-level operations.
 func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketName, key string) {
 	if containsUnreadableURIKeyRune(key) {
-		backend.WriteError(w, http.StatusBadRequest, "InvalidURI", "Couldn't parse the specified URI.")
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidURI",
+			"Couldn't parse the specified URI.",
+		)
 		return
 	}
 
@@ -2574,7 +2579,12 @@ func (h *Handler) handleGetObjectAttributes(
 	for _, attr := range strings.Split(attributesHeader, ",") {
 		trimmed := strings.TrimSpace(attr)
 		if trimmed == "" || !validAttr[trimmed] {
-			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid object attributes value.")
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Invalid object attributes value.",
+			)
 			return
 		}
 		requestedAttrs[trimmed] = true
@@ -2642,7 +2652,12 @@ func (h *Handler) handleGetObjectAttributes(
 		if maxPartsRaw != "" {
 			parsed, parseErr := strconv.Atoi(maxPartsRaw)
 			if parseErr != nil || parsed < 0 {
-				backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "max-parts must be a non-negative integer.")
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"max-parts must be a non-negative integer.",
+				)
 				return
 			}
 			maxParts = parsed
@@ -2739,7 +2754,10 @@ func (h *Handler) handleGetObjectAttributes(
 				partDataStart = 0
 				partDataEnd = 0
 			}
-			checksumItem := computePartChecksums(obj.Data[partDataStart:partDataEnd], obj.ChecksumAlgorithm)
+			checksumItem := computePartChecksums(
+				obj.Data[partDataStart:partDataEnd],
+				obj.ChecksumAlgorithm,
+			)
 			checksumItem.PartNumber = p.PartNumber
 			checksumItem.Size = p.Size
 			if p.ChecksumCRC32 != "" {
