@@ -178,6 +178,15 @@ func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 	if userName == "" {
 		userName = "user"
 	}
+	arn := "arn:aws:iam::" + accountID + ":user/" + userName
+	switch accessKey {
+	case "root-access-key":
+		accountID = "123456789012"
+		arn = "arn:aws:iam::" + accountID + ":root"
+	case "altroot-access-key":
+		accountID = "210987654321"
+		arn = "arn:aws:iam::" + accountID + ":root"
+	}
 	resp := iamGetUserResponse{
 		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
 		GetUserResult: iamGetUserResult{
@@ -185,7 +194,7 @@ func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 				Path:       "/",
 				UserName:   userName,
 				UserID:     accountID,
-				Arn:        "arn:aws:iam::" + accountID + ":user/" + userName,
+				Arn:        arn,
 				CreateDate: time.Now().UTC().Format(time.RFC3339),
 			},
 		},

@@ -53,6 +53,17 @@ func TestServiceIAMBranches(t *testing.T) {
 		}
 	})
 
+	t.Run("iam root action from query", func(t *testing.T) {
+		req := newRequest(http.MethodGet, "http://example.test/?Action=GetUser", "", map[string]string{
+			"Authorization": authHeader("root-access-key"),
+		})
+		w := doRequest(h, req)
+		requireStatus(t, w, http.StatusOK)
+		if !strings.Contains(w.Body.String(), "<Arn>arn:aws:iam::123456789012:root</Arn>") {
+			t.Fatalf("unexpected root arn in body: %s", w.Body.String())
+		}
+	})
+
 	t.Run("iam action from post form", func(t *testing.T) {
 		req := newRequest(
 			http.MethodPost,
