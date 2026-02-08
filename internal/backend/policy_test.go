@@ -428,3 +428,126 @@ func TestEvaluateBucketPolicyAccess(t *testing.T) {
 		})
 	}
 }
+
+func TestHasAllowStatementForRequest(t *testing.T) {
+	policy := mustPolicyJSON(t, map[string]any{
+		"Version": "2012-10-17",
+		"Statement": []any{
+			map[string]any{
+				"Effect":    "Allow",
+				"Principal": map[string]any{"AWS": "*"},
+				"Action":    "s3:GetObject",
+				"Resource":  "arn:aws:s3:::bucket/*",
+				"Condition": map[string]any{
+					"StringEquals": map[string]string{
+						"aws:Referer": "https://example.test",
+					},
+				},
+			},
+		},
+	})
+
+	tests := []struct {
+		name   string
+		policy string
+		ctx    PolicyEvalContext
+		want   bool
+	}{
+		{
+			name:   "empty policy",
+			policy: "",
+			ctx: PolicyEvalContext{
+				Action:   "s3:GetObject",
+				Resource: "arn:aws:s3:::bucket/object",
+			},
+			want: false,
+		},
+		{
+			name:   "malformed policy",
+			policy: "{",
+			ctx: PolicyEvalContext{
+				Action:   "s3:GetObject",
+				Resource: "arn:aws:s3:::bucket/object",
+			},
+			want: false,
+		},
+		{
+			name:   "allow statement matches ignoring conditions",
+			policy: policy,
+			ctx: PolicyEvalContext{
+				Action:    "s3:GetObject",
+				Resource:  "arn:aws:s3:::bucket/object",
+				AccessKey: "any",
+			},
+			want: true,
+		},
+		{
+			name:   "action mismatch",
+			policy: policy,
+			ctx: PolicyEvalContext{
+				Action:   "s3:PutObject",
+				Resource: "arn:aws:s3:::bucket/object",
+			},
+			want: false,
+		},
+		{
+			name:   "resource mismatch",
+			policy: policy,
+			ctx: PolicyEvalContext{
+				Action:   "s3:GetObject",
+				Resource: "arn:aws:s3:::other/object",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasAllowStatementForRequest(tt.policy, tt.ctx); got != tt.want {
+				t.Fatalf("HasAllowStatementForRequest() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConditionKeySupportedForAction(t *testing.T) {
+	tests := []struct {
+		name    string
+		condKey string
+		action  string
+		want    bool
+	}{
+		{
+			name:    "existing object tag unsupported for put object",
+			condKey: "s3:ExistingObjectTag/security",
+			action:  "s3:PutObject",
+			want:    false,
+		},
+		{
+			name:    "existing object tag unsupported for delete object",
+			condKey: "s3:ExistingObjectTag/security",
+			action:  "s3:DeleteObject",
+			want:    false,
+		},
+		{
+			name:    "existing object tag supported for put object tagging",
+			condKey: "s3:ExistingObjectTag/security",
+			action:  "s3:PutObjectTagging",
+			want:    true,
+		},
+		{
+			name:    "unrelated condition key remains supported",
+			condKey: "aws:Referer",
+			action:  "s3:GetObject",
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := conditionKeySupportedForAction(tt.condKey, tt.action); got != tt.want {
+				t.Fatalf("conditionKeySupportedForAction() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

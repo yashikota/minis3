@@ -201,8 +201,13 @@ var (
 	ErrAccessControlListNotSupported = errors.New(
 		"the bucket does not allow ACLs",
 	)
+	ErrInvalidBucketAclWithObjectOwnership = errors.New(
+		"bucket acl is incompatible with object ownership",
+	)
 	ErrPreconditionFailed = errors.New("precondition failed")
-	ErrBadDigest          = errors.New("the content-md5 you specified did not match what we received")
+	ErrBadDigest          = errors.New(
+		"the content-md5 you specified did not match what we received",
+	)
 )
 
 func New() *Backend {

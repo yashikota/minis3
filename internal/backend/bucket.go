@@ -414,6 +414,9 @@ func (b *Backend) PutBucketPolicy(bucketName, policy string) error {
 	if !isValidJSON(policy) {
 		return ErrMalformedPolicy
 	}
+	if !isSupportedBucketPolicy(policy) {
+		return ErrMalformedPolicy
+	}
 
 	bucket.Policy = policy
 	return nil
@@ -436,6 +439,40 @@ func (b *Backend) DeleteBucketPolicy(bucketName string) error {
 // isValidJSON checks if a string is valid JSON.
 func isValidJSON(s string) bool {
 	return json.Valid([]byte(s))
+}
+
+func isSupportedBucketPolicy(policy string) bool {
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(policy), &doc); err != nil {
+		return false
+	}
+	statementsRaw, ok := doc["Statement"]
+	if !ok {
+		return true
+	}
+	var statements []any
+	switch s := statementsRaw.(type) {
+	case []any:
+		statements = s
+	case map[string]any:
+		statements = []any{s}
+	default:
+		return true
+	}
+
+	for _, raw := range statements {
+		stmt, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		effect, _ := stmt["Effect"].(string)
+		if _, hasNotPrincipal := stmt["NotPrincipal"]; hasNotPrincipal &&
+			strings.EqualFold(effect, "Allow") {
+			return false
+		}
+	}
+
+	return true
 }
 
 // DefaultOwner returns the default owner for minis3.
@@ -791,8 +828,38 @@ func (b *Backend) PutBucketOwnershipControls(bucketName string, controls *Owners
 	default:
 		return ErrInvalidRequest
 	}
+	if strings.EqualFold(mode, ObjectOwnershipBucketOwnerEnforced) &&
+		!bucketACLCompatibleWithOwnerEnforced(bucket) {
+		return ErrInvalidBucketAclWithObjectOwnership
+	}
 	bucket.ObjectOwnership = mode
 	return nil
+}
+
+func bucketACLCompatibleWithOwnerEnforced(bucket *Bucket) bool {
+	if bucket == nil {
+		return true
+	}
+	acl := bucket.ACL
+	if acl == nil {
+		return true
+	}
+	owner := OwnerForAccessKey(bucket.OwnerAccessKey)
+	if owner == nil || owner.ID == "" {
+		owner = DefaultOwner()
+	}
+	for _, grant := range acl.AccessControlList.Grants {
+		if grant.Grantee == nil {
+			continue
+		}
+		if grant.Grantee.URI != "" {
+			return false
+		}
+		if grant.Grantee.ID != "" && grant.Grantee.ID != owner.ID {
+			return false
+		}
+	}
+	return true
 }
 
 // DeleteBucketOwnershipControls resets ownership controls to BucketOwnerEnforced.
@@ -956,7 +1023,10 @@ func (b *Backend) GetBucketRequestPayment(bucketName string) (*RequestPaymentCon
 }
 
 // PutBucketRequestPayment sets request payment configuration for a bucket.
-func (b *Backend) PutBucketRequestPayment(bucketName string, cfg *RequestPaymentConfiguration) error {
+func (b *Backend) PutBucketRequestPayment(
+	bucketName string,
+	cfg *RequestPaymentConfiguration,
+) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
