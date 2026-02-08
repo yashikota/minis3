@@ -79,7 +79,8 @@ func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
 			t.Fatalf("resolveLoggingTargetBucketName(empty) = %q, want empty", got)
 		}
 		mustPutBucketPolicy(t, b, "dst-h", `{"Statement":["not-map"]}`)
-		if ok, code := h.bucketLoggingTargetAllowed("src-h", "dst-h", "logs/"); ok || code != "AccessDenied" {
+		if ok, code := h.bucketLoggingTargetAllowed("src-h", "dst-h", "logs/"); ok ||
+			code != "AccessDenied" {
 			t.Fatalf("bucketLoggingTargetAllowed invalid statement elem = (%v,%q)", ok, code)
 		}
 
@@ -95,7 +96,11 @@ func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
 			}},
 		}
 		if code, _, ok := validateLifecycleConfiguration(cfg); ok || code != "InvalidArgument" {
-			t.Fatalf("validateLifecycleConfiguration negative newer versions = (%s,%v), want InvalidArgument,false", code, ok)
+			t.Fatalf(
+				"validateLifecycleConfiguration negative newer versions = (%s,%v), want InvalidArgument,false",
+				code,
+				ok,
+			)
 		}
 	})
 
@@ -225,6 +230,9 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 	})
 
 	t.Run("create multipart ownership and checksum header branches", func(t *testing.T) {
+		if err := b.PutBucketACL("mp-gap", backend.CannedACLToPolicy("private")); err != nil {
+			t.Fatalf("PutBucketACL mp-gap private failed: %v", err)
+		}
 		if err := b.PutBucketOwnershipControls("mp-gap", &backend.OwnershipControls{
 			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
 		}); err != nil {
@@ -269,9 +277,12 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 					"x-amz-object-lock-legal-hold": "ON",
 					"x-amz-storage-class":          "STANDARD_IA",
 					"x-amz-object-lock-mode":       backend.RetentionModeGovernance,
-					"x-amz-object-lock-retain-until-date": time.Now().UTC().Add(24 * time.Hour).Format(
-						time.RFC3339,
-					),
+					"x-amz-object-lock-retain-until-date": time.Now().
+						UTC().
+						Add(24 * time.Hour).
+						Format(
+							time.RFC3339,
+						),
 				},
 			),
 		)
@@ -380,7 +391,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-gap/checksum?uploadId=%s&partNumber=1", uploadID),
+				fmt.Sprintf(
+					"http://example.test/mp-gap/checksum?uploadId=%s&partNumber=1",
+					uploadID,
+				),
 				"part",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
@@ -414,7 +428,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-gap/checksum2?uploadId=%s&partNumber=1", uploadID2),
+				fmt.Sprintf(
+					"http://example.test/mp-gap/checksum2?uploadId=%s&partNumber=1",
+					uploadID2,
+				),
 				"part-2",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
@@ -470,7 +487,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				fmt.Sprintf("http://example.test/mp-gap/unknown-algo?uploadId=%s&partNumber=1", uploadID4),
+				fmt.Sprintf(
+					"http://example.test/mp-gap/unknown-algo?uploadId=%s&partNumber=1",
+					uploadID4,
+				),
 				"part-4",
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
@@ -531,7 +551,10 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		h, b := newTestHandler(t)
 		mustCreateBucket(t, b, "obj-gap")
 		mustPutObject(t, b, "obj-gap", "k", "v")
-		wTorrent := doRequest(h, newRequest(http.MethodGet, "http://example.test/obj-gap/k?torrent", "", nil))
+		wTorrent := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/obj-gap/k?torrent", "", nil),
+		)
 		requireStatus(t, wTorrent, http.StatusNotFound)
 		requireS3ErrorCode(t, wTorrent, "NoSuchKey")
 	})
@@ -542,6 +565,9 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		b.SetBucketOwner("obj-put", "minis3-access-key")
 		if err := b.PutBucketACL("obj-put", backend.CannedACLToPolicy("public-read-write")); err != nil {
 			t.Fatalf("PutBucketACL failed: %v", err)
+		}
+		if err := b.PutBucketACL("obj-put", backend.CannedACLToPolicy("private")); err != nil {
+			t.Fatalf("PutBucketACL obj-put private failed: %v", err)
 		}
 
 		if err := b.PutBucketOwnershipControls("obj-put", &backend.OwnershipControls{
@@ -615,6 +641,9 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		b.SetBucketOwner("dst-copy-gap", "minis3-access-key")
 		if err := b.PutBucketACL("dst-copy-gap", backend.CannedACLToPolicy("public-read-write")); err != nil {
 			t.Fatalf("PutBucketACL dst failed: %v", err)
+		}
+		if err := b.PutBucketACL("dst-copy-gap", backend.CannedACLToPolicy("private")); err != nil {
+			t.Fatalf("PutBucketACL dst private failed: %v", err)
 		}
 		if err := b.PutBucketOwnershipControls("dst-copy-gap", &backend.OwnershipControls{
 			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
@@ -713,11 +742,19 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		etagMismatchBody := `<Delete><Object><Key></Key></Object><Object><Key>precond</Key><ETag>"other"</ETag></Object></Delete>`
 		wDeleteObjects := doRequest(
 			h,
-			newRequest(http.MethodPost, "http://example.test/obj-attrs-gap?delete", etagMismatchBody, nil),
+			newRequest(
+				http.MethodPost,
+				"http://example.test/obj-attrs-gap?delete",
+				etagMismatchBody,
+				nil,
+			),
 		)
 		requireStatus(t, wDeleteObjects, http.StatusOK)
 		if !bytes.Contains(wDeleteObjects.Body.Bytes(), []byte("<Code>PreconditionFailed</Code>")) {
-			t.Fatalf("expected PreconditionFailed in DeleteObjects response: %s", wDeleteObjects.Body.String())
+			t.Fatalf(
+				"expected PreconditionFailed in DeleteObjects response: %s",
+				wDeleteObjects.Body.String(),
+			)
 		}
 
 		obj, err := b.GetObject("obj-attrs-gap", "k")
@@ -749,7 +786,10 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		)
 		requireStatus(t, wAttrsHeaderFallback, http.StatusOK)
 		if !bytes.Contains(wAttrsHeaderFallback.Body.Bytes(), []byte("<ObjectParts>")) {
-			t.Fatalf("expected ObjectParts in attributes response: %s", wAttrsHeaderFallback.Body.String())
+			t.Fatalf(
+				"expected ObjectParts in attributes response: %s",
+				wAttrsHeaderFallback.Body.String(),
+			)
 		}
 
 		wAttrsMarkerLoop := doRequest(
@@ -823,7 +863,12 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		if owner == nil {
 			t.Fatal("owner must not be nil")
 		}
-		mustPutBucketPolicy(t, b, "dst-h2", allowLoggingPolicy("src-h2", "dst-h2", "logs/", owner.ID))
+		mustPutBucketPolicy(
+			t,
+			b,
+			"dst-h2",
+			allowLoggingPolicy("src-h2", "dst-h2", "logs/", owner.ID),
+		)
 
 		origOwner := ownerForAccessKeyFn
 		origGetBucketForLogging := getBucketForLoggingFn
@@ -879,7 +924,12 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			}, nil
 		}
 		requestURIForLoggingFn = func(*http.Request) string { return "" }
-		reqEmit := newRequest(http.MethodGet, "http://example.test/src-h2/k?X-Amz-Signature=s", "", nil)
+		reqEmit := newRequest(
+			http.MethodGet,
+			"http://example.test/src-h2/k?X-Amz-Signature=s",
+			"",
+			nil,
+		)
 		reqEmit.RemoteAddr = ""
 		h.emitServerAccessLog(reqEmit, http.StatusOK, 1, "r", "h")
 		requestURIForLoggingFn = origRequestURI
@@ -890,7 +940,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 					TargetBucket: "dst-h2",
 					TargetPrefix: "logs/",
 					TargetObjectKeyFormat: &backend.TargetObjectKeyFormat{
-						PartitionedPrefix: &backend.PartitionedPrefix{PartitionDateSource: "DeliveryTime"},
+						PartitionedPrefix: &backend.PartitionedPrefix{
+							PartitionDateSource: "DeliveryTime",
+						},
 					},
 				},
 			}, nil
@@ -1411,6 +1463,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 
 		// Multipart remaining lines: BOE owner assignment and FULL_OBJECT checksum finalization.
 		mustPublicWriteBucket(t, b, "mp-left", "minis3-access-key")
+		if err := b.PutBucketACL("mp-left", backend.CannedACLToPolicy("private")); err != nil {
+			t.Fatalf("PutBucketACL mp-left private failed: %v", err)
+		}
 		if err := b.PutBucketOwnershipControls("mp-left", &backend.OwnershipControls{
 			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
 		}); err != nil {
@@ -1470,6 +1525,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		if err := b.PutBucketACL("obj-left", backend.CannedACLToPolicy("public-read-write")); err != nil {
 			t.Fatalf("PutBucketACL obj-left failed: %v", err)
 		}
+		if err := b.PutBucketACL("obj-left", backend.CannedACLToPolicy("private")); err != nil {
+			t.Fatalf("PutBucketACL obj-left private failed: %v", err)
+		}
 		if err := b.PutBucketOwnershipControls("obj-left", &backend.OwnershipControls{
 			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
 		}); err != nil {
@@ -1492,7 +1550,15 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			t.Fatalf("PutBucketOwnershipControls obj-left writer failed: %v", err)
 		}
 		ownerForAccessKeyFn = func(string) *backend.Owner { return nil }
-		wPutNilOwner := doRequest(h, newRequest(http.MethodPut, "http://example.test/obj-left/nil-owner", "v", nil))
+		wPutNilOwner := doRequest(
+			h,
+			newRequest(
+				http.MethodPut,
+				"http://example.test/obj-left/nil-owner",
+				"v",
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
+			),
+		)
 		requireStatus(t, wPutNilOwner, http.StatusOK)
 		ownerForAccessKeyFn = origOwner
 
@@ -1567,6 +1633,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		if err := b.PutBucketACL("dst-left", backend.CannedACLToPolicy("public-read-write")); err != nil {
 			t.Fatalf("PutBucketACL dst-left failed: %v", err)
 		}
+		if err := b.PutBucketACL("dst-left", backend.CannedACLToPolicy("private")); err != nil {
+			t.Fatalf("PutBucketACL dst-left private failed: %v", err)
+		}
 		if err := b.PutBucketOwnershipControls("dst-left", &backend.OwnershipControls{
 			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
 		}); err != nil {
@@ -1609,9 +1678,14 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 
 		wAttrsDenied := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/obj-left/part?attributes", "", map[string]string{
-				"x-amz-object-attributes": "ETag",
-			}),
+			newRequest(
+				http.MethodGet,
+				"http://example.test/obj-left/part?attributes",
+				"",
+				map[string]string{
+					"x-amz-object-attributes": "ETag",
+				},
+			),
 		)
 		requireStatus(t, wAttrsDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wAttrsDenied, "AccessDenied")
@@ -1648,7 +1722,10 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			),
 		)
 		requireStatus(t, wAttrsParts, http.StatusOK)
-		if !bytes.Contains(wAttrsParts.Body.Bytes(), []byte("<NextPartNumberMarker>1</NextPartNumberMarker>")) {
+		if !bytes.Contains(
+			wAttrsParts.Body.Bytes(),
+			[]byte("<NextPartNumberMarker>1</NextPartNumberMarker>"),
+		) {
 			t.Fatalf("expected NextPartNumberMarker in response: %s", wAttrsParts.Body.String())
 		}
 	})
@@ -1693,7 +1770,12 @@ func TestCoverageGapEmitRequestURIFallbackBranch(t *testing.T) {
 	if owner == nil {
 		t.Fatal("owner must not be nil")
 	}
-	mustPutBucketPolicy(t, b, "uri-gap-target", allowLoggingPolicy("uri-gap", "uri-gap-target", "logs/", owner.ID))
+	mustPutBucketPolicy(
+		t,
+		b,
+		"uri-gap-target",
+		allowLoggingPolicy("uri-gap", "uri-gap-target", "logs/", owner.ID),
+	)
 
 	origGetLogging := getBucketLoggingFn
 	origReqURI := requestURIForLoggingFn

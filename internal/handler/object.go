@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/yashikota/minis3/internal/backend"
 )
@@ -372,6 +373,9 @@ func validateSSEHeaders(r *http.Request) (string, string) {
 	// KMS key ID without aws:kms declaration
 	if sseKmsKeyId != "" && sse != "aws:kms" && sse != "aws:kms:dsse" {
 		return "InvalidArgument", "SSE-KMS key ID is not applicable without aws:kms encryption."
+	}
+	if (sse == "aws:kms" || sse == "aws:kms:dsse") && sseKmsKeyId == "" {
+		return "InvalidArgument", "SSE-KMS key ID must be specified."
 	}
 
 	// SSE-C header completeness: all or none
@@ -832,6 +836,16 @@ func parseRangeHeader(rangeHeader string, size int64) (int64, int64, error) {
 
 // handleObject handles object-level operations.
 func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketName, key string) {
+	if containsUnreadableURIKeyRune(key) {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidURI",
+			"Couldn't parse the specified URI.",
+		)
+		return
+	}
+
 	if r.URL.Query().Has("torrent") && r.Method == http.MethodGet {
 		backend.WriteError(
 			w,
@@ -968,9 +982,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
+		inlineTags := parseTaggingHeader(r.Header.Get("x-amz-tagging"))
+
 		// Evaluate access before reading body to avoid emitting 100-continue
 		// for unauthorized requests.
-		if !h.checkAccess(r, bucketName, "s3:PutObject", key) {
+		if !h.checkAccessWithContext(r, bucketName, "s3:PutObject", key, backend.PolicyEvalContext{
+			RequestObjectTags: inlineTags,
+		}) {
 			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -1032,7 +1050,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			}
 		}
 
-		inlineTags := parseTaggingHeader(r.Header.Get("x-amz-tagging"))
 		if errCode, errMsg := validateTags(inlineTags); errCode != "" {
 			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
 			return
@@ -1056,6 +1073,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
 			t, err := time.Parse(time.RFC3339, retainUntil)
 			if err == nil {
+				t = t.UTC().Truncate(time.Second)
 				opts.RetainUntilDate = &t
 			}
 		}
@@ -1242,8 +1260,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodGet:
+		versionId := r.URL.Query().Get("versionId")
+
 		// Check bucket policy for GetObject
-		if !h.checkAccess(r, bucketName, "s3:GetObject", key) {
+		if !h.checkAccessWithContext(r, bucketName, "s3:GetObject", key, backend.PolicyEvalContext{
+			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
+		}) {
 			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -1255,7 +1277,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
-		versionId := r.URL.Query().Get("versionId")
 		var obj *backend.Object
 		var err error
 
@@ -1533,8 +1554,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		w.WriteHeader(http.StatusNoContent)
 
 	case http.MethodHead:
+		versionId := r.URL.Query().Get("versionId")
+
 		// Check bucket policy for HeadObject
-		if !h.checkAccess(r, bucketName, "s3:GetObject", key) {
+		if !h.checkAccessWithContext(r, bucketName, "s3:GetObject", key, backend.PolicyEvalContext{
+			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
+		}) {
 			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			return
 		}
@@ -1546,7 +1571,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
-		versionId := r.URL.Query().Get("versionId")
 		var obj *backend.Object
 		var err error
 
@@ -1691,6 +1715,37 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			"The specified method is not allowed against this resource.",
 		)
 	}
+}
+
+func containsUnreadableURIKeyRune(key string) bool {
+	for _, r := range key {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) existingObjectTagsForPolicy(
+	bucketName, key, versionID string,
+) map[string]string {
+	var (
+		obj *backend.Object
+		err error
+	)
+	if versionID != "" {
+		obj, err = h.backend.GetObjectVersion(bucketName, key, versionID)
+	} else {
+		obj, err = h.backend.GetObject(bucketName, key)
+	}
+	if err != nil || obj == nil || obj.IsDeleteMarker || len(obj.Tags) == 0 {
+		return nil
+	}
+	tags := make(map[string]string, len(obj.Tags))
+	for k, v := range obj.Tags {
+		tags[k] = v
+	}
+	return tags
 }
 
 // handleDeleteObjects handles batch delete operations.
@@ -2140,12 +2195,14 @@ func (h *Handler) handleGetObjectACL(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetObjectAcl", key) {
+	versionId := r.URL.Query().Get("versionId")
+	if !h.checkAccessWithContext(r, bucketName, "s3:GetObjectAcl", key, backend.PolicyEvalContext{
+		ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
+	}) {
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
 
-	versionId := r.URL.Query().Get("versionId")
 	acl, err := getObjectACLFn(h, bucketName, key, versionId)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2244,9 +2301,26 @@ func (h *Handler) handlePutObjectACL(
 		)
 		return
 	}
-	if aclErr := normalizeAndValidateACL(&acl); aclErr != nil {
-		backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
-		return
+
+	skipACLValidation := false
+	if acl.Owner == nil && len(acl.AccessControlList.Grants) == 0 {
+		owner := requesterOwner(r)
+		if owner == nil {
+			owner = h.bucketOwner(bucketName)
+		}
+		defaultACL := backend.NewDefaultACLForOwner(owner)
+		if defaultACL != nil {
+			acl = *defaultACL
+			skipACLValidation = true
+		}
+	} else if acl.Owner == nil || acl.Owner.ID == "" {
+		acl.Owner = requesterOwner(r)
+	}
+	if !skipACLValidation {
+		if aclErr := normalizeAndValidateACL(&acl); aclErr != nil {
+			backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
+			return
+		}
 	}
 	if config != nil && config.BlockPublicAcls && isPublicACL(&acl) {
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
@@ -2302,12 +2376,20 @@ func (h *Handler) handleGetObjectTagging(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetObjectTagging", key) {
+	versionId := r.URL.Query().Get("versionId")
+	if !h.checkAccessWithContext(
+		r,
+		bucketName,
+		"s3:GetObjectTagging",
+		key,
+		backend.PolicyEvalContext{
+			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
+		},
+	) {
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
 
-	versionId := r.URL.Query().Get("versionId")
 	tags, actualVersionId, err := h.backend.GetObjectTagging(bucketName, key, versionId)
 	if err != nil {
 		h.writeObjectTaggingError(w, err)
@@ -2351,11 +2433,6 @@ func (h *Handler) handlePutObjectTagging(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutObjectTagging", key) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	versionId := r.URL.Query().Get("versionId")
 
 	defer func() { _ = r.Body.Close() }()
@@ -2391,6 +2468,20 @@ func (h *Handler) handlePutObjectTagging(
 	tags := make(map[string]string, len(tagging.TagSet))
 	for _, tag := range tagging.TagSet {
 		tags[tag.Key] = tag.Value
+	}
+
+	if !h.checkAccessWithContext(
+		r,
+		bucketName,
+		"s3:PutObjectTagging",
+		key,
+		backend.PolicyEvalContext{
+			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
+			RequestObjectTags:  tags,
+		},
+	) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
 	}
 
 	actualVersionId, err := h.backend.PutObjectTagging(bucketName, key, versionId, tags)
@@ -2488,7 +2579,12 @@ func (h *Handler) handleGetObjectAttributes(
 	for _, attr := range strings.Split(attributesHeader, ",") {
 		trimmed := strings.TrimSpace(attr)
 		if trimmed == "" || !validAttr[trimmed] {
-			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid object attributes value.")
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Invalid object attributes value.",
+			)
 			return
 		}
 		requestedAttrs[trimmed] = true
@@ -2556,7 +2652,12 @@ func (h *Handler) handleGetObjectAttributes(
 		if maxPartsRaw != "" {
 			parsed, parseErr := strconv.Atoi(maxPartsRaw)
 			if parseErr != nil || parsed < 0 {
-				backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "max-parts must be a non-negative integer.")
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"max-parts must be a non-negative integer.",
+				)
 				return
 			}
 			maxParts = parsed
@@ -2653,7 +2754,10 @@ func (h *Handler) handleGetObjectAttributes(
 				partDataStart = 0
 				partDataEnd = 0
 			}
-			checksumItem := computePartChecksums(obj.Data[partDataStart:partDataEnd], obj.ChecksumAlgorithm)
+			checksumItem := computePartChecksums(
+				obj.Data[partDataStart:partDataEnd],
+				obj.ChecksumAlgorithm,
+			)
 			checksumItem.PartNumber = p.PartNumber
 			checksumItem.Size = p.Size
 			if p.ChecksumCRC32 != "" {

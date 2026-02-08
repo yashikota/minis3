@@ -270,6 +270,9 @@ func TestUploadPartCopyAdditionalBranches(t *testing.T) {
 				map[string]string{
 					"Authorization":     authHeader("dst-owner"),
 					"x-amz-copy-source": "/src-copy-branch/src",
+					"x-amz-server-side-encryption-customer-algorithm": "AES256",
+					"x-amz-server-side-encryption-customer-key":       "c2VjcmV0",
+					"x-amz-server-side-encryption-customer-key-md5":   "Xr4ilOzQ4PCOq3aQ0qbuaQ==",
 				},
 			),
 		)
@@ -344,6 +347,9 @@ func TestUploadPartCopyAdditionalBranches(t *testing.T) {
 				map[string]string{
 					"Authorization":     authHeader("dst-owner"),
 					"x-amz-copy-source": "/src-copy-branch/src",
+					"x-amz-server-side-encryption-customer-algorithm": "AES256",
+					"x-amz-server-side-encryption-customer-key":       "c2VjcmV0",
+					"x-amz-server-side-encryption-customer-key-md5":   "Xr4ilOzQ4PCOq3aQ0qbuaQ==",
 				},
 			),
 		)
@@ -377,6 +383,15 @@ func TestUploadPartCopyAdditionalBranches(t *testing.T) {
 				"x-amz-server-side-encryption-customer-key-md5":   "Xr4ilOzQ4PCOq3aQ0qbuaQ==",
 			},
 		)
+		if upload, ok := b.GetUpload(uploadID); !ok ||
+			upload.SSECustomerKeyMD5 != "Xr4ilOzQ4PCOq3aQ0qbuaQ==" {
+			t.Fatalf(
+				"unexpected upload sse-c state: ok=%v algo=%q md5=%q",
+				ok,
+				upload.SSECustomerAlgorithm,
+				upload.SSECustomerKeyMD5,
+			)
+		}
 		w := doRequest(
 			h,
 			newRequest(
@@ -389,6 +404,9 @@ func TestUploadPartCopyAdditionalBranches(t *testing.T) {
 				map[string]string{
 					"Authorization":     authHeader("dst-owner"),
 					"x-amz-copy-source": "/src-copy-branch/src",
+					"x-amz-server-side-encryption-customer-algorithm": "AES256",
+					"x-amz-server-side-encryption-customer-key":       "c2VjcmV0",
+					"x-amz-server-side-encryption-customer-key-md5":   "Xr4ilOzQ4PCOq3aQ0qbuaQ==",
 				},
 			),
 		)

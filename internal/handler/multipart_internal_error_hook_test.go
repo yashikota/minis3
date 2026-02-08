@@ -274,6 +274,11 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("copy part unexpected backend error", func(t *testing.T) {
+		mustCreateBucket(t, b, "src-b")
+		mustPutObject(t, b, "src-b", "src-k", "v")
+		if err := b.PutObjectACL("src-b", "src-k", "", backend.CannedACLToPolicy("public-read")); err != nil {
+			t.Fatalf("PutObjectACL failed: %v", err)
+		}
 		copyPartFn = func(
 			*Handler,
 			string,
@@ -292,7 +297,10 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 			http.MethodPut,
 			"http://example.test/mp-hook/dst?uploadId=u&partNumber=1",
 			"",
-			map[string]string{"x-amz-copy-source": "/src-b/src-k"},
+			map[string]string{
+				"Authorization":     authHeader("minis3-access-key"),
+				"x-amz-copy-source": "/src-b/src-k",
+			},
 		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)

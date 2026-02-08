@@ -123,6 +123,36 @@ func EvaluateBucketPolicyAccess(policyJSON string, ctx PolicyEvalContext) Policy
 	return PolicyEffectDefault
 }
 
+// HasAllowStatementForRequest reports whether the policy has an Allow statement
+// that matches principal/action/resource for the request context, regardless of conditions.
+func HasAllowStatementForRequest(policyJSON string, ctx PolicyEvalContext) bool {
+	if policyJSON == "" {
+		return false
+	}
+
+	var policy BucketPolicy
+	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
+		return false
+	}
+
+	for _, stmt := range policy.Statement {
+		if stmt.Effect != "Allow" {
+			continue
+		}
+		if !matchesPrincipal(stmt.Principal, ctx) {
+			continue
+		}
+		if !matchesAction(stmt.Action, ctx.Action) {
+			continue
+		}
+		if !matchesResource(stmt.Resource, ctx.Resource) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func matchesPrincipal(principal any, ctx PolicyEvalContext) bool {
 	// Backward-compat: statements without Principal are treated as matching.
 	if principal == nil {
@@ -282,6 +312,10 @@ func evaluateConditions(conditions map[string]map[string]string, ctx PolicyEvalC
 }
 
 func evaluateCondition(operator, condKey, condValue string, ctx PolicyEvalContext) bool {
+	if !conditionKeySupportedForAction(condKey, ctx.Action) {
+		return false
+	}
+
 	// Handle IfExists suffix - if the key doesn't exist, the condition is satisfied
 	isIfExists := strings.HasSuffix(operator, "IfExists")
 	baseOperator := strings.TrimSuffix(operator, "IfExists")
@@ -310,6 +344,16 @@ func evaluateCondition(operator, condKey, condValue string, ctx PolicyEvalContex
 	default:
 		return false
 	}
+}
+
+func conditionKeySupportedForAction(condKey, action string) bool {
+	if strings.HasPrefix(condKey, "s3:ExistingObjectTag/") {
+		switch strings.ToLower(action) {
+		case "s3:putobject", "s3:deleteobject":
+			return false
+		}
+	}
+	return true
 }
 
 func matchWildcard(pattern, s string) bool {

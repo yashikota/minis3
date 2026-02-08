@@ -280,6 +280,14 @@ func TestValidateSSEHeaders(t *testing.T) {
 			t.Fatalf("expected valid headers, got code=%q msg=%q", code, msg)
 		}
 	})
+
+	t.Run("kms algorithm without key id", func(t *testing.T) {
+		r := req()
+		r.Header.Set("x-amz-server-side-encryption", "aws:kms")
+		if code, _ := validateSSEHeaders(r); code != "InvalidArgument" {
+			t.Fatalf("expected InvalidArgument, got %q", code)
+		}
+	})
 }
 
 func TestValidateSSECAccess(t *testing.T) {
@@ -372,7 +380,8 @@ func TestGetPartData(t *testing.T) {
 			{PartNumber: 2, Size: 4},
 		},
 	}
-	if data, size, _, ok := getPartData(multipartObj, 2); !ok || string(data) != "cdef" || size != 4 {
+	if data, size, _, ok := getPartData(multipartObj, 2); !ok || string(data) != "cdef" ||
+		size != 4 {
 		t.Fatalf("unexpected multipart part result: data=%q size=%d ok=%v", string(data), size, ok)
 	}
 

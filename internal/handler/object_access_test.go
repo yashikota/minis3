@@ -344,6 +344,51 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 	if denied {
 		t.Fatal("expected access to be denied with non-matching existing object tag")
 	}
+
+	ownerReq := httptest.NewRequest(http.MethodGet, "/policy-context-bucket/obj", nil)
+	ownerReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	ownerAllowed := h.checkAccessWithContext(
+		ownerReq,
+		"policy-context-bucket",
+		"s3:GetObject",
+		"obj",
+		backend.PolicyEvalContext{
+			ExistingObjectTags: map[string]string{"Project": "beta"},
+		},
+	)
+	if !ownerAllowed {
+		t.Fatal("expected bucket owner to remain allowed without explicit deny")
+	}
+}
+
+func TestCheckAccessWithContextStringLikeIfExistsRefererMismatch(t *testing.T) {
+	b := backend.New()
+	if err := b.CreateBucket("policy-referer-bucket"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("policy-referer-bucket", "minis3-access-key")
+	h := New(b)
+
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Principal":"*","Resource":"arn:aws:s3:::policy-referer-bucket/*","Condition":{"StringLikeIfExists":{"aws:Referer":"http://www.example.com/*"}}}]}`
+	if err := b.PutBucketPolicy("policy-referer-bucket", policy); err != nil {
+		t.Fatalf("PutBucketPolicy failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/policy-referer-bucket/obj", nil)
+	req.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
+	// Simulate lower-case header map keys as seen in some HTTP clients.
+	req.Header["referer"] = []string{"http://example.com"}
+
+	allowed := h.checkAccessWithContext(
+		req,
+		"policy-referer-bucket",
+		"s3:GetObject",
+		"obj",
+		backend.PolicyEvalContext{},
+	)
+	if allowed {
+		t.Fatal("expected referer mismatch to deny access for StringLikeIfExists policy")
+	}
 }
 
 func TestCheckAccessBucketACLCanonicalUserPermissions(t *testing.T) {
@@ -499,12 +544,14 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 	}
 	seen := make(map[string]bool, 5)
 	for _, grant := range acl.AccessControlList.Grants {
-		if grant.Grantee == nil ||
-			grant.Grantee.ID != alt.ID ||
-			grant.Grantee.DisplayName != alt.DisplayName {
-			t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
+		if grant.Grantee == nil {
+			t.Fatalf("unexpected nil grantee in grant")
 		}
-		seen[grant.Permission] = true
+		if grant.Grantee.ID == alt.ID && grant.Grantee.DisplayName == alt.DisplayName {
+			seen[grant.Permission] = true
+			continue
+		}
+		t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
 	}
 	for _, permission := range []string{
 		backend.PermissionRead,
@@ -562,11 +609,14 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 	}
 	seen := make(map[string]bool, 5)
 	for _, grant := range acl.AccessControlList.Grants {
-		if grant.Grantee == nil || grant.Grantee.ID != alt.ID ||
-			grant.Grantee.DisplayName != alt.DisplayName {
-			t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
+		if grant.Grantee == nil {
+			t.Fatalf("unexpected nil grantee in grant")
 		}
-		seen[grant.Permission] = true
+		if grant.Grantee.ID == alt.ID && grant.Grantee.DisplayName == alt.DisplayName {
+			seen[grant.Permission] = true
+			continue
+		}
+		t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
 	}
 	for _, permission := range []string{
 		backend.PermissionRead,

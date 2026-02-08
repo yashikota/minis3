@@ -796,7 +796,9 @@ func (b *Backend) DeleteObjects(
 				continue
 			}
 			if targetObj != nil &&
-				!targetObj.LastModified.UTC().Truncate(time.Second).Equal(t.UTC().Truncate(time.Second)) {
+				!targetObj.LastModified.UTC().
+					Truncate(time.Second).
+					Equal(t.UTC().Truncate(time.Second)) {
 				result.Error = ErrPreconditionFailed
 				results = append(results, result)
 				continue

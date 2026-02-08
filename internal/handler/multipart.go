@@ -171,6 +171,50 @@ func setUploadFinalChecksum(upload *backend.MultipartUpload, algorithm, value st
 	}
 }
 
+func validateMultipartSSECustomerHeaders(
+	upload *backend.MultipartUpload,
+	r *http.Request,
+) (string, string) {
+	if upload == nil || upload.SSECustomerAlgorithm == "" {
+		return "", ""
+	}
+
+	reqAlgo := r.Header.Get("x-amz-server-side-encryption-customer-algorithm")
+	reqKeyMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5")
+	if reqAlgo == "" || reqKeyMD5 == "" {
+		return "InvalidArgument",
+			"The SSE-C key provided does not match the key used to initiate the upload."
+	}
+	if !strings.EqualFold(reqAlgo, upload.SSECustomerAlgorithm) ||
+		reqKeyMD5 != upload.SSECustomerKeyMD5 {
+		return "InvalidArgument",
+			"The SSE-C key provided does not match the key used to initiate the upload."
+	}
+	return "", ""
+}
+
+func validateCopySourceSSECustomerHeaders(
+	source *backend.Object,
+	r *http.Request,
+) (string, string) {
+	if source == nil || source.SSECustomerAlgorithm == "" {
+		return "", ""
+	}
+
+	reqAlgo := r.Header.Get("x-amz-copy-source-server-side-encryption-customer-algorithm")
+	reqKeyMD5 := r.Header.Get("x-amz-copy-source-server-side-encryption-customer-key-md5")
+	if reqAlgo == "" || reqKeyMD5 == "" {
+		return "InvalidArgument",
+			"The SSE-C key provided for the copy source is invalid."
+	}
+	if !strings.EqualFold(reqAlgo, source.SSECustomerAlgorithm) ||
+		reqKeyMD5 != source.SSECustomerKeyMD5 {
+		return "InvalidArgument",
+			"The SSE-C key provided for the copy source is invalid."
+	}
+	return "", ""
+}
+
 func computeCompositeChecksum(algorithm string, partChecksums []string) (string, bool) {
 	algorithm = strings.ToUpper(algorithm)
 	if len(partChecksums) == 0 {
@@ -421,10 +465,8 @@ func (h *Handler) handleUploadPart(
 		return
 	}
 	if upload, ok := h.backend.GetUpload(uploadId); ok && upload.SSECustomerAlgorithm != "" {
-		reqKeyMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5")
-		if reqKeyMD5 == "" || reqKeyMD5 != upload.SSECustomerKeyMD5 {
-			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
-				"The SSE-C key provided does not match the key used to initiate the upload.")
+		if errCode, errMsg := validateMultipartSSECustomerHeaders(upload, r); errCode != "" {
+			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
 			return
 		}
 	}
@@ -496,6 +538,12 @@ func (h *Handler) handleCompleteMultipartUpload(
 	bucketName, key string,
 ) {
 	uploadId := r.URL.Query().Get("uploadId")
+	if upload, ok := h.backend.GetUpload(uploadId); ok && upload.SSECustomerAlgorithm != "" {
+		if errCode, errMsg := validateMultipartSSECustomerHeaders(upload, r); errCode != "" {
+			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+			return
+		}
+	}
 
 	body, err := readAllFn(r.Body)
 	if err != nil {
@@ -977,6 +1025,17 @@ func (h *Handler) handleUploadPartCopy(
 		return
 	}
 
+	if errCode, errMsg := validateSSEHeaders(r); errCode != "" {
+		backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+		return
+	}
+	if upload, ok := h.backend.GetUpload(uploadId); ok && upload.SSECustomerAlgorithm != "" {
+		if errCode, errMsg := validateMultipartSSECustomerHeaders(upload, r); errCode != "" {
+			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+			return
+		}
+	}
+
 	// Decode copy source
 	decodedCopySource, err := decodeAndParseCopySource(copySource)
 	if err != nil {
@@ -986,6 +1045,16 @@ func (h *Handler) handleUploadPartCopy(
 			"InvalidArgument",
 			"Invalid x-amz-copy-source header: "+err.Error(),
 		)
+		return
+	}
+
+	srcObj, errCode, errMsg, statusCode := h.loadCopySourceObjectForUploadPart(decodedCopySource)
+	if errCode != "" {
+		backend.WriteError(w, statusCode, errCode, errMsg)
+		return
+	}
+	if errCode, errMsg := validateCopySourceSSECustomerHeaders(srcObj, r); errCode != "" {
+		backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
 		return
 	}
 
@@ -1096,6 +1165,32 @@ type copySourceInfo struct {
 	bucket    string
 	key       string
 	versionId string
+}
+
+func (h *Handler) loadCopySourceObjectForUploadPart(
+	source *copySourceInfo,
+) (*backend.Object, string, string, int) {
+	if source == nil {
+		return nil, "NoSuchKey", "The specified source key does not exist.", http.StatusNotFound
+	}
+	if _, ok := h.backend.GetBucket(source.bucket); !ok {
+		return nil, "NoSuchBucket", "The specified source bucket does not exist.", http.StatusNotFound
+	}
+	if source.versionId != "" {
+		obj, err := h.backend.GetObjectVersion(source.bucket, source.key, source.versionId)
+		if err != nil {
+			if errors.Is(err, backend.ErrVersionNotFound) {
+				return nil, "NoSuchVersion", "The specified version does not exist.", http.StatusNotFound
+			}
+			return nil, "NoSuchKey", "The specified source key does not exist.", http.StatusNotFound
+		}
+		return obj, "", "", 0
+	}
+	obj, err := h.backend.GetObject(source.bucket, source.key)
+	if err != nil {
+		return nil, "NoSuchKey", "The specified source key does not exist.", http.StatusNotFound
+	}
+	return obj, "", "", 0
 }
 
 // decodeAndParseCopySource decodes and parses x-amz-copy-source header.

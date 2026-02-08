@@ -13,7 +13,11 @@ import (
 )
 
 func TestAuthV4ReadsNonNilBodyWhenPayloadHashMissing(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "http://example.test/bucket/key", strings.NewReader("abc"))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"http://example.test/bucket/key",
+		strings.NewReader("abc"),
+	)
 	req.Host = "example.test"
 	req.Header.Set("x-amz-date", "20260207T000000Z")
 	req.Header.Set(
@@ -40,9 +44,14 @@ func TestServiceIAMBranches(t *testing.T) {
 	mustCreateBucket(t, b, "svc-iam")
 
 	t.Run("iam action from query", func(t *testing.T) {
-		req := newRequest(http.MethodGet, "http://example.test/?Action=GetUser", "", map[string]string{
-			"Authorization": authHeader("iam-access-key"),
-		})
+		req := newRequest(
+			http.MethodGet,
+			"http://example.test/?Action=GetUser",
+			"",
+			map[string]string{
+				"Authorization": authHeader("iam-access-key"),
+			},
+		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusOK)
 		if got := w.Header().Get("Content-Type"); got != "text/xml" {
@@ -228,17 +237,28 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 			"",
 			map[string]string{"x-amz-if-match-last-modified-time": "invalid"},
 		)
-		if status, code, _ := evaluateDeletePreconditions(reqInvalidTime, obj); status != http.StatusBadRequest || code != "InvalidArgument" {
-			t.Fatalf("invalid last-modified result = (%d,%s), want (400,InvalidArgument)", status, code)
+		if status, code, _ := evaluateDeletePreconditions(reqInvalidTime, obj); status != http.StatusBadRequest ||
+			code != "InvalidArgument" {
+			t.Fatalf(
+				"invalid last-modified result = (%d,%s), want (400,InvalidArgument)",
+				status,
+				code,
+			)
 		}
 
 		reqTimeMismatch := newRequest(
 			http.MethodDelete,
 			"http://example.test/",
 			"",
-			map[string]string{"x-amz-if-match-last-modified-time": time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)},
+			map[string]string{
+				"x-amz-if-match-last-modified-time": time.Now().
+					UTC().
+					Add(-time.Hour).
+					Format(time.RFC3339),
+			},
 		)
-		if status, code, _ := evaluateDeletePreconditions(reqTimeMismatch, obj); status != http.StatusPreconditionFailed || code != "PreconditionFailed" {
+		if status, code, _ := evaluateDeletePreconditions(reqTimeMismatch, obj); status != http.StatusPreconditionFailed ||
+			code != "PreconditionFailed" {
 			t.Fatalf("time mismatch result = (%d,%s), want (412,PreconditionFailed)", status, code)
 		}
 
@@ -248,7 +268,8 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 			"",
 			map[string]string{"x-amz-if-match-size": "-1"},
 		)
-		if status, code, _ := evaluateDeletePreconditions(reqInvalidSize, obj); status != http.StatusBadRequest || code != "InvalidArgument" {
+		if status, code, _ := evaluateDeletePreconditions(reqInvalidSize, obj); status != http.StatusBadRequest ||
+			code != "InvalidArgument" {
 			t.Fatalf("invalid size result = (%d,%s), want (400,InvalidArgument)", status, code)
 		}
 
@@ -258,7 +279,8 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 			"",
 			map[string]string{"x-amz-if-match-size": "9"},
 		)
-		if status, code, _ := evaluateDeletePreconditions(reqSizeMismatch, obj); status != http.StatusPreconditionFailed || code != "PreconditionFailed" {
+		if status, code, _ := evaluateDeletePreconditions(reqSizeMismatch, obj); status != http.StatusPreconditionFailed ||
+			code != "PreconditionFailed" {
 			t.Fatalf("size mismatch result = (%d,%s), want (412,PreconditionFailed)", status, code)
 		}
 	})
@@ -297,7 +319,10 @@ func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
 	mustPutObject(t, b, "attr-bkt", "k", "hello")
 
 	t.Run("missing attributes header", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/attr-bkt/k?attributes", "", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/attr-bkt/k?attributes", "", nil),
+		)
 		requireStatus(t, w, http.StatusBadRequest)
 		requireS3ErrorCode(t, w, "InvalidArgument")
 	})
@@ -478,7 +503,9 @@ func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
 				http.MethodGet,
 				"http://example.test/attr-bkt/multipart?attributes&max-parts=1&part-number-marker=0",
 				"",
-				map[string]string{"x-amz-object-attributes": "ObjectParts,Checksum,StorageClass,ObjectSize,ETag"},
+				map[string]string{
+					"x-amz-object-attributes": "ObjectParts,Checksum,StorageClass,ObjectSize,ETag",
+				},
 			),
 		)
 		requireStatus(t, wAttr, http.StatusOK)

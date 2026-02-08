@@ -548,12 +548,17 @@ func TestNormalizeACLFillsKnownCanonicalDisplayName(t *testing.T) {
 	if len(got.AccessControlList.Grants) != 1 {
 		t.Fatalf("unexpected grants: %+v", got.AccessControlList.Grants)
 	}
-	if got.AccessControlList.Grants[0].Grantee == nil ||
-		got.AccessControlList.Grants[0].Grantee.DisplayName != altOwner.DisplayName {
-		t.Fatalf(
-			"grantee display name was not normalized: %+v",
-			got.AccessControlList.Grants[0].Grantee,
-		)
+	seenAlt := false
+	for _, grant := range got.AccessControlList.Grants {
+		if grant.Grantee == nil {
+			continue
+		}
+		if grant.Grantee.ID == altOwner.ID && grant.Grantee.DisplayName == altOwner.DisplayName {
+			seenAlt = true
+		}
+	}
+	if !seenAlt {
+		t.Fatalf("grantee display name was not normalized: %+v", got.AccessControlList.Grants)
 	}
 }
 
@@ -830,5 +835,181 @@ func TestGetObjectVersionLookup(t *testing.T) {
 		ErrVersionNotFound,
 	) {
 		t.Fatalf("expected ErrVersionNotFound, got %v", err)
+	}
+}
+
+func TestIsSupportedBucketPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy string
+		want   bool
+	}{
+		{
+			name:   "malformed json",
+			policy: "{",
+			want:   false,
+		},
+		{
+			name:   "no statement",
+			policy: `{"Version":"2012-10-17"}`,
+			want:   true,
+		},
+		{
+			name:   "statement unexpected type treated as supported",
+			policy: `{"Version":"2012-10-17","Statement":"oops"}`,
+			want:   true,
+		},
+		{
+			name:   "allow with notprincipal unsupported",
+			policy: `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","NotPrincipal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`,
+			want:   false,
+		},
+		{
+			name:   "deny with notprincipal supported",
+			policy: `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","NotPrincipal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`,
+			want:   true,
+		},
+		{
+			name:   "non-object statement items are ignored",
+			policy: `{"Version":"2012-10-17","Statement":[1,{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`,
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSupportedBucketPolicy(tt.policy); got != tt.want {
+				t.Fatalf("isSupportedBucketPolicy() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPutBucketPolicyRejectsAllowNotPrincipal(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("policy-notprincipal"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+
+	invalid := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","NotPrincipal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-notprincipal/*"}]}`
+	if err := b.PutBucketPolicy("policy-notprincipal", invalid); !errors.Is(
+		err,
+		ErrMalformedPolicy,
+	) {
+		t.Fatalf("expected ErrMalformedPolicy, got %v", err)
+	}
+
+	valid := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","NotPrincipal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-notprincipal/*"}]}`
+	if err := b.PutBucketPolicy("policy-notprincipal", valid); err != nil {
+		t.Fatalf("PutBucketPolicy deny-notprincipal failed: %v", err)
+	}
+}
+
+func TestPutBucketOwnershipControlsRejectsIncompatibleACL(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("ownership-acl"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("ownership-acl", "minis3-access-key")
+
+	owner := OwnerForAccessKey("minis3-access-key")
+	alt := OwnerForAccessKey("minis3-alt-access-key")
+	if owner == nil || alt == nil {
+		t.Fatal("expected known owners for access keys")
+	}
+
+	incompatibleACL := &AccessControlPolicy{
+		Owner: owner,
+		AccessControlList: AccessControlList{
+			Grants: []Grant{{
+				Grantee: &Grantee{
+					Type:        "CanonicalUser",
+					ID:          alt.ID,
+					DisplayName: alt.DisplayName,
+				},
+				Permission: PermissionRead,
+			}},
+		},
+	}
+	if err := b.PutBucketACL("ownership-acl", incompatibleACL); err != nil {
+		t.Fatalf("PutBucketACL failed: %v", err)
+	}
+
+	err := b.PutBucketOwnershipControls("ownership-acl", &OwnershipControls{
+		Rules: []OwnershipControlsRule{{
+			ObjectOwnership: ObjectOwnershipBucketOwnerEnforced,
+		}},
+	})
+	if !errors.Is(err, ErrInvalidBucketAclWithObjectOwnership) {
+		t.Fatalf("expected ErrInvalidBucketAclWithObjectOwnership, got %v", err)
+	}
+
+	if err := b.PutBucketACL("ownership-acl", NewDefaultACLForOwner(owner)); err != nil {
+		t.Fatalf("PutBucketACL owner-only failed: %v", err)
+	}
+	if err := b.PutBucketOwnershipControls("ownership-acl", &OwnershipControls{
+		Rules: []OwnershipControlsRule{{
+			ObjectOwnership: ObjectOwnershipBucketOwnerEnforced,
+		}},
+	}); err != nil {
+		t.Fatalf("PutBucketOwnershipControls should succeed for owner-only ACL: %v", err)
+	}
+}
+
+func TestBucketACLCompatibleWithOwnerEnforced(t *testing.T) {
+	if !bucketACLCompatibleWithOwnerEnforced(nil) {
+		t.Fatal("nil bucket should be compatible")
+	}
+	if !bucketACLCompatibleWithOwnerEnforced(&Bucket{}) {
+		t.Fatal("bucket without ACL should be compatible")
+	}
+
+	owner := OwnerForAccessKey("minis3-access-key")
+	alt := OwnerForAccessKey("minis3-alt-access-key")
+	if owner == nil || alt == nil {
+		t.Fatal("expected known owners for access keys")
+	}
+
+	bucket := &Bucket{
+		OwnerAccessKey: "minis3-access-key",
+		ACL: &AccessControlPolicy{
+			Owner: owner,
+			AccessControlList: AccessControlList{
+				Grants: []Grant{{
+					Grantee: &Grantee{
+						Type: "Group",
+						URI:  AllUsersURI,
+					},
+					Permission: PermissionRead,
+				}},
+			},
+		},
+	}
+	if bucketACLCompatibleWithOwnerEnforced(bucket) {
+		t.Fatal("group grantee should be incompatible with bucket-owner-enforced")
+	}
+
+	bucket.ACL.AccessControlList.Grants = []Grant{{
+		Grantee: &Grantee{
+			Type:        "CanonicalUser",
+			ID:          owner.ID,
+			DisplayName: owner.DisplayName,
+		},
+		Permission: PermissionFullControl,
+	}}
+	if !bucketACLCompatibleWithOwnerEnforced(bucket) {
+		t.Fatal("owner-only canonical grants should be compatible")
+	}
+
+	bucket.ACL.AccessControlList.Grants = []Grant{{
+		Grantee: &Grantee{
+			Type:        "CanonicalUser",
+			ID:          alt.ID,
+			DisplayName: alt.DisplayName,
+		},
+		Permission: PermissionRead,
+	}}
+	if bucketACLCompatibleWithOwnerEnforced(bucket) {
+		t.Fatal("non-owner canonical grantee should be incompatible")
 	}
 }
