@@ -133,20 +133,24 @@ func TestPutObjectBranches(t *testing.T) {
 	if err != nil || obj.ChecksumCRC32C == "" {
 		t.Fatalf("expected computed CRC32C checksum, err=%v obj=%+v", err, obj)
 	}
+	checksumCRC32C, _ := ComputeChecksumBase64("CRC32C", []byte("hello"))
+	checksumSHA1, _ := ComputeChecksumBase64("SHA1", []byte("hello"))
+	checksumSHA256, _ := ComputeChecksumBase64("SHA256", []byte("hello"))
+	checksumCRC32, _ := ComputeChecksumBase64("CRC32", []byte("hello"))
 	obj, err = b.PutObject("put-branches", "k3b", []byte("hello"), PutObjectOptions{
 		ChecksumAlgorithm: "CRC32C",
-		ChecksumCRC32C:    "provided-crc32c",
+		ChecksumCRC32C:    checksumCRC32C,
 	})
-	if err != nil || obj.ChecksumCRC32C != "provided-crc32c" {
+	if err != nil || obj.ChecksumCRC32C != checksumCRC32C {
 		t.Fatalf("expected provided CRC32C checksum, err=%v obj=%+v", err, obj)
 	}
 	obj, err = b.PutObject(
 		"put-branches",
 		"k4",
 		[]byte("hello"),
-		PutObjectOptions{ChecksumAlgorithm: "SHA1", ChecksumSHA1: "provided-sha1"},
+		PutObjectOptions{ChecksumAlgorithm: "SHA1", ChecksumSHA1: checksumSHA1},
 	)
-	if err != nil || obj.ChecksumSHA1 != "provided-sha1" {
+	if err != nil || obj.ChecksumSHA1 != checksumSHA1 {
 		t.Fatalf("expected provided SHA1 checksum, err=%v obj=%+v", err, obj)
 	}
 	obj, err = b.PutObject(
@@ -169,18 +173,18 @@ func TestPutObjectBranches(t *testing.T) {
 	}
 	obj, err = b.PutObject("put-branches", "k5b", []byte("hello"), PutObjectOptions{
 		ChecksumAlgorithm: "SHA256",
-		ChecksumSHA256:    "provided-sha256",
+		ChecksumSHA256:    checksumSHA256,
 	})
-	if err != nil || obj.ChecksumSHA256 != "provided-sha256" {
+	if err != nil || obj.ChecksumSHA256 != checksumSHA256 {
 		t.Fatalf("expected provided SHA256 checksum, err=%v obj=%+v", err, obj)
 	}
 	obj, err = b.PutObject(
 		"put-branches",
 		"k6",
 		[]byte("hello"),
-		PutObjectOptions{ChecksumAlgorithm: "CRC32", ChecksumCRC32: "provided-crc32"},
+		PutObjectOptions{ChecksumAlgorithm: "CRC32", ChecksumCRC32: checksumCRC32},
 	)
-	if err != nil || obj.ChecksumCRC32 != "provided-crc32" {
+	if err != nil || obj.ChecksumCRC32 != checksumCRC32 {
 		t.Fatalf("expected provided CRC32 checksum, err=%v obj=%+v", err, obj)
 	}
 	obj, err = b.PutObject(

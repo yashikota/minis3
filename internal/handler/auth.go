@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -131,7 +133,18 @@ func verifyAuthorizationHeaderV4(r *http.Request, auth, secretKey string) error 
 
 	payloadHash := r.Header.Get("x-amz-content-sha256")
 	if payloadHash == "" {
-		payloadHash = "UNSIGNED-PAYLOAD"
+		body := []byte{}
+		if r.Body != nil {
+			var err error
+			body, err = io.ReadAll(r.Body)
+			if err != nil {
+				return &presignedError{code: "AccessDenied", message: "Access Denied"}
+			}
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		sum := sha256.Sum256(body)
+		payloadHash = hex.EncodeToString(sum[:])
 	}
 
 	canonicalRequest := strings.Join([]string{

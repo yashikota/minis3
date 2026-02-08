@@ -60,8 +60,11 @@ type DeleteRequest struct {
 }
 
 type ObjectIdentifier struct {
-	Key       string `xml:"Key"`
-	VersionId string `xml:"VersionId,omitempty"`
+	Key              string `xml:"Key"`
+	VersionId        string `xml:"VersionId,omitempty"`
+	ETag             string `xml:"ETag,omitempty"`
+	LastModifiedTime string `xml:"LastModifiedTime,omitempty"`
+	Size             *int64 `xml:"Size,omitempty"`
 }
 
 type DeleteResult struct {
@@ -175,6 +178,51 @@ type ListObjectsV1Result struct {
 type CreateBucketConfiguration struct {
 	XMLName            xml.Name `xml:"CreateBucketConfiguration"`
 	LocationConstraint string   `xml:"LocationConstraint"`
+	ObjectOwnership    string   `xml:"ObjectOwnership,omitempty"`
+}
+
+// OwnershipControls configures object ownership behavior for a bucket.
+type OwnershipControls struct {
+	XMLName xml.Name                `xml:"OwnershipControls"`
+	Xmlns   string                  `xml:"xmlns,attr,omitempty"`
+	Rules   []OwnershipControlsRule `xml:"Rule"`
+}
+
+// OwnershipControlsRule is a rule under OwnershipControls.
+type OwnershipControlsRule struct {
+	ObjectOwnership string `xml:"ObjectOwnership"`
+}
+
+// BucketLoggingStatus is the XML request/response for bucket logging.
+type BucketLoggingStatus struct {
+	XMLName        xml.Name        `xml:"BucketLoggingStatus"`
+	Xmlns          string          `xml:"xmlns,attr,omitempty"`
+	LoggingEnabled *LoggingEnabled `xml:"LoggingEnabled,omitempty"`
+}
+
+// LoggingEnabled configures server access logging destination.
+type LoggingEnabled struct {
+	TargetBucket          string                 `xml:"TargetBucket"`
+	TargetPrefix          string                 `xml:"TargetPrefix"`
+	TargetGrants          *TargetGrants          `xml:"TargetGrants,omitempty"`
+	TargetObjectKeyFormat *TargetObjectKeyFormat `xml:"TargetObjectKeyFormat,omitempty"`
+}
+
+// TargetGrants groups optional grants under TargetGrants.
+type TargetGrants struct {
+	Grants []Grant `xml:"Grant,omitempty"`
+}
+
+// TargetObjectKeyFormat controls the log object key format.
+type TargetObjectKeyFormat struct {
+	SimplePrefix      *SimplePrefix      `xml:"SimplePrefix,omitempty"`
+	PartitionedPrefix *PartitionedPrefix `xml:"PartitionedPrefix,omitempty"`
+}
+
+type SimplePrefix struct{}
+
+type PartitionedPrefix struct {
+	PartitionDateSource string `xml:"PartitionDateSource,omitempty"`
 }
 
 // ListVersionsResult is the XML response for ListObjectVersions.
@@ -226,6 +274,18 @@ type VersioningConfiguration struct {
 	Status    string   `xml:"Status,omitempty"`
 	MFADelete string   `xml:"MfaDelete,omitempty"`
 }
+
+// RequestPaymentConfiguration is the XML body for bucket request payment APIs.
+type RequestPaymentConfiguration struct {
+	XMLName xml.Name `xml:"RequestPaymentConfiguration"`
+	Xmlns   string   `xml:"xmlns,attr,omitempty"`
+	Payer   string   `xml:"Payer"`
+}
+
+const (
+	RequestPayerBucketOwner = "BucketOwner"
+	RequestPayerRequester   = "Requester"
+)
 
 // ListObjectVersionsResult is the internal result for ListObjectVersions.
 type ListObjectVersionsResult struct {
@@ -341,24 +401,38 @@ type MultipartUpload struct {
 	SSEKMSKeyId          string
 	SSECustomerAlgorithm string
 	SSECustomerKeyMD5    string
+	ChecksumAlgorithm    string
+	ChecksumType         string
+	ChecksumCRC32        string
+	ChecksumCRC32C       string
+	ChecksumCRC64NVME    string
+	ChecksumSHA1         string
+	ChecksumSHA256       string
 }
 
 // PartInfo represents an uploaded part.
 type PartInfo struct {
-	PartNumber   int
-	ETag         string
-	Size         int64
-	Data         []byte
-	LastModified string // RFC3339 formatted time
+	PartNumber        int
+	ETag              string
+	Size              int64
+	Data              []byte
+	LastModified      string // RFC3339 formatted time
+	ChecksumCRC32     string
+	ChecksumCRC32C    string
+	ChecksumCRC64NVME string
+	ChecksumSHA1      string
+	ChecksumSHA256    string
 }
 
 // InitiateMultipartUploadResult is the XML response for CreateMultipartUpload.
 type InitiateMultipartUploadResult struct {
-	XMLName  xml.Name `xml:"InitiateMultipartUploadResult"`
-	Xmlns    string   `xml:"xmlns,attr,omitempty"`
-	Bucket   string   `xml:"Bucket"`
-	Key      string   `xml:"Key"`
-	UploadId string   `xml:"UploadId"`
+	XMLName           xml.Name `xml:"InitiateMultipartUploadResult"`
+	Xmlns             string   `xml:"xmlns,attr,omitempty"`
+	Bucket            string   `xml:"Bucket"`
+	Key               string   `xml:"Key"`
+	UploadId          string   `xml:"UploadId"`
+	ChecksumAlgorithm string   `xml:"ChecksumAlgorithm,omitempty"`
+	ChecksumType      string   `xml:"ChecksumType,omitempty"`
 }
 
 // CompleteMultipartUploadRequest is the XML request for CompleteMultipartUpload.
@@ -369,18 +443,29 @@ type CompleteMultipartUploadRequest struct {
 
 // CompletePart represents a part in CompleteMultipartUpload request.
 type CompletePart struct {
-	PartNumber int    `xml:"PartNumber"`
-	ETag       string `xml:"ETag"`
+	PartNumber        int    `xml:"PartNumber"`
+	ETag              string `xml:"ETag"`
+	ChecksumCRC32     string `xml:"ChecksumCRC32,omitempty"`
+	ChecksumCRC32C    string `xml:"ChecksumCRC32C,omitempty"`
+	ChecksumCRC64NVME string `xml:"ChecksumCRC64NVME,omitempty"`
+	ChecksumSHA1      string `xml:"ChecksumSHA1,omitempty"`
+	ChecksumSHA256    string `xml:"ChecksumSHA256,omitempty"`
 }
 
 // CompleteMultipartUploadResult is the XML response for CompleteMultipartUpload.
 type CompleteMultipartUploadResult struct {
-	XMLName  xml.Name `xml:"CompleteMultipartUploadResult"`
-	Xmlns    string   `xml:"xmlns,attr,omitempty"`
-	Location string   `xml:"Location"`
-	Bucket   string   `xml:"Bucket"`
-	Key      string   `xml:"Key"`
-	ETag     string   `xml:"ETag"`
+	XMLName           xml.Name `xml:"CompleteMultipartUploadResult"`
+	Xmlns             string   `xml:"xmlns,attr,omitempty"`
+	Location          string   `xml:"Location"`
+	Bucket            string   `xml:"Bucket"`
+	Key               string   `xml:"Key"`
+	ETag              string   `xml:"ETag"`
+	ChecksumCRC32     string   `xml:"ChecksumCRC32,omitempty"`
+	ChecksumCRC32C    string   `xml:"ChecksumCRC32C,omitempty"`
+	ChecksumCRC64NVME string   `xml:"ChecksumCRC64NVME,omitempty"`
+	ChecksumSHA1      string   `xml:"ChecksumSHA1,omitempty"`
+	ChecksumSHA256    string   `xml:"ChecksumSHA256,omitempty"`
+	ChecksumType      string   `xml:"ChecksumType,omitempty"`
 }
 
 // ListMultipartUploadsResult is the XML response for ListMultipartUploads.
@@ -430,10 +515,15 @@ type ListPartsResult struct {
 
 // PartItem represents a part in ListParts response.
 type PartItem struct {
-	PartNumber   int    `xml:"PartNumber"`
-	LastModified string `xml:"LastModified"`
-	ETag         string `xml:"ETag"`
-	Size         int64  `xml:"Size"`
+	PartNumber        int    `xml:"PartNumber"`
+	LastModified      string `xml:"LastModified"`
+	ETag              string `xml:"ETag"`
+	Size              int64  `xml:"Size"`
+	ChecksumCRC32     string `xml:"ChecksumCRC32,omitempty"`
+	ChecksumCRC32C    string `xml:"ChecksumCRC32C,omitempty"`
+	ChecksumCRC64NVME string `xml:"ChecksumCRC64NVME,omitempty"`
+	ChecksumSHA1      string `xml:"ChecksumSHA1,omitempty"`
+	ChecksumSHA256    string `xml:"ChecksumSHA256,omitempty"`
 }
 
 // ObjectLockConfiguration represents the bucket's Object Lock configuration.
@@ -505,16 +595,42 @@ type GetObjectAttributesResponse struct {
 
 // GetObjectAttributesChecksum contains checksum information.
 type GetObjectAttributesChecksum struct {
-	ChecksumCRC32  string `xml:"ChecksumCRC32,omitempty"`
-	ChecksumCRC32C string `xml:"ChecksumCRC32C,omitempty"`
-	ChecksumSHA1   string `xml:"ChecksumSHA1,omitempty"`
-	ChecksumSHA256 string `xml:"ChecksumSHA256,omitempty"`
+	ChecksumType      string `xml:"ChecksumType,omitempty"`
+	ChecksumCRC32     string `xml:"ChecksumCRC32,omitempty"`
+	ChecksumCRC32C    string `xml:"ChecksumCRC32C,omitempty"`
+	ChecksumCRC64NVME string `xml:"ChecksumCRC64NVME,omitempty"`
+	ChecksumSHA1      string `xml:"ChecksumSHA1,omitempty"`
+	ChecksumSHA256    string `xml:"ChecksumSHA256,omitempty"`
 }
 
 // GetObjectAttributesObjectParts contains multipart upload information.
 type GetObjectAttributesObjectParts struct {
-	TotalPartsCount int `xml:"TotalPartsCount,omitempty"`
+	IsTruncated          bool                          `xml:"IsTruncated"`
+	MaxParts             int                           `xml:"MaxParts"`
+	NextPartNumberMarker int                           `xml:"NextPartNumberMarker,omitempty"`
+	PartNumberMarker     int                           `xml:"PartNumberMarker"`
+	PartsCount           int                           `xml:"PartsCount,omitempty"`
+	TotalPartsCount      int                           `xml:"TotalPartsCount,omitempty"`
+	Parts                []GetObjectAttributesPartItem `xml:"Part,omitempty"`
 }
+
+// GetObjectAttributesPartItem represents a part in GetObjectAttributes response.
+type GetObjectAttributesPartItem struct {
+	PartNumber        int    `xml:"PartNumber"`
+	Size              int64  `xml:"Size"`
+	ChecksumCRC32     string `xml:"ChecksumCRC32,omitempty"`
+	ChecksumCRC32C    string `xml:"ChecksumCRC32C,omitempty"`
+	ChecksumCRC64NVME string `xml:"ChecksumCRC64NVME,omitempty"`
+	ChecksumSHA1      string `xml:"ChecksumSHA1,omitempty"`
+	ChecksumSHA256    string `xml:"ChecksumSHA256,omitempty"`
+}
+
+// Object ownership mode constants.
+const (
+	ObjectOwnershipBucketOwnerEnforced  = "BucketOwnerEnforced"
+	ObjectOwnershipBucketOwnerPreferred = "BucketOwnerPreferred"
+	ObjectOwnershipObjectWriter         = "ObjectWriter"
+)
 
 // LifecycleConfiguration represents bucket lifecycle rules.
 type LifecycleConfiguration struct {

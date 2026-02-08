@@ -24,8 +24,19 @@ var (
 
 // ValidateBucketName validates a bucket name according to S3 naming rules.
 func ValidateBucketName(name string) error {
+	validationName := name
+	if idx := strings.Index(name, ":"); idx >= 0 {
+		if idx == len(name)-1 {
+			return fmt.Errorf(
+				"%w: bucket name must be between 3 and 63 characters long",
+				ErrInvalidBucketName,
+			)
+		}
+		validationName = name[idx+1:]
+	}
+
 	// Length: 3-63 characters
-	if len(name) < 3 || len(name) > 63 {
+	if len(validationName) < 3 || len(validationName) > 63 {
 		return fmt.Errorf(
 			"%w: bucket name must be between 3 and 63 characters long",
 			ErrInvalidBucketName,
@@ -33,7 +44,7 @@ func ValidateBucketName(name string) error {
 	}
 
 	// Must match pattern (lowercase, numbers, hyphens, periods)
-	if !bucketNameRegex.MatchString(name) {
+	if !bucketNameRegex.MatchString(validationName) {
 		return fmt.Errorf(
 			"%w: bucket name can only contain lowercase letters, numbers, hyphens, and periods",
 			ErrInvalidBucketName,
@@ -41,7 +52,7 @@ func ValidateBucketName(name string) error {
 	}
 
 	// Must not contain consecutive periods
-	if strings.Contains(name, "..") {
+	if strings.Contains(validationName, "..") {
 		return fmt.Errorf(
 			"%w: bucket name must not contain consecutive periods",
 			ErrInvalidBucketName,
@@ -49,7 +60,7 @@ func ValidateBucketName(name string) error {
 	}
 
 	// Must not contain period adjacent to hyphen
-	if strings.Contains(name, ".-") || strings.Contains(name, "-.") {
+	if strings.Contains(validationName, ".-") || strings.Contains(validationName, "-.") {
 		return fmt.Errorf(
 			"%w: bucket name must not contain period adjacent to hyphen",
 			ErrInvalidBucketName,
@@ -57,7 +68,7 @@ func ValidateBucketName(name string) error {
 	}
 
 	// Must not be formatted as IP address
-	if ipAddressRegex.MatchString(name) {
+	if ipAddressRegex.MatchString(validationName) {
 		return fmt.Errorf(
 			"%w: bucket name must not be formatted as an IP address",
 			ErrInvalidBucketName,
@@ -66,7 +77,7 @@ func ValidateBucketName(name string) error {
 
 	// Check prohibited prefixes
 	for _, prefix := range prohibitedPrefixes {
-		if strings.HasPrefix(name, prefix) {
+		if strings.HasPrefix(validationName, prefix) {
 			return fmt.Errorf(
 				"%w: bucket name must not start with prohibited prefix '%s'",
 				ErrInvalidBucketName,
@@ -77,7 +88,7 @@ func ValidateBucketName(name string) error {
 
 	// Check prohibited suffixes
 	for _, suffix := range prohibitedSuffixes {
-		if strings.HasSuffix(name, suffix) {
+		if strings.HasSuffix(validationName, suffix) {
 			return fmt.Errorf(
 				"%w: bucket name must not end with prohibited suffix '%s'",
 				ErrInvalidBucketName,
@@ -110,6 +121,10 @@ func (b *Backend) CreateBucket(name string) error {
 		VersioningStatus: VersioningUnset,
 		MFADelete:        MFADeleteDisabled,
 		Objects:          make(map[string]*ObjectVersions),
+		// Keep ownership controls unset by default. ACLs remain enabled unless
+		// ObjectOwnership is explicitly configured to BucketOwnerEnforced.
+		ObjectOwnership:     "",
+		RequestPaymentPayer: RequestPayerBucketOwner,
 	}
 	return nil
 }
@@ -121,6 +136,11 @@ func (b *Backend) SetBucketOwner(name, ownerAccessKey string) {
 
 	if bucket, ok := b.buckets[name]; ok {
 		bucket.OwnerAccessKey = ownerAccessKey
+		if bucket.ACL == nil {
+			bucket.ACL = NewDefaultACLForOwner(OwnerForAccessKey(ownerAccessKey))
+		} else {
+			bucket.ACL.Owner = OwnerForAccessKey(ownerAccessKey)
+		}
 	}
 }
 
@@ -600,7 +620,7 @@ func (b *Backend) GetBucketACL(bucketName string) (*AccessControlPolicy, error) 
 	}
 
 	if bucket.ACL == nil {
-		return NewDefaultACL(), nil
+		return NewDefaultACLForOwner(OwnerForAccessKey(bucket.OwnerAccessKey)), nil
 	}
 
 	return bucket.ACL, nil
@@ -614,6 +634,9 @@ func (b *Backend) PutBucketACL(bucketName string, acl *AccessControlPolicy) erro
 	bucket, exists := b.buckets[bucketName]
 	if !exists {
 		return ErrBucketNotFound
+	}
+	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
+		return ErrAccessControlListNotSupported
 	}
 
 	bucket.ACL = normalizeACL(acl)
@@ -657,9 +680,15 @@ func (b *Backend) GetObjectACL(bucketName, key, versionId string) (*AccessContro
 	if obj.IsDeleteMarker {
 		return nil, ErrObjectNotFound
 	}
+	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
+		return NewDefaultACLForOwner(OwnerForAccessKey(bucket.OwnerAccessKey)), nil
+	}
 
 	if obj.ACL == nil {
-		return NewDefaultACL(), nil
+		if obj.Owner != nil {
+			return NewDefaultACLForOwner(obj.Owner), nil
+		}
+		return NewDefaultACLForOwner(OwnerForAccessKey(bucket.OwnerAccessKey)), nil
 	}
 
 	return obj.ACL, nil
@@ -675,6 +704,9 @@ func (b *Backend) PutObjectACL(bucketName, key, versionId string, acl *AccessCon
 	bucket, exists := b.buckets[bucketName]
 	if !exists {
 		return ErrBucketNotFound
+	}
+	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
+		return ErrAccessControlListNotSupported
 	}
 
 	versions, exists := bucket.Objects[key]
@@ -705,6 +737,243 @@ func (b *Backend) PutObjectACL(bucketName, key, versionId string, acl *AccessCon
 
 	obj.ACL = normalizeACL(acl)
 	return nil
+}
+
+// IsBucketACLEnabled reports whether ACLs are enabled for the bucket.
+func (b *Backend) IsBucketACLEnabled(bucketName string) (bool, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return false, ErrBucketNotFound
+	}
+	return !strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced), nil
+}
+
+// GetBucketOwnershipControls gets ownership controls for a bucket.
+func (b *Backend) GetBucketOwnershipControls(bucketName string) (*OwnershipControls, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+	if bucket.ObjectOwnership == "" {
+		return nil, ErrOwnershipControlsNotFound
+	}
+	return &OwnershipControls{
+		Xmlns: S3Xmlns,
+		Rules: []OwnershipControlsRule{
+			{ObjectOwnership: bucket.ObjectOwnership},
+		},
+	}, nil
+}
+
+// PutBucketOwnershipControls sets ownership controls for a bucket.
+func (b *Backend) PutBucketOwnershipControls(bucketName string, controls *OwnershipControls) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+	if controls == nil || len(controls.Rules) == 0 {
+		return ErrInvalidRequest
+	}
+	mode := controls.Rules[0].ObjectOwnership
+	switch mode {
+	case ObjectOwnershipBucketOwnerEnforced,
+		ObjectOwnershipBucketOwnerPreferred,
+		ObjectOwnershipObjectWriter:
+	default:
+		return ErrInvalidRequest
+	}
+	bucket.ObjectOwnership = mode
+	return nil
+}
+
+// DeleteBucketOwnershipControls resets ownership controls to BucketOwnerEnforced.
+func (b *Backend) DeleteBucketOwnershipControls(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+	bucket.ObjectOwnership = ""
+	return nil
+}
+
+// GetBucketLogging gets bucket logging configuration.
+func (b *Backend) GetBucketLogging(bucketName string) (*BucketLoggingStatus, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+	if bucket.LoggingConfiguration == nil {
+		return &BucketLoggingStatus{Xmlns: S3Xmlns}, nil
+	}
+	resp := *bucket.LoggingConfiguration
+	if resp.LoggingEnabled != nil && resp.LoggingEnabled.TargetObjectKeyFormat == nil {
+		resp.LoggingEnabled.TargetObjectKeyFormat = &TargetObjectKeyFormat{
+			SimplePrefix: &SimplePrefix{},
+		}
+	}
+	resp.Xmlns = S3Xmlns
+	return &resp, nil
+}
+
+// PutBucketLogging sets bucket logging configuration.
+func (b *Backend) PutBucketLogging(bucketName string, status *BucketLoggingStatus) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+	if status == nil || status.LoggingEnabled == nil {
+		bucket.LoggingConfiguration = nil
+		bucket.LoggingConfigModifiedAt = time.Now().UTC()
+		bucket.LoggingObjectKey = ""
+		return nil
+	}
+	target, ok := b.buckets[status.LoggingEnabled.TargetBucket]
+	if !ok {
+		return ErrObjectNotFound
+	}
+	if target.Name == bucket.Name {
+		return ErrInvalidRequest
+	}
+	if target.LoggingConfiguration != nil {
+		return ErrInvalidRequest
+	}
+	if target.EncryptionConfiguration != nil {
+		return ErrInvalidRequest
+	}
+	if target.RequestPaymentPayer == RequestPayerRequester {
+		return ErrInvalidRequest
+	}
+	next := &BucketLoggingStatus{
+		LoggingEnabled: &LoggingEnabled{
+			TargetBucket: status.LoggingEnabled.TargetBucket,
+			TargetPrefix: status.LoggingEnabled.TargetPrefix,
+			// TargetGrants are accepted in requests but not persisted.
+			TargetObjectKeyFormat: status.LoggingEnabled.TargetObjectKeyFormat,
+		},
+	}
+	if next.LoggingEnabled.TargetObjectKeyFormat == nil {
+		next.LoggingEnabled.TargetObjectKeyFormat = &TargetObjectKeyFormat{
+			SimplePrefix: &SimplePrefix{},
+		}
+	}
+	changed := !bucketLoggingConfigEqual(bucket.LoggingConfiguration, next)
+	bucket.LoggingConfiguration = next
+	if changed || bucket.LoggingConfigModifiedAt.IsZero() {
+		bucket.LoggingConfigModifiedAt = time.Now().UTC()
+		bucket.LoggingObjectKey = ""
+	}
+	return nil
+}
+
+// DeleteBucketLogging disables bucket logging.
+func (b *Backend) DeleteBucketLogging(bucketName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+	bucket.LoggingConfiguration = nil
+	bucket.LoggingConfigModifiedAt = time.Now().UTC()
+	bucket.LoggingObjectKey = ""
+	return nil
+}
+
+func bucketLoggingConfigEqual(a, b *BucketLoggingStatus) bool {
+	if a == nil || a.LoggingEnabled == nil {
+		return b == nil || b.LoggingEnabled == nil
+	}
+	if b == nil || b.LoggingEnabled == nil {
+		return false
+	}
+	ae := a.LoggingEnabled
+	be := b.LoggingEnabled
+	if ae.TargetBucket != be.TargetBucket || ae.TargetPrefix != be.TargetPrefix {
+		return false
+	}
+	return bucketLogKeyFormatEqual(ae.TargetObjectKeyFormat, be.TargetObjectKeyFormat)
+}
+
+func bucketLogKeyFormatEqual(a, b *TargetObjectKeyFormat) bool {
+	if a == nil {
+		a = &TargetObjectKeyFormat{SimplePrefix: &SimplePrefix{}}
+	}
+	if b == nil {
+		b = &TargetObjectKeyFormat{SimplePrefix: &SimplePrefix{}}
+	}
+	aSimple := a.SimplePrefix != nil
+	bSimple := b.SimplePrefix != nil
+	if aSimple != bSimple {
+		return false
+	}
+	aPartitioned := a.PartitionedPrefix
+	bPartitioned := b.PartitionedPrefix
+	if (aPartitioned == nil) != (bPartitioned == nil) {
+		return false
+	}
+	if aPartitioned == nil {
+		return true
+	}
+	return aPartitioned.PartitionDateSource == bPartitioned.PartitionDateSource
+}
+
+// GetBucketRequestPayment gets the request payment configuration for a bucket.
+func (b *Backend) GetBucketRequestPayment(bucketName string) (*RequestPaymentConfiguration, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+	payer := bucket.RequestPaymentPayer
+	if payer == "" {
+		payer = RequestPayerBucketOwner
+	}
+	return &RequestPaymentConfiguration{
+		Xmlns: S3Xmlns,
+		Payer: payer,
+	}, nil
+}
+
+// PutBucketRequestPayment sets request payment configuration for a bucket.
+func (b *Backend) PutBucketRequestPayment(bucketName string, cfg *RequestPaymentConfiguration) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	bucket, exists := b.buckets[bucketName]
+	if !exists {
+		return ErrBucketNotFound
+	}
+	if cfg == nil {
+		return ErrInvalidRequest
+	}
+	switch cfg.Payer {
+	case RequestPayerBucketOwner, RequestPayerRequester:
+		bucket.RequestPaymentPayer = cfg.Payer
+		return nil
+	default:
+		return ErrInvalidRequest
+	}
 }
 
 // IsACLPublicRead checks if the ACL grants public read access.

@@ -336,12 +336,14 @@ func (b *Backend) CreateBucketWithObjectLock(name string) error {
 	}
 
 	b.buckets[name] = &Bucket{
-		Name:              name,
-		CreationDate:      time.Now().UTC(),
-		VersioningStatus:  VersioningEnabled, // Object Lock requires versioning
-		MFADelete:         MFADeleteDisabled,
-		Objects:           make(map[string]*ObjectVersions),
-		ObjectLockEnabled: true,
+		Name:                name,
+		CreationDate:        time.Now().UTC(),
+		VersioningStatus:    VersioningEnabled, // Object Lock requires versioning
+		MFADelete:           MFADeleteDisabled,
+		Objects:             make(map[string]*ObjectVersions),
+		ObjectOwnership:     "",
+		RequestPaymentPayer: RequestPayerBucketOwner,
+		ObjectLockEnabled:   true,
 	}
 	return nil
 }

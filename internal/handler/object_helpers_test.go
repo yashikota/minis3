@@ -353,7 +353,7 @@ func TestInferChecksumAlgorithmFromTrailer(t *testing.T) {
 
 func TestGetPartData(t *testing.T) {
 	obj := &backend.Object{Data: []byte("hello"), Size: 5}
-	if data, size, ok := getPartData(obj, 1); !ok || string(data) != "hello" || size != 5 {
+	if data, size, _, ok := getPartData(obj, 1); !ok || string(data) != "hello" || size != 5 {
 		t.Fatalf(
 			"unexpected non-multipart part 1 result: data=%q size=%d ok=%v",
 			string(data),
@@ -361,7 +361,7 @@ func TestGetPartData(t *testing.T) {
 			ok,
 		)
 	}
-	if _, _, ok := getPartData(obj, 2); ok {
+	if _, _, _, ok := getPartData(obj, 2); ok {
 		t.Fatal("expected part 2 to be missing for non-multipart object")
 	}
 
@@ -372,7 +372,7 @@ func TestGetPartData(t *testing.T) {
 			{PartNumber: 2, Size: 4},
 		},
 	}
-	if data, size, ok := getPartData(multipartObj, 2); !ok || string(data) != "cdef" || size != 4 {
+	if data, size, _, ok := getPartData(multipartObj, 2); !ok || string(data) != "cdef" || size != 4 {
 		t.Fatalf("unexpected multipart part result: data=%q size=%d ok=%v", string(data), size, ok)
 	}
 
@@ -383,7 +383,7 @@ func TestGetPartData(t *testing.T) {
 			{PartNumber: 2, Size: 5},
 		},
 	}
-	if data, size, ok := getPartData(clampedObj, 2); !ok || string(data) != "c" || size != 5 {
+	if data, size, _, ok := getPartData(clampedObj, 2); !ok || string(data) != "c" || size != 5 {
 		t.Fatalf(
 			"unexpected clamped multipart part result: data=%q size=%d ok=%v",
 			string(data),

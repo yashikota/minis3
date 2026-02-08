@@ -7,10 +7,15 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash/crc32"
+	"hash/crc64"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
 )
+
+// Inverted NVME polynomial value used by Go's crc64 implementation.
+const crc64NVME = 0x9a6c9329ac4bc9b5
 
 // isObjectLocked checks whether an object is locked and cannot be deleted.
 func isObjectLocked(obj *Object, bypassGovernance bool) bool {
@@ -81,6 +86,62 @@ func addVersionToObject(bucket *Bucket, key string, obj *Object) {
 		}
 		// Prepend new null version
 		versions.Versions = append([]*Object{obj}, newVersions...)
+	}
+}
+
+func checksumCRC64NVMEBase64(data []byte) string {
+	table := crc64.MakeTable(crc64NVME)
+	sum := crc64.Checksum(data, table)
+	buf := []byte{
+		byte(sum >> 56), byte(sum >> 48), byte(sum >> 40), byte(sum >> 32),
+		byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum),
+	}
+	return base64.StdEncoding.EncodeToString(buf)
+}
+
+func checksumForAlgorithm(algorithm string, data []byte) (string, bool) {
+	switch strings.ToUpper(strings.TrimSpace(algorithm)) {
+	case "CRC32":
+		h := crc32.NewIEEE()
+		_, _ = h.Write(data)
+		return base64.StdEncoding.EncodeToString(h.Sum(nil)), true
+	case "CRC32C":
+		h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+		_, _ = h.Write(data)
+		return base64.StdEncoding.EncodeToString(h.Sum(nil)), true
+	case "CRC64NVME":
+		return checksumCRC64NVMEBase64(data), true
+	case "SHA1":
+		sum := sha1.Sum(data)
+		return base64.StdEncoding.EncodeToString(sum[:]), true
+	case "SHA256":
+		sum := sha256.Sum256(data)
+		return base64.StdEncoding.EncodeToString(sum[:]), true
+	default:
+		return "", false
+	}
+}
+
+// ComputeChecksumBase64 computes a base64 checksum value for a supported algorithm.
+// It returns false when the algorithm is unsupported.
+func ComputeChecksumBase64(algorithm string, data []byte) (string, bool) {
+	return checksumForAlgorithm(algorithm, data)
+}
+
+func providedChecksumForPut(algorithm string, opts PutObjectOptions) string {
+	switch strings.ToUpper(strings.TrimSpace(algorithm)) {
+	case "CRC32":
+		return opts.ChecksumCRC32
+	case "CRC32C":
+		return opts.ChecksumCRC32C
+	case "CRC64NVME":
+		return opts.ChecksumCRC64NVME
+	case "SHA1":
+		return opts.ChecksumSHA1
+	case "SHA256":
+		return opts.ChecksumSHA256
+	default:
+		return ""
 	}
 }
 
@@ -216,6 +277,19 @@ func (b *Backend) PutObject(
 	if storageClass == "" {
 		storageClass = "STANDARD"
 	}
+	owner := opts.Owner
+	if owner == nil {
+		owner = OwnerForAccessKey(bucket.OwnerAccessKey)
+	}
+	if owner == nil {
+		owner = DefaultOwner()
+	}
+	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
+		owner = OwnerForAccessKey(bucket.OwnerAccessKey)
+		if owner == nil {
+			owner = DefaultOwner()
+		}
+	}
 
 	obj := &Object{
 		Key:                     key,
@@ -227,8 +301,10 @@ func (b *Backend) PutObject(
 		Size:                    int64(len(data)),
 		ContentType:             contentType,
 		Data:                    data,
-		ChecksumAlgorithm:       opts.ChecksumAlgorithm,
+		ChecksumAlgorithm:       strings.ToUpper(strings.TrimSpace(opts.ChecksumAlgorithm)),
 		Metadata:                opts.Metadata,
+		Owner:                   owner,
+		ACL:                     NewDefaultACLForOwner(owner),
 		CacheControl:            opts.CacheControl,
 		Expires:                 opts.Expires,
 		ContentEncoding:         opts.ContentEncoding,
@@ -243,38 +319,28 @@ func (b *Backend) PutObject(
 		WebsiteRedirectLocation: opts.WebsiteRedirectLocation,
 	}
 
-	// Compute or store additional checksums based on ChecksumAlgorithm
-	switch strings.ToUpper(opts.ChecksumAlgorithm) {
-	case "CRC32C":
-		if opts.ChecksumCRC32C != "" {
-			obj.ChecksumCRC32C = opts.ChecksumCRC32C
-		} else {
-			crc32cTable := crc32.MakeTable(crc32.Castagnoli)
-			crc32cHash := crc32.New(crc32cTable)
-			_, _ = crc32cHash.Write(data)
-			obj.ChecksumCRC32C = base64.StdEncoding.EncodeToString(crc32cHash.Sum(nil))
+	// Compute checksum and validate client-provided value if present.
+	algorithm := obj.ChecksumAlgorithm
+	if computed, ok := checksumForAlgorithm(algorithm, data); ok {
+		provided := providedChecksumForPut(algorithm, opts)
+		if provided != "" && provided != computed {
+			return nil, ErrBadDigest
 		}
-	case "SHA1":
-		if opts.ChecksumSHA1 != "" {
-			obj.ChecksumSHA1 = opts.ChecksumSHA1
-		} else {
-			sha1Hash := sha1.Sum(data)
-			obj.ChecksumSHA1 = base64.StdEncoding.EncodeToString(sha1Hash[:])
+		value := computed
+		if provided != "" {
+			value = provided
 		}
-	case "SHA256":
-		if opts.ChecksumSHA256 != "" {
-			obj.ChecksumSHA256 = opts.ChecksumSHA256
-		} else {
-			sha256Hash := sha256.Sum256(data)
-			obj.ChecksumSHA256 = base64.StdEncoding.EncodeToString(sha256Hash[:])
-		}
-	case "CRC32":
-		if opts.ChecksumCRC32 != "" {
-			obj.ChecksumCRC32 = opts.ChecksumCRC32
-		} else {
-			crc32Hash := crc32.NewIEEE()
-			_, _ = crc32Hash.Write(data)
-			obj.ChecksumCRC32 = base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil))
+		switch algorithm {
+		case "CRC32":
+			obj.ChecksumCRC32 = value
+		case "CRC32C":
+			obj.ChecksumCRC32C = value
+		case "CRC64NVME":
+			obj.ChecksumCRC64NVME = value
+		case "SHA1":
+			obj.ChecksumSHA1 = value
+		case "SHA256":
+			obj.ChecksumSHA256 = value
 		}
 	}
 
@@ -520,20 +586,34 @@ func (b *Backend) CopyObject(
 		Data:              copiedData,
 		ChecksumCRC32:     srcObj.ChecksumCRC32,
 		ChecksumCRC32C:    srcObj.ChecksumCRC32C,
+		ChecksumCRC64NVME: srcObj.ChecksumCRC64NVME,
 		ChecksumSHA1:      srcObj.ChecksumSHA1,
 		ChecksumSHA256:    srcObj.ChecksumSHA256,
 		ChecksumAlgorithm: srcObj.ChecksumAlgorithm,
+		Owner:             srcObj.Owner,
+		ACL:               srcObj.ACL,
 	}
 
 	// Override ChecksumAlgorithm if specified in opts and recompute
 	if opts.ChecksumAlgorithm != "" {
 		obj.ChecksumAlgorithm = opts.ChecksumAlgorithm
+		obj.ChecksumCRC32 = ""
+		obj.ChecksumCRC32C = ""
+		obj.ChecksumCRC64NVME = ""
+		obj.ChecksumSHA1 = ""
+		obj.ChecksumSHA256 = ""
 		switch strings.ToUpper(opts.ChecksumAlgorithm) {
+		case "CRC32":
+			crc32Hash := crc32.NewIEEE()
+			_, _ = crc32Hash.Write(copiedData)
+			obj.ChecksumCRC32 = base64.StdEncoding.EncodeToString(crc32Hash.Sum(nil))
 		case "CRC32C":
 			crc32cTable := crc32.MakeTable(crc32.Castagnoli)
 			crc32cHash := crc32.New(crc32cTable)
 			_, _ = crc32cHash.Write(copiedData)
 			obj.ChecksumCRC32C = base64.StdEncoding.EncodeToString(crc32cHash.Sum(nil))
+		case "CRC64NVME":
+			obj.ChecksumCRC64NVME = checksumCRC64NVMEBase64(copiedData)
 		case "SHA1":
 			sha1Hash := sha1.Sum(copiedData)
 			obj.ChecksumSHA1 = base64.StdEncoding.EncodeToString(sha1Hash[:])
@@ -649,6 +729,10 @@ func (b *Backend) CopyObject(
 			}
 		}
 	}
+	if strings.EqualFold(dstBkt.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
+		obj.Owner = OwnerForAccessKey(dstBkt.OwnerAccessKey)
+		obj.ACL = NewDefaultACLForOwner(obj.Owner)
+	}
 
 	addVersionToObject(dstBkt, dstKey, obj)
 
@@ -680,10 +764,54 @@ func (b *Backend) DeleteObjects(
 			Key:       obj.Key,
 			VersionId: obj.VersionId,
 		}
+		versions, exists := bucket.Objects[obj.Key]
+		var targetObj *Object
+		if exists && len(versions.Versions) > 0 {
+			if obj.VersionId == "" {
+				targetObj = versions.Versions[0]
+			} else {
+				for _, v := range versions.Versions {
+					if v.VersionId == obj.VersionId {
+						targetObj = v
+						break
+					}
+				}
+			}
+		}
+		if obj.ETag != "" {
+			if targetObj != nil {
+				if strings.TrimSpace(obj.ETag) != "*" &&
+					(targetObj.IsDeleteMarker || !matchesDeleteETag(obj.ETag, targetObj.ETag)) {
+					result.Error = ErrPreconditionFailed
+					results = append(results, result)
+					continue
+				}
+			}
+		}
+		if obj.LastModifiedTime != "" {
+			t, err := parseDeletePreconditionTime(obj.LastModifiedTime)
+			if err != nil {
+				result.Error = ErrPreconditionFailed
+				results = append(results, result)
+				continue
+			}
+			if targetObj != nil &&
+				!targetObj.LastModified.UTC().Truncate(time.Second).Equal(t.UTC().Truncate(time.Second)) {
+				result.Error = ErrPreconditionFailed
+				results = append(results, result)
+				continue
+			}
+		}
+		if obj.Size != nil {
+			if targetObj != nil && targetObj.Size != *obj.Size {
+				result.Error = ErrPreconditionFailed
+				results = append(results, result)
+				continue
+			}
+		}
 
 		if obj.VersionId != "" {
 			// Delete specific version
-			versions, exists := bucket.Objects[obj.Key]
 			if !exists {
 				// S3 returns success even if key doesn't exist when VersionId is specified
 				results = append(results, result)
@@ -744,6 +872,39 @@ func (b *Backend) DeleteObjects(
 	}
 
 	return results, nil
+}
+
+func matchesDeleteETag(conditionETag, objectETag string) bool {
+	if conditionETag == "*" {
+		return true
+	}
+	normalizedObjectETag := objectETag
+	if !strings.HasPrefix(normalizedObjectETag, "\"") {
+		normalizedObjectETag = "\"" + normalizedObjectETag + "\""
+	}
+	for _, candidate := range strings.Split(conditionETag, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		normalizedCandidate := candidate
+		if !strings.HasPrefix(normalizedCandidate, "\"") {
+			normalizedCandidate = "\"" + normalizedCandidate + "\""
+		}
+		if normalizedCandidate == normalizedObjectETag || candidate == objectETag {
+			return true
+		}
+	}
+	return false
+}
+
+func parseDeletePreconditionTime(value string) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, http.TimeFormat} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid timestamp")
 }
 
 // ListObjectsV1 lists objects with support for prefix, delimiter, marker, and max-keys.

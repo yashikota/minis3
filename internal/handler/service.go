@@ -3,7 +3,9 @@ package handler
 import (
 	"encoding/xml"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
@@ -11,6 +13,11 @@ import (
 
 // handleService handles service-level operations (ListBuckets).
 func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
+	if action := iamAction(r); action != "" {
+		h.handleIAMAction(w, r, action)
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		backend.WriteError(
 			w,
@@ -44,7 +51,42 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 		opts.MaxBuckets = maxBuckets
 	}
 
-	result := h.backend.ListBucketsWithOptions(opts)
+	accessKey := extractAccessKey(r)
+	type bucketView struct {
+		name   string
+		bucket *backend.Bucket
+	}
+	allBuckets := h.backend.ListBuckets()
+	views := make([]bucketView, 0, len(allBuckets))
+	for _, b := range allBuckets {
+		if accessKey != "" && b.OwnerAccessKey != accessKey {
+			continue
+		}
+		displayName := displayBucketName(b.Name)
+		if opts.Prefix != "" && !strings.HasPrefix(displayName, opts.Prefix) {
+			continue
+		}
+		views = append(views, bucketView{name: displayName, bucket: b})
+	}
+	sort.Slice(views, func(i, j int) bool {
+		return views[i].name < views[j].name
+	})
+	startIdx := 0
+	if opts.ContinuationToken != "" {
+		startIdx = sort.Search(len(views), func(i int) bool {
+			return views[i].name > opts.ContinuationToken
+		})
+	}
+	maxBuckets := opts.MaxBuckets
+	if maxBuckets <= 0 {
+		maxBuckets = 1000
+	}
+	endIdx := startIdx + maxBuckets
+	if endIdx > len(views) {
+		endIdx = len(views)
+	}
+	isTruncated := endIdx < len(views)
+
 	resp := backend.ListAllMyBucketsResult{
 		Owner:  &backend.Owner{ID: "minis3", DisplayName: "minis3"},
 		Prefix: opts.Prefix,
@@ -59,18 +101,99 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for _, b := range result.Buckets {
+	for _, view := range views[startIdx:endIdx] {
 		resp.Buckets = append(resp.Buckets, backend.BucketInfo{
-			Name:         b.Name,
-			CreationDate: b.CreationDate.Format(time.RFC3339),
+			Name:         view.name,
+			CreationDate: view.bucket.CreationDate.Format(time.RFC3339),
 		})
 	}
 
-	if result.IsTruncated {
-		resp.ContinuationToken = result.ContinuationToken
+	if isTruncated && endIdx > startIdx {
+		resp.ContinuationToken = views[endIdx-1].name
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+func iamAction(r *http.Request) string {
+	if action := strings.TrimSpace(r.URL.Query().Get("Action")); action != "" {
+		return action
+	}
+	if r.Method == http.MethodPost {
+		_ = r.ParseForm()
+		if action := strings.TrimSpace(r.Form.Get("Action")); action != "" {
+			return action
+		}
+	}
+	return ""
+}
+
+func (h *Handler) handleIAMAction(w http.ResponseWriter, r *http.Request, action string) {
+	switch action {
+	case "GetUser":
+		h.handleIAMGetUser(w, r)
+	default:
+		backend.WriteError(w, http.StatusBadRequest, "Unknown", "Unknown")
+	}
+}
+
+type iamGetUserResponse struct {
+	XMLName          xml.Name            `xml:"GetUserResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	GetUserResult    iamGetUserResult    `xml:"GetUserResult"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type iamGetUserResult struct {
+	User iamUser `xml:"User"`
+}
+
+type iamUser struct {
+	Path       string `xml:"Path"`
+	UserName   string `xml:"UserName"`
+	UserID     string `xml:"UserId"`
+	Arn        string `xml:"Arn"`
+	CreateDate string `xml:"CreateDate"`
+}
+
+type iamResponseMetadata struct {
+	RequestID string `xml:"RequestId"`
+}
+
+func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
+	accessKey := extractAccessKey(r)
+	owner := ownerForAccessKeyFn(accessKey)
+	if owner == nil {
+		owner = backend.DefaultOwner()
+	}
+	accountID := owner.ID
+	userName := owner.DisplayName
+	if userName == "" {
+		userName = "user"
+	}
+	resp := iamGetUserResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		GetUserResult: iamGetUserResult{
+			User: iamUser{
+				Path:       "/",
+				UserName:   userName,
+				UserID:     accountID,
+				Arn:        "arn:aws:iam::" + accountID + ":user/" + userName,
+				CreateDate: time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xmlMarshalFn(resp)
 	if err != nil {
