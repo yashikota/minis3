@@ -179,11 +179,11 @@ func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 		userName = "user"
 	}
 	arn := "arn:aws:iam::" + accountID + ":user/" + userName
-	switch accessKey {
-	case "root-access-key":
+	switch {
+	case accessKey == "root-access-key" || userName == "root":
 		accountID = "123456789012"
 		arn = "arn:aws:iam::" + accountID + ":root"
-	case "altroot-access-key":
+	case accessKey == "altroot-access-key" || userName == "altroot":
 		accountID = "210987654321"
 		arn = "arn:aws:iam::" + accountID + ":root"
 	}

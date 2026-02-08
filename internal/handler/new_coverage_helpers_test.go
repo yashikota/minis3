@@ -64,6 +64,25 @@ func TestServiceIAMBranches(t *testing.T) {
 		}
 	})
 
+	t.Run("iam root arn by display name fallback", func(t *testing.T) {
+		origOwnerForAccessKeyFn := ownerForAccessKeyFn
+		t.Cleanup(func() {
+			ownerForAccessKeyFn = origOwnerForAccessKeyFn
+		})
+		ownerForAccessKeyFn = func(string) *backend.Owner {
+			return &backend.Owner{ID: "custom-account", DisplayName: "root"}
+		}
+
+		req := newRequest(http.MethodGet, "http://example.test/?Action=GetUser", "", map[string]string{
+			"Authorization": authHeader("custom-access-key"),
+		})
+		w := doRequest(h, req)
+		requireStatus(t, w, http.StatusOK)
+		if !strings.Contains(w.Body.String(), "<Arn>arn:aws:iam::123456789012:root</Arn>") {
+			t.Fatalf("unexpected root arn in body: %s", w.Body.String())
+		}
+	})
+
 	t.Run("iam action from post form", func(t *testing.T) {
 		req := newRequest(
 			http.MethodPost,
