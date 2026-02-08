@@ -11,6 +11,15 @@ import (
 	"github.com/yashikota/minis3/internal/backend"
 )
 
+func mustChecksumBase64(t *testing.T, algorithm string, data []byte) string {
+	t.Helper()
+	sum, ok := backend.ComputeChecksumBase64(algorithm, data)
+	if !ok {
+		t.Fatalf("unsupported checksum algorithm: %s", algorithm)
+	}
+	return sum
+}
+
 func TestObjectHelperUncoveredBranches(t *testing.T) {
 	if got := parseTaggingHeader("&"); got != nil {
 		t.Fatalf("parseTaggingHeader(\"&\") = %#v, want nil", got)
@@ -120,7 +129,7 @@ func TestHandleObjectReadDeleteHeadAdditionalBranchesUncovered(t *testing.T) {
 		map[string]string{
 			"x-amz-website-redirect-location": "/redirect",
 			"x-amz-checksum-algorithm":        "CRC32",
-			"x-amz-checksum-crc32":            "AAAAAA==",
+			"x-amz-checksum-crc32":            mustChecksumBase64(t, "CRC32", []byte("body")),
 		},
 	)
 	putW := doRequest(h, putReq)
@@ -453,7 +462,7 @@ func TestObjectACLAndAttributesAdditionalBranchesUncovered(t *testing.T) {
 		"body",
 		map[string]string{
 			"x-amz-checksum-algorithm": "CRC32",
-			"x-amz-checksum-crc32":     "AAAAAA==",
+			"x-amz-checksum-crc32":     mustChecksumBase64(t, "CRC32", []byte("body")),
 		},
 	)
 	putW := doRequest(h, putReq)
