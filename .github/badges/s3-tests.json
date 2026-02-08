@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "label": "s3-tests",
-  "message": "success 1379, fail 113, skip 0, error 2",
+  "message": "success 1381, fail 111, skip 0, error 0",
   "color": "yellow"
 }
