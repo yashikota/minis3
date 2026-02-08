@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "label": "s3-tests",
+  "message": "success n/a, fail n/a, skip n/a, error n/a",
+  "color": "lightgrey"
+}

@@ -6,6 +6,13 @@ on:
       - "**.go"
       - "integration/s3-test/**"
       - ".github/workflows/s3tests.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "**.go"
+      - "integration/s3-test/**"
+      - ".github/workflows/s3tests.yaml"
   workflow_dispatch:
 
 jobs:
@@ -15,6 +22,12 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    outputs:
+      has_results: ${{ steps.summary.outputs.has_results }}
+      passed: ${{ steps.summary.outputs.passed }}
+      failed: ${{ steps.summary.outputs.failed }}
+      skipped: ${{ steps.summary.outputs.skipped }}
+      errors: ${{ steps.summary.outputs.errors }}
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -41,15 +54,18 @@ jobs:
         run: |
           if [ ! -f s3-test.log ]; then
             echo "s3-test.log not found"
+            echo "has_results=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          result_line=$(grep -oE '[0-9]+ failed, [0-9]+ passed, [0-9]+ skipped' s3-test.log | tail -1)
+          result_line=$(grep -oE '[0-9]+ failed, [0-9]+ passed, [0-9]+ skipped(, [0-9]+ errors?)?' s3-test.log | tail -1)
           if [ -n "$result_line" ]; then
-            failed=$(echo "$result_line" | cut -d' ' -f1)
-            passed=$(echo "$result_line" | cut -d' ' -f3)
-            skipped=$(echo "$result_line" | cut -d' ' -f5)
-            total=$((passed + failed))
+            failed=$(echo "$result_line" | awk '{print $1}')
+            passed=$(echo "$result_line" | awk '{print $3}')
+            skipped=$(echo "$result_line" | awk '{print $5}')
+            errors=$(echo "$result_line" | awk '{print $7}')
+            errors=${errors:-0}
+            total=$((passed + failed + errors))
             if [ "$total" -gt 0 ]; then
               pass_rate=$(echo "scale=2; $passed * 100 / $total" | bc)
             else
@@ -59,6 +75,7 @@ jobs:
             echo "passed=$passed" >> $GITHUB_OUTPUT
             echo "failed=$failed" >> $GITHUB_OUTPUT
             echo "skipped=$skipped" >> $GITHUB_OUTPUT
+            echo "errors=$errors" >> $GITHUB_OUTPUT
             echo "pass_rate=$pass_rate" >> $GITHUB_OUTPUT
             echo "has_results=true" >> $GITHUB_OUTPUT
           else
@@ -73,6 +90,7 @@ jobs:
             const passed = '${{ steps.summary.outputs.passed }}';
             const failed = '${{ steps.summary.outputs.failed }}';
             const skipped = '${{ steps.summary.outputs.skipped }}';
+            const errors = '${{ steps.summary.outputs.errors }}';
             const passRate = '${{ steps.summary.outputs.pass_rate }}';
 
             const body = `## S3 Test Summary
@@ -82,6 +100,7 @@ jobs:
             | Passed | ${passed} |
             | Failed | ${failed} |
             | Skipped | ${skipped} |
+            | Errors | ${errors} |
             | **Pass Rate** | **${passRate}%** |
 
             <details>
@@ -117,3 +136,51 @@ jobs:
                 body: body
               });
             }
+
+  publish-badge:
+    needs: s3-tests
+    if: needs.s3-tests.outputs.has_results == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Build badge payload
+        run: |
+          passed='${{ needs.s3-tests.outputs.passed }}'
+          failed='${{ needs.s3-tests.outputs.failed }}'
+          skipped='${{ needs.s3-tests.outputs.skipped }}'
+          errors='${{ needs.s3-tests.outputs.errors }}'
+
+          if [ "$failed" -eq 0 ] && [ "$errors" -eq 0 ]; then
+            color="brightgreen"
+          elif [ "$passed" -gt 0 ]; then
+            color="yellow"
+          else
+            color="red"
+          fi
+
+          mkdir -p .github/badges
+          cat > .github/badges/s3-tests.json <<EOF
+          {
+            "schemaVersion": 1,
+            "label": "s3-tests",
+            "message": "success ${passed}, fail ${failed}, skip ${skipped}, error ${errors}",
+            "color": "${color}"
+          }
+          EOF
+
+      - name: Update badge data
+        run: |
+          if git diff --quiet -- .github/badges/s3-tests.json; then
+            echo "No badge changes"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/s3-tests.json
+          git commit -m "chore: update s3-test badge data"
+          git push origin HEAD:${GITHUB_REF_NAME}

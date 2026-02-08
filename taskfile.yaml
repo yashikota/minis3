@@ -52,7 +52,7 @@ tasks:
           echo "Error: s3-test.log not found. Run 'task s3-test' first."
           exit 1
         fi
-        result_line=$(rg -o '\d+ failed, \d+ passed, \d+ skipped' s3-test.log | tail -1)
+        result_line=$(rg -o '\d+ failed, \d+ passed, \d+ skipped(, \d+ errors?)?' s3-test.log | tail -1)
         if [ -n "$result_line" ]; then
           echo ""
           echo "=========================================="
@@ -63,18 +63,21 @@ tasks:
           failed=$(echo "$result_line" | cut -d' ' -f1)
           passed=$(echo "$result_line" | cut -d' ' -f3)
           skipped=$(echo "$result_line" | cut -d' ' -f5)
+          errors=$(echo "$result_line" | cut -d' ' -f7)
 
           passed=${passed:-0}
           failed=${failed:-0}
           skipped=${skipped:-0}
+          errors=${errors:-0}
 
-          total=$((passed + failed))
+          total=$((passed + failed + errors))
           if [ "$total" -gt 0 ]; then
             pass_rate=$(echo "scale=2; $passed * 100 / $total" | bc)
             echo ""
             echo "Passed:  $passed"
             echo "Failed:  $failed"
             echo "Skipped: $skipped"
+            echo "Errors:  $errors"
             echo ""
             echo "Pass Rate: ${pass_rate}% ($passed/$total)"
           fi
