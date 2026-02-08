@@ -3,10 +3,52 @@ package handler
 import (
 	"encoding/xml"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/yashikota/minis3/internal/backend"
+)
+
+var (
+	getObjectLockConfigurationFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.ObjectLockConfiguration, error) {
+		return h.backend.GetObjectLockConfiguration(bucketName)
+	}
+	putObjectLockConfigurationFn = func(
+		h *Handler,
+		bucketName string,
+		config *backend.ObjectLockConfiguration,
+	) error {
+		return h.backend.PutObjectLockConfiguration(bucketName, config)
+	}
+	getObjectRetentionFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+	) (*backend.ObjectLockRetention, error) {
+		return h.backend.GetObjectRetention(bucketName, key, versionID)
+	}
+	putObjectRetentionFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+		retention *backend.ObjectLockRetention,
+		bypassGovernance bool,
+	) error {
+		return h.backend.PutObjectRetention(bucketName, key, versionID, retention, bypassGovernance)
+	}
+	getObjectLegalHoldFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+	) (*backend.ObjectLockLegalHold, error) {
+		return h.backend.GetObjectLegalHold(bucketName, key, versionID)
+	}
+	putObjectLegalHoldFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+		legalHold *backend.ObjectLockLegalHold,
+	) error {
+		return h.backend.PutObjectLegalHold(bucketName, key, versionID, legalHold)
+	}
 )
 
 // handleGetObjectLockConfiguration handles GetObjectLockConfiguration requests.
@@ -15,7 +57,7 @@ func (h *Handler) handleGetObjectLockConfiguration(
 	r *http.Request,
 	bucketName string,
 ) {
-	config, err := h.backend.GetObjectLockConfiguration(bucketName)
+	config, err := getObjectLockConfigurationFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -40,7 +82,7 @@ func (h *Handler) handleGetObjectLockConfiguration(
 	config.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(config)
+	output, err := xmlMarshalFn(config)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -54,7 +96,7 @@ func (h *Handler) handlePutObjectLockConfiguration(
 	r *http.Request,
 	bucketName string,
 ) {
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -77,7 +119,7 @@ func (h *Handler) handlePutObjectLockConfiguration(
 		return
 	}
 
-	err = h.backend.PutObjectLockConfiguration(bucketName, &config)
+	err = putObjectLockConfigurationFn(h, bucketName, &config)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -123,7 +165,7 @@ func (h *Handler) handleGetObjectRetention(
 	bucketName, key string,
 ) {
 	versionId := r.URL.Query().Get("versionId")
-	retention, err := h.backend.GetObjectRetention(bucketName, key, versionId)
+	retention, err := getObjectRetentionFn(h, bucketName, key, versionId)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -169,7 +211,7 @@ func (h *Handler) handleGetObjectRetention(
 	retention.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(retention)
+	output, err := xmlMarshalFn(retention)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -186,7 +228,7 @@ func (h *Handler) handlePutObjectRetention(
 	versionId := r.URL.Query().Get("versionId")
 	bypassGovernance := r.Header.Get("x-amz-bypass-governance-retention") == "true"
 
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -209,7 +251,14 @@ func (h *Handler) handlePutObjectRetention(
 		return
 	}
 
-	err = h.backend.PutObjectRetention(bucketName, key, versionId, &retention, bypassGovernance)
+	err = putObjectRetentionFn(
+		h,
+		bucketName,
+		key,
+		versionId,
+		&retention,
+		bypassGovernance,
+	)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -269,7 +318,7 @@ func (h *Handler) handleGetObjectLegalHold(
 	bucketName, key string,
 ) {
 	versionId := r.URL.Query().Get("versionId")
-	legalHold, err := h.backend.GetObjectLegalHold(bucketName, key, versionId)
+	legalHold, err := getObjectLegalHoldFn(h, bucketName, key, versionId)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -308,7 +357,7 @@ func (h *Handler) handleGetObjectLegalHold(
 	legalHold.Xmlns = backend.S3Xmlns
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(legalHold)
+	output, err := xmlMarshalFn(legalHold)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -324,7 +373,7 @@ func (h *Handler) handlePutObjectLegalHold(
 ) {
 	versionId := r.URL.Query().Get("versionId")
 
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -347,7 +396,7 @@ func (h *Handler) handlePutObjectLegalHold(
 		return
 	}
 
-	err = h.backend.PutObjectLegalHold(bucketName, key, versionId, &legalHold)
+	err = putObjectLegalHoldFn(h, bucketName, key, versionId, &legalHold)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(

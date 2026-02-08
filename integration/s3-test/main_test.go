@@ -182,6 +182,16 @@ func TestMainDelegatesToRunFn(t *testing.T) {
 	}
 }
 
+func TestDefaultNewHTTPServerFactory(t *testing.T) {
+	restore := patchGlobals()
+	defer restore()
+
+	srv := newHTTPServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	if _, ok := srv.(*http.Server); !ok {
+		t.Fatalf("newHTTPServer() returned %T, want *http.Server", srv)
+	}
+}
+
 func patchGlobals() func() {
 	origListenFn := listenFn
 	origNotifySignal := notifySignal

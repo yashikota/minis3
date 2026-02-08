@@ -417,6 +417,132 @@ func TestValidatePostPolicyRejectsInvalidBase64(t *testing.T) {
 	}
 }
 
+func TestValidatePostPolicyAdditionalInvalidShapes(t *testing.T) {
+	expiration := time.Now().UTC().Add(10 * time.Minute).Format("2006-01-02T15:04:05Z")
+
+	t.Run("invalid json", func(t *testing.T) {
+		invalidJSON := base64.StdEncoding.EncodeToString([]byte("{not-json"))
+		status, ok := validatePostPolicy(
+			invalidJSON,
+			"bucket-a",
+			"foo.txt",
+			"text/plain",
+			nil,
+			1,
+		)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+
+	t.Run("expiration is not a string", func(t *testing.T) {
+		policy := encodePolicy(t, map[string]any{
+			"expiration": 1,
+			"conditions": []any{
+				map[string]any{"bucket": "bucket-a"},
+			},
+		})
+		status, ok := validatePostPolicy(policy, "bucket-a", "k", "", nil, 1)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+
+	t.Run("conditions is not an array", func(t *testing.T) {
+		policy := encodePolicy(t, map[string]any{
+			"expiration": expiration,
+			"conditions": "invalid",
+		})
+		status, ok := validatePostPolicy(policy, "bucket-a", "k", "", nil, 1)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+
+	t.Run("map condition expected value must be string", func(t *testing.T) {
+		policy := encodePolicy(t, map[string]any{
+			"expiration": expiration,
+			"conditions": []any{
+				map[string]any{"bucket": 123},
+			},
+		})
+		status, ok := validatePostPolicy(policy, "bucket-a", "k", "", nil, 1)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+
+	t.Run("array condition must not be empty", func(t *testing.T) {
+		policy := encodePolicy(t, map[string]any{
+			"expiration": expiration,
+			"conditions": []any{
+				map[string]any{"bucket": "bucket-a"},
+				[]any{},
+			},
+		})
+		status, ok := validatePostPolicy(policy, "bucket-a", "k", "", nil, 1)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+
+	t.Run("array condition operator must be string", func(t *testing.T) {
+		policy := encodePolicy(t, map[string]any{
+			"expiration": expiration,
+			"conditions": []any{
+				map[string]any{"bucket": "bucket-a"},
+				[]any{1, "$key", "k"},
+			},
+		})
+		status, ok := validatePostPolicy(policy, "bucket-a", "k", "", nil, 1)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+
+	t.Run("eq condition field must be string", func(t *testing.T) {
+		policy := encodePolicy(t, map[string]any{
+			"expiration": expiration,
+			"conditions": []any{
+				map[string]any{"bucket": "bucket-a"},
+				[]any{"eq", 1, "k"},
+			},
+		})
+		status, ok := validatePostPolicy(policy, "bucket-a", "k", "", nil, 1)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+
+	t.Run("eq condition expected must be string", func(t *testing.T) {
+		policy := encodePolicy(t, map[string]any{
+			"expiration": expiration,
+			"conditions": []any{
+				map[string]any{"bucket": "bucket-a"},
+				[]any{"eq", "$key", 1},
+			},
+		})
+		status, ok := validatePostPolicy(policy, "bucket-a", "k", "", nil, 1)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+
+	t.Run("unsupported condition type", func(t *testing.T) {
+		policy := encodePolicy(t, map[string]any{
+			"expiration": expiration,
+			"conditions": []any{
+				map[string]any{"bucket": "bucket-a"},
+				true,
+			},
+		})
+		status, ok := validatePostPolicy(policy, "bucket-a", "k", "", nil, 1)
+		if ok || status != 400 {
+			t.Fatalf("status=%d ok=%v, want 400/false", status, ok)
+		}
+	})
+}
+
 func TestParsePostTaggingXML(t *testing.T) {
 	t.Run("valid xml", func(t *testing.T) {
 		tags, errCode, errMsg := parsePostTaggingXML(
@@ -446,6 +572,16 @@ func TestParsePostTaggingXML(t *testing.T) {
 		_, errCode, _ := parsePostTaggingXML(payload)
 		if errCode != "InvalidTag" {
 			t.Fatalf("unexpected error code: %q", errCode)
+		}
+	})
+
+	t.Run("empty tag set", func(t *testing.T) {
+		tags, errCode, errMsg := parsePostTaggingXML("<Tagging><TagSet></TagSet></Tagging>")
+		if errCode != "" || errMsg != "" {
+			t.Fatalf("unexpected error: code=%q msg=%q", errCode, errMsg)
+		}
+		if tags != nil {
+			t.Fatalf("expected nil tags for empty set, got %#v", tags)
 		}
 	})
 }
@@ -485,6 +621,15 @@ func TestVerifyPostPolicySignature(t *testing.T) {
 	}
 	if verifyPostPolicySignature("unknown-access-key", signature, policy) {
 		t.Fatal("expected signature verification to fail with unknown access key")
+	}
+	if !verifyPostPolicySignature("", "", "") {
+		t.Fatal("expected anonymous POST policy signature check to pass")
+	}
+	if verifyPostPolicySignature("minis3-access-key", "", policy) {
+		t.Fatal("expected empty signature to fail")
+	}
+	if verifyPostPolicySignature("minis3-access-key", signature, "") {
+		t.Fatal("expected empty policy to fail")
 	}
 }
 

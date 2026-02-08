@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -57,4 +58,22 @@ func TestHandleService(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusOK)
 	})
+
+	t.Run("list buckets truncated response includes continuation token", func(t *testing.T) {
+		req := newRequest(http.MethodGet, "http://example.test/?max-buckets=1", "", nil)
+		w := doRequest(h, req)
+		requireStatus(t, w, http.StatusOK)
+		if body := w.Body.String(); body == "" || !containsAll(body, "ContinuationToken") {
+			t.Fatalf("unexpected truncated list response body: %s", body)
+		}
+	})
+}
+
+func containsAll(body string, tokens ...string) bool {
+	for _, tok := range tokens {
+		if !strings.Contains(body, tok) {
+			return false
+		}
+	}
+	return true
 }

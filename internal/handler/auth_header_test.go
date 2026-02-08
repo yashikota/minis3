@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -105,6 +106,35 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "AccessDenied")
 	})
 
+	t.Run("v4 malformed kv pairs are ignored and fail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
+		req.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=minis3-access-key/20260207/us-east-1/s3/aws4_request, malformed, SignedHeaders=host, Signature=sig",
+		)
+		req.Header.Set("x-amz-date", "20260207T000000Z")
+		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "SignatureDoesNotMatch")
+	})
+
+	t.Run("v4 invalid credential scope format", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
+		req.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=minis3-access-key/20260207/us-east-1, SignedHeaders=host, Signature=sig",
+		)
+		req.Header.Set("x-amz-date", "20260207T000000Z")
+		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "AccessDenied")
+	})
+
+	t.Run("v4 missing x-amz-date", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
+		req.Header.Set(
+			"Authorization",
+			"AWS4-HMAC-SHA256 Credential=minis3-access-key/20260207/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=sig",
+		)
+		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "AccessDenied")
+	})
+
 	t.Run("v4 signature mismatch", func(t *testing.T) {
 		req := newV4AuthHeaderRequest(t, "minis3-access-key", time.Now().UTC())
 		req.Header.Set(
@@ -119,6 +149,48 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 		req := newV4AuthHeaderRequest(t, "minis3-access-key", time.Now().UTC())
 		if err := verifyAuthorizationHeader(req); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("v4 defaults payload hash to unsigned payload", func(t *testing.T) {
+		req := newV4AuthHeaderRequest(t, "minis3-access-key", time.Now().UTC())
+		req.Header.Del("x-amz-content-sha256")
+		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "SignatureDoesNotMatch")
+	})
+
+	t.Run("v4 canonical uri fallback and empty signed header token", func(t *testing.T) {
+		req := &http.Request{
+			Method: http.MethodGet,
+			URL:    &url.URL{},
+			Host:   "example.test",
+			Header: make(http.Header),
+		}
+		req.Header.Set("x-amz-date", "20260207T000000Z")
+		err := verifyAuthorizationHeaderV4(
+			req,
+			"AWS4-HMAC-SHA256 Credential=minis3-access-key/20260207/us-east-1/s3/aws4_request, SignedHeaders=host;;x-amz-date, Signature=deadbeef",
+			DefaultCredentials()["minis3-access-key"],
+		)
+		requirePresignedErrCode(t, err, "SignatureDoesNotMatch")
+	})
+
+	t.Run("calculate signature with empty canonical path", func(t *testing.T) {
+		req := &http.Request{
+			Method: http.MethodGet,
+			URL:    &url.URL{},
+			Host:   "example.test",
+			Header: make(http.Header),
+		}
+		got := calculatePresignedSignatureV4(
+			req,
+			"minis3-secret-key",
+			"20260207",
+			"us-east-1",
+			"s3",
+			"host;x-amz-meta-test",
+		)
+		if got == "" {
+			t.Fatal("expected non-empty signature")
 		}
 	})
 }

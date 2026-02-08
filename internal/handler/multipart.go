@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/xml"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -11,6 +10,76 @@ import (
 	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
+)
+
+var (
+	createMultipartUploadFn = func(
+		h *Handler,
+		bucketName, key string,
+		opts backend.CreateMultipartUploadOptions,
+	) (*backend.MultipartUpload, error) {
+		return h.backend.CreateMultipartUpload(bucketName, key, opts)
+	}
+	uploadPartFn = func(
+		h *Handler,
+		bucketName, key, uploadID string,
+		partNumber int,
+		data []byte,
+	) (*backend.PartInfo, error) {
+		return h.backend.UploadPart(bucketName, key, uploadID, partNumber, data)
+	}
+	completeMultipartUploadFn = func(
+		h *Handler,
+		bucketName, key, uploadID string,
+		parts []backend.CompletePart,
+	) (*backend.Object, error) {
+		return h.backend.CompleteMultipartUpload(bucketName, key, uploadID, parts)
+	}
+	getObjectForMultipartCompletionFn = func(
+		h *Handler,
+		bucketName, key string,
+	) (*backend.Object, error) {
+		return h.backend.GetObject(bucketName, key)
+	}
+	abortMultipartUploadFn = func(
+		h *Handler,
+		bucketName, key, uploadID string,
+	) error {
+		return h.backend.AbortMultipartUpload(bucketName, key, uploadID)
+	}
+	listMultipartUploadsFn = func(
+		h *Handler,
+		bucketName string,
+		opts backend.ListMultipartUploadsOptions,
+	) (*backend.ListMultipartUploadsInternalResult, error) {
+		return h.backend.ListMultipartUploads(bucketName, opts)
+	}
+	listPartsFn = func(
+		h *Handler,
+		bucketName, key, uploadID string,
+		opts backend.ListPartsOptions,
+	) (*backend.ListPartsInternalResult, *backend.MultipartUpload, error) {
+		return h.backend.ListParts(bucketName, key, uploadID, opts)
+	}
+	copyPartFn = func(
+		h *Handler,
+		srcBucket, srcKey, srcVersionID, dstBucket, dstKey, uploadID string,
+		partNumber int,
+		rangeStart, rangeEnd int64,
+	) (*backend.PartInfo, error) {
+		return h.backend.CopyPart(
+			srcBucket,
+			srcKey,
+			srcVersionID,
+			dstBucket,
+			dstKey,
+			uploadID,
+			partNumber,
+			rangeStart,
+			rangeEnd,
+		)
+	}
+	decodeURIFn = decodeURI
 )
 
 // handleCreateMultipartUpload handles CreateMultipartUpload requests.
@@ -77,7 +146,7 @@ func (h *Handler) handleCreateMultipartUpload(
 		opts.SSECustomerKeyMD5 = sseCKMD5
 	}
 
-	upload, err := h.backend.CreateMultipartUpload(bucketName, key, opts)
+	upload, err := createMultipartUploadFn(h, bucketName, key, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -116,7 +185,7 @@ func (h *Handler) handleCreateMultipartUpload(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -159,14 +228,14 @@ func (h *Handler) handleUploadPart(
 		}
 	}
 
-	data, err := io.ReadAll(r.Body)
+	data, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	defer func() { _ = r.Body.Close() }()
 
-	part, err := h.backend.UploadPart(bucketName, key, uploadId, partNumber, data)
+	part, err := uploadPartFn(h, bucketName, key, uploadId, partNumber, data)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
 			backend.WriteError(
@@ -212,7 +281,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 ) {
 	uploadId := r.URL.Query().Get("uploadId")
 
-	body, err := io.ReadAll(r.Body)
+	body, err := readAllFn(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -235,12 +304,12 @@ func (h *Handler) handleCompleteMultipartUpload(
 		return
 	}
 
-	obj, err := h.backend.CompleteMultipartUpload(bucketName, key, uploadId, completeReq.Parts)
+	obj, err := completeMultipartUploadFn(h, bucketName, key, uploadId, completeReq.Parts)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
 			// S3 treats repeated completion of the same upload as idempotent success
 			// if the completed object already exists at the destination key.
-			existingObj, getErr := h.backend.GetObject(bucketName, key)
+			existingObj, getErr := getObjectForMultipartCompletionFn(h, bucketName, key)
 			if getErr == nil && existingObj != nil {
 				obj = existingObj
 			} else {
@@ -319,7 +388,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -335,7 +404,7 @@ func (h *Handler) handleAbortMultipartUpload(
 ) {
 	uploadId := r.URL.Query().Get("uploadId")
 
-	err := h.backend.AbortMultipartUpload(bucketName, key, uploadId)
+	err := abortMultipartUploadFn(h, bucketName, key, uploadId)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
 			backend.WriteError(
@@ -384,7 +453,7 @@ func (h *Handler) handleListMultipartUploads(
 		MaxUploads:     maxUploads,
 	}
 
-	result, err := h.backend.ListMultipartUploads(bucketName, opts)
+	result, err := listMultipartUploadsFn(h, bucketName, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -443,7 +512,7 @@ func (h *Handler) handleListMultipartUploads(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -495,7 +564,7 @@ func (h *Handler) handleListParts(
 		MaxParts:         maxParts,
 	}
 
-	result, upload, err := h.backend.ListParts(bucketName, key, uploadId, opts)
+	result, upload, err := listPartsFn(h, bucketName, key, uploadId, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
 			backend.WriteError(
@@ -547,7 +616,7 @@ func (h *Handler) handleListParts(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -610,7 +679,8 @@ func (h *Handler) handleUploadPartCopy(
 		}
 	}
 
-	part, err := h.backend.CopyPart(
+	part, err := copyPartFn(
+		h,
 		decodedCopySource.bucket,
 		decodedCopySource.key,
 		decodedCopySource.versionId,
@@ -681,7 +751,7 @@ func (h *Handler) handleUploadPartCopy(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	copyPartOutput, err := xml.Marshal(copyPartResp)
+	copyPartOutput, err := xmlMarshalFn(copyPartResp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -710,7 +780,7 @@ func decodeAndParseCopySource(copySource string) (*copySourceInfo, error) {
 	}
 
 	// URL decode the path part only
-	decoded, err := decodeURI(pathPart)
+	decoded, err := decodeURIFn(pathPart)
 	if err != nil {
 		return nil, err
 	}
