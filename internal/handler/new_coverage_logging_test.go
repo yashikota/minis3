@@ -14,7 +14,7 @@ import (
 
 func mustPutBucketPolicy(t *testing.T, b *backend.Backend, bucketName, policy string) {
 	t.Helper()
-	if err := b.PutBucketPolicy(bucketName, policy); err != nil {
+	if err := b.PutBucketPolicy(bucketName, policy, false); err != nil {
 		t.Fatalf("PutBucketPolicy(%q) failed: %v", bucketName, err)
 	}
 }
@@ -342,7 +342,7 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 		requireS3ErrorCode(t, wMissingTarget, "NoSuchKey")
 
 		// No policy on target -> AccessDenied from bucketLoggingTargetAllowed.
-		if err := b.PutBucketPolicy("dst-log", `{"Version":"2012-10-17","Statement":[]}`); err != nil {
+		if err := b.PutBucketPolicy("dst-log", `{"Version":"2012-10-17","Statement":[]}`, false); err != nil {
 			t.Fatalf("PutBucketPolicy reset failed: %v", err)
 		}
 		wDeniedPolicy := doRequest(

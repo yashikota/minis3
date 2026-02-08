@@ -1,19 +1,46 @@
 package backend
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
+
+// IAMUser represents an IAM user managed by minis3.
+type IAMUser struct {
+	UserName   string
+	Path       string
+	UserID     string
+	Arn        string
+	CreateDate time.Time
+}
+
+// IAMAccessKey represents an access key created for an IAM user.
+type IAMAccessKey struct {
+	UserName        string
+	AccessKeyId     string
+	SecretAccessKey string
+	Status          string
+	CreateDate      time.Time
+}
 
 // Backend holds the state of the S3 world.
 type Backend struct {
 	mu      sync.RWMutex
 	buckets map[string]*Bucket
 	uploads map[string]*MultipartUpload // key: uploadId
+
+	// IAM state
+	iamUsers      map[string]*IAMUser      // key: userName
+	iamAccessKeys map[string]*IAMAccessKey // key: accessKeyId
+	iamKeysByUser map[string][]string      // userName -> []accessKeyId
 }
 
 var (
@@ -32,6 +59,7 @@ type Bucket struct {
 	Location                string            // Region location constraint (empty = us-east-1)
 	Tags                    map[string]string // Bucket tags
 	Policy                  string            // Bucket policy (JSON)
+	PolicyDenySelfAccess    bool              // true when policy was set with ConfirmRemoveSelfBucketAccess
 	ACL                     *AccessControlPolicy
 	ObjectOwnership         string // BucketOwnerEnforced, BucketOwnerPreferred, ObjectWriter
 	RequestPaymentPayer     string // BucketOwner or Requester
@@ -221,9 +249,155 @@ var (
 
 func New() *Backend {
 	return &Backend{
-		buckets: make(map[string]*Bucket),
-		uploads: make(map[string]*MultipartUpload),
+		buckets:       make(map[string]*Bucket),
+		uploads:       make(map[string]*MultipartUpload),
+		iamUsers:      make(map[string]*IAMUser),
+		iamAccessKeys: make(map[string]*IAMAccessKey),
+		iamKeysByUser: make(map[string][]string),
 	}
+}
+
+// --- IAM user management ---
+
+var (
+	ErrIAMUserAlreadyExists = errors.New("IAM user already exists")
+	ErrIAMUserNotFound      = errors.New("IAM user not found")
+	ErrIAMAccessKeyNotFound = errors.New("IAM access key not found")
+)
+
+func generateRandomID(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// CreateIAMUser creates a new IAM user.
+func (b *Backend) CreateIAMUser(userName, path string) (*IAMUser, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, exists := b.iamUsers[userName]; exists {
+		return nil, ErrIAMUserAlreadyExists
+	}
+
+	userID := "AID" + strings.ToUpper(generateRandomID(10))
+	arn := fmt.Sprintf("arn:aws:iam::123456789012:user%s%s", path, userName)
+
+	user := &IAMUser{
+		UserName:   userName,
+		Path:       path,
+		UserID:     userID,
+		Arn:        arn,
+		CreateDate: time.Now().UTC(),
+	}
+	b.iamUsers[userName] = user
+
+	return user, nil
+}
+
+// CreateIAMAccessKey creates a new access key pair for an IAM user.
+func (b *Backend) CreateIAMAccessKey(userName string) (*IAMAccessKey, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, exists := b.iamUsers[userName]; !exists {
+		return nil, ErrIAMUserNotFound
+	}
+
+	accessKeyID := "AKIA" + strings.ToUpper(generateRandomID(8))
+	secretKey := generateRandomID(20)
+
+	key := &IAMAccessKey{
+		UserName:        userName,
+		AccessKeyId:     accessKeyID,
+		SecretAccessKey: secretKey,
+		Status:          "Active",
+		CreateDate:      time.Now().UTC(),
+	}
+	b.iamAccessKeys[accessKeyID] = key
+	b.iamKeysByUser[userName] = append(b.iamKeysByUser[userName], accessKeyID)
+
+	return key, nil
+}
+
+// DeleteIAMAccessKey deletes an access key.
+func (b *Backend) DeleteIAMAccessKey(userName, accessKeyID string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, exists := b.iamAccessKeys[accessKeyID]; !exists {
+		return ErrIAMAccessKeyNotFound
+	}
+	delete(b.iamAccessKeys, accessKeyID)
+
+	keys := b.iamKeysByUser[userName]
+	for i, k := range keys {
+		if k == accessKeyID {
+			b.iamKeysByUser[userName] = append(keys[:i], keys[i+1:]...)
+			break
+		}
+	}
+
+	return nil
+}
+
+// DeleteIAMUser deletes an IAM user.
+func (b *Backend) DeleteIAMUser(userName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, exists := b.iamUsers[userName]; !exists {
+		return ErrIAMUserNotFound
+	}
+
+	// Clean up associated access keys
+	for _, kid := range b.iamKeysByUser[userName] {
+		delete(b.iamAccessKeys, kid)
+	}
+	delete(b.iamKeysByUser, userName)
+	delete(b.iamUsers, userName)
+
+	return nil
+}
+
+// ListIAMUsers returns IAM users optionally filtered by path prefix.
+func (b *Backend) ListIAMUsers(pathPrefix string) []*IAMUser {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	var users []*IAMUser
+	for _, u := range b.iamUsers {
+		if pathPrefix == "" || strings.HasPrefix(u.Path, pathPrefix) {
+			users = append(users, u)
+		}
+	}
+	return users
+}
+
+// ListIAMAccessKeys returns access keys for a user.
+func (b *Backend) ListIAMAccessKeys(userName string) []*IAMAccessKey {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	var keys []*IAMAccessKey
+	for _, kid := range b.iamKeysByUser[userName] {
+		if k, ok := b.iamAccessKeys[kid]; ok {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// LookupCredential looks up a secret key for an access key,
+// checking both static (DefaultCredentials-equivalent) and dynamic IAM credentials.
+func (b *Backend) LookupCredential(accessKey string) (string, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if k, ok := b.iamAccessKeys[accessKey]; ok {
+		return k.SecretAccessKey, true
+	}
+	return "", false
 }
 
 func WriteError(w http.ResponseWriter, code int, s3Code, message string) {

@@ -85,8 +85,8 @@ var (
 	getBucketPolicyFn = func(h *Handler, bucketName string) (string, error) {
 		return h.backend.GetBucketPolicy(bucketName)
 	}
-	putBucketPolicyFn = func(h *Handler, bucketName, policy string) error {
-		return h.backend.PutBucketPolicy(bucketName, policy)
+	putBucketPolicyFn = func(h *Handler, bucketName, policy string, denySelfAccess bool) error {
+		return h.backend.PutBucketPolicy(bucketName, policy, denySelfAccess)
 	}
 	deleteBucketPolicyFn = func(h *Handler, bucketName string) error {
 		return h.backend.DeleteBucketPolicy(bucketName)
@@ -2047,7 +2047,11 @@ func (h *Handler) handlePutBucketPolicy(
 		return
 	}
 
-	err = putBucketPolicyFn(h, bucketName, string(body))
+	denySelfAccess := strings.EqualFold(
+		headerValueAnyCase(r.Header, "x-amz-confirm-remove-self-bucket-access"), "true",
+	)
+
+	err = putBucketPolicyFn(h, bucketName, string(body), denySelfAccess)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(

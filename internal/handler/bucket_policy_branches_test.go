@@ -130,7 +130,8 @@ func TestGetDeleteBucketPolicyDenySelf(t *testing.T) {
 
 	ownerHeaders := map[string]string{"Authorization": authHeader("minis3-access-key")}
 
-	// Set a policy that denies GetBucketPolicy and DeleteBucketPolicy for the owner
+	// Set a policy that denies GetBucketPolicy and DeleteBucketPolicy for everyone.
+	// Without ConfirmRemoveSelfBucketAccess, the owner is exempt from deny.
 	denyPolicy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*","Action":["s3:GetBucketPolicy","s3:DeleteBucketPolicy"],"Resource":"arn:aws:s3:::deny-policy"}]}`
 	wPut := doRequest(
 		h,
@@ -143,30 +144,34 @@ func TestGetDeleteBucketPolicyDenySelf(t *testing.T) {
 	)
 	requireStatus(t, wPut, http.StatusNoContent)
 
-	t.Run("GET policy denied by bucket policy", func(t *testing.T) {
+	t.Run("GET policy allowed for owner without ConfirmRemoveSelfBucketAccess", func(t *testing.T) {
 		w := doRequest(
 			h,
 			newRequest(http.MethodGet, "http://example.test/deny-policy?policy", "", ownerHeaders),
 		)
-		requireStatus(t, w, http.StatusForbidden)
-		requireS3ErrorCode(t, w, "AccessDenied")
+		requireStatus(t, w, http.StatusOK)
 	})
 
-	t.Run("DELETE policy denied by bucket policy", func(t *testing.T) {
-		w := doRequest(
-			h,
-			newRequest(
-				http.MethodDelete,
-				"http://example.test/deny-policy?policy",
-				"",
-				ownerHeaders,
-			),
-		)
-		requireStatus(t, w, http.StatusForbidden)
-		requireS3ErrorCode(t, w, "AccessDenied")
-	})
+	t.Run(
+		"DELETE policy allowed for owner without ConfirmRemoveSelfBucketAccess",
+		func(t *testing.T) {
+			// Re-set the policy first since delete clears it
+			_ = b.PutBucketPolicy("deny-policy", denyPolicy, false)
+			w := doRequest(
+				h,
+				newRequest(
+					http.MethodDelete,
+					"http://example.test/deny-policy?policy",
+					"",
+					ownerHeaders,
+				),
+			)
+			requireStatus(t, w, http.StatusNoContent)
+		},
+	)
 
 	t.Run("GET policy access denied for non-owner", func(t *testing.T) {
+		_ = b.PutBucketPolicy("deny-policy", denyPolicy, false)
 		w := doRequest(
 			h,
 			newRequest(http.MethodGet, "http://example.test/deny-policy?policy", "", nil),
@@ -182,6 +187,30 @@ func TestGetDeleteBucketPolicyDenySelf(t *testing.T) {
 		)
 		requireStatus(t, w, http.StatusForbidden)
 		requireS3ErrorCode(t, w, "AccessDenied")
+	})
+
+	t.Run("owner denied with ConfirmRemoveSelfBucketAccess", func(t *testing.T) {
+		// Set the policy with ConfirmRemoveSelfBucketAccess=true
+		_ = b.PutBucketPolicy("deny-policy", denyPolicy, true)
+
+		wGet := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/deny-policy?policy", "", ownerHeaders),
+		)
+		requireStatus(t, wGet, http.StatusForbidden)
+		requireS3ErrorCode(t, wGet, "AccessDenied")
+
+		wDel := doRequest(
+			h,
+			newRequest(
+				http.MethodDelete,
+				"http://example.test/deny-policy?policy",
+				"",
+				ownerHeaders,
+			),
+		)
+		requireStatus(t, wDel, http.StatusForbidden)
+		requireS3ErrorCode(t, wDel, "AccessDenied")
 	})
 }
 
@@ -214,6 +243,7 @@ func TestBucketPolicyStatusBranches(t *testing.T) {
 		if err := b.PutBucketPolicy(
 			"policy-status",
 			`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Principal":{"AWS":"arn:aws:iam::123456789012:user/u"},"Resource":"arn:aws:s3:::policy-status/*"}]}`,
+			false,
 		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
@@ -251,6 +281,7 @@ func TestBucketPolicyStatusBranches(t *testing.T) {
 		if err := b.PutBucketPolicy(
 			"policy-status",
 			`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Principal":{"AWS":"arn:aws:iam::123456789012:user/u"},"Resource":"arn:aws:s3:::policy-status/*"}]}`,
+			false,
 		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}

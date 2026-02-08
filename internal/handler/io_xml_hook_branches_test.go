@@ -191,6 +191,7 @@ func TestXMLMarshalErrorHookBranches(t *testing.T) {
 	if err := b.PutBucketPolicy(
 		"marshal-bucket",
 		`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::marshal-bucket/*"}]}`,
+		false,
 	); err != nil {
 		t.Fatalf("PutBucketPolicy failed: %v", err)
 	}

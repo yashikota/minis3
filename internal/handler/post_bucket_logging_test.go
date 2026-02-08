@@ -19,7 +19,7 @@ func TestPostBucketLoggingFlush(t *testing.T) {
 
 	// Set target bucket policy to allow logging service writes
 	tgtPolicy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"logging.s3.amazonaws.com"},"Action":"s3:PutObject","Resource":"arn:aws:s3:::tgt-log/*"}]}`
-	if err := b.PutBucketPolicy("tgt-log", tgtPolicy); err != nil {
+	if err := b.PutBucketPolicy("tgt-log", tgtPolicy, false); err != nil {
 		t.Fatalf("PutBucketPolicy failed: %v", err)
 	}
 

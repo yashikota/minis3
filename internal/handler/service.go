@@ -139,6 +139,28 @@ func (h *Handler) handleIAMAction(w http.ResponseWriter, r *http.Request, action
 	switch action {
 	case "GetUser":
 		h.handleIAMGetUser(w, r)
+	case "CreateUser":
+		h.handleIAMCreateUser(w, r)
+	case "CreateAccessKey":
+		h.handleIAMCreateAccessKey(w, r)
+	case "DeleteAccessKey":
+		h.handleIAMDeleteAccessKey(w, r)
+	case "DeleteUser":
+		h.handleIAMDeleteUser(w, r)
+	case "ListUsers":
+		h.handleIAMListUsers(w, r)
+	case "ListAccessKeys":
+		h.handleIAMListAccessKeys(w, r)
+	case "ListUserPolicies":
+		h.handleIAMListUserPolicies(w, r)
+	case "ListAttachedUserPolicies":
+		h.handleIAMListAttachedUserPolicies(w, r)
+	case "ListGroups":
+		h.handleIAMListGroups(w, r)
+	case "ListRoles":
+		h.handleIAMListRoles(w, r)
+	case "ListOpenIDConnectProviders":
+		h.handleIAMListOpenIDConnectProviders(w, r)
 	default:
 		backend.WriteError(w, http.StatusBadRequest, "Unknown", "Unknown")
 	}
@@ -188,7 +210,7 @@ func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 		arn = "arn:aws:iam::" + accountID + ":root"
 	}
 	resp := iamGetUserResponse{
-		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		Xmlns: iamXmlns,
 		GetUserResult: iamGetUserResult{
 			User: iamUser{
 				Path:       "/",
@@ -202,12 +224,353 @@ func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 			RequestID: generateRequestId(),
 		},
 	}
+	h.writeIAMResponse(w, resp)
+}
+
+const iamXmlns = "https://iam.amazonaws.com/doc/2010-05-08/"
+
+func (h *Handler) writeIAMResponse(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "text/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := xmlMarshalFn(v)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	_, _ = w.Write(output)
+}
+
+func iamFormValue(r *http.Request, key string) string {
+	_ = r.ParseForm()
+	if v := r.Form.Get(key); v != "" {
+		return v
+	}
+	return r.URL.Query().Get(key)
+}
+
+// --- CreateUser ---
+
+type iamCreateUserResponse struct {
+	XMLName          xml.Name            `xml:"CreateUserResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	CreateUserResult iamCreateUserResult `xml:"CreateUserResult"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type iamCreateUserResult struct {
+	User iamUser `xml:"User"`
+}
+
+func (h *Handler) handleIAMCreateUser(w http.ResponseWriter, r *http.Request) {
+	userName := iamFormValue(r, "UserName")
+	path := iamFormValue(r, "Path")
+	if path == "" {
+		path = "/"
+	}
+
+	user, err := h.backend.CreateIAMUser(userName, path)
+	if err != nil {
+		backend.WriteError(w, http.StatusConflict, "EntityAlreadyExists",
+			"User with name "+userName+" already exists.")
+		return
+	}
+
+	resp := iamCreateUserResponse{
+		Xmlns: iamXmlns,
+		CreateUserResult: iamCreateUserResult{
+			User: iamUser{
+				Path:       user.Path,
+				UserName:   user.UserName,
+				UserID:     user.UserID,
+				Arn:        user.Arn,
+				CreateDate: user.CreateDate.Format(time.RFC3339),
+			},
+		},
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	w.WriteHeader(http.StatusCreated)
+	h.writeIAMResponse(w, resp)
+}
+
+// --- CreateAccessKey ---
+
+type iamCreateAccessKeyResponse struct {
+	XMLName               xml.Name                 `xml:"CreateAccessKeyResponse"`
+	Xmlns                 string                   `xml:"xmlns,attr,omitempty"`
+	CreateAccessKeyResult iamCreateAccessKeyResult `xml:"CreateAccessKeyResult"`
+	ResponseMetadata      iamResponseMetadata      `xml:"ResponseMetadata"`
+}
+
+type iamCreateAccessKeyResult struct {
+	AccessKey iamAccessKeyDetail `xml:"AccessKey"`
+}
+
+type iamAccessKeyDetail struct {
+	UserName        string `xml:"UserName"`
+	AccessKeyId     string `xml:"AccessKeyId"`
+	Status          string `xml:"Status"`
+	SecretAccessKey string `xml:"SecretAccessKey"`
+	CreateDate      string `xml:"CreateDate"`
+}
+
+func (h *Handler) handleIAMCreateAccessKey(w http.ResponseWriter, r *http.Request) {
+	userName := iamFormValue(r, "UserName")
+
+	key, err := h.backend.CreateIAMAccessKey(userName)
+	if err != nil {
+		backend.WriteError(w, http.StatusNotFound, "NoSuchEntity",
+			"The user with name "+userName+" cannot be found.")
+		return
+	}
+
+	resp := iamCreateAccessKeyResponse{
+		Xmlns: iamXmlns,
+		CreateAccessKeyResult: iamCreateAccessKeyResult{
+			AccessKey: iamAccessKeyDetail{
+				UserName:        key.UserName,
+				AccessKeyId:     key.AccessKeyId,
+				Status:          key.Status,
+				SecretAccessKey: key.SecretAccessKey,
+				CreateDate:      key.CreateDate.Format(time.RFC3339),
+			},
+		},
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	w.WriteHeader(http.StatusCreated)
+	h.writeIAMResponse(w, resp)
+}
+
+// --- DeleteAccessKey ---
+
+type iamDeleteAccessKeyResponse struct {
+	XMLName          xml.Name            `xml:"DeleteAccessKeyResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+func (h *Handler) handleIAMDeleteAccessKey(w http.ResponseWriter, r *http.Request) {
+	userName := iamFormValue(r, "UserName")
+	accessKeyID := iamFormValue(r, "AccessKeyId")
+
+	_ = h.backend.DeleteIAMAccessKey(userName, accessKeyID)
+
+	resp := iamDeleteAccessKeyResponse{
+		Xmlns:            iamXmlns,
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+// --- DeleteUser ---
+
+type iamDeleteUserResponse struct {
+	XMLName          xml.Name            `xml:"DeleteUserResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+func (h *Handler) handleIAMDeleteUser(w http.ResponseWriter, r *http.Request) {
+	userName := iamFormValue(r, "UserName")
+
+	_ = h.backend.DeleteIAMUser(userName)
+
+	resp := iamDeleteUserResponse{
+		Xmlns:            iamXmlns,
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+// --- ListUsers ---
+
+type iamListUsersResponse struct {
+	XMLName          xml.Name            `xml:"ListUsersResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ListUsersResult  iamListUsersResult  `xml:"ListUsersResult"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type iamListUsersResult struct {
+	Users       []iamUserMember `xml:"Users>member,omitempty"`
+	IsTruncated bool            `xml:"IsTruncated"`
+}
+
+type iamUserMember struct {
+	Path       string `xml:"Path"`
+	UserName   string `xml:"UserName"`
+	UserID     string `xml:"UserId"`
+	Arn        string `xml:"Arn"`
+	CreateDate string `xml:"CreateDate"`
+}
+
+func (h *Handler) handleIAMListUsers(w http.ResponseWriter, r *http.Request) {
+	pathPrefix := iamFormValue(r, "PathPrefix")
+	users := h.backend.ListIAMUsers(pathPrefix)
+
+	result := iamListUsersResult{IsTruncated: false}
+	for _, u := range users {
+		result.Users = append(result.Users, iamUserMember{
+			Path:       u.Path,
+			UserName:   u.UserName,
+			UserID:     u.UserID,
+			Arn:        u.Arn,
+			CreateDate: u.CreateDate.Format(time.RFC3339),
+		})
+	}
+
+	resp := iamListUsersResponse{
+		Xmlns:            iamXmlns,
+		ListUsersResult:  result,
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+// --- ListAccessKeys ---
+
+type iamListAccessKeysResponse struct {
+	XMLName              xml.Name                `xml:"ListAccessKeysResponse"`
+	Xmlns                string                  `xml:"xmlns,attr,omitempty"`
+	ListAccessKeysResult iamListAccessKeysResult `xml:"ListAccessKeysResult"`
+	ResponseMetadata     iamResponseMetadata     `xml:"ResponseMetadata"`
+}
+
+type iamListAccessKeysResult struct {
+	AccessKeyMetadata []iamAccessKeyMetadata `xml:"AccessKeyMetadata>member,omitempty"`
+	IsTruncated       bool                   `xml:"IsTruncated"`
+}
+
+type iamAccessKeyMetadata struct {
+	UserName    string `xml:"UserName"`
+	AccessKeyId string `xml:"AccessKeyId"`
+	Status      string `xml:"Status"`
+	CreateDate  string `xml:"CreateDate"`
+}
+
+func (h *Handler) handleIAMListAccessKeys(w http.ResponseWriter, r *http.Request) {
+	userName := iamFormValue(r, "UserName")
+	keys := h.backend.ListIAMAccessKeys(userName)
+
+	result := iamListAccessKeysResult{IsTruncated: false}
+	for _, k := range keys {
+		result.AccessKeyMetadata = append(result.AccessKeyMetadata, iamAccessKeyMetadata{
+			UserName:    k.UserName,
+			AccessKeyId: k.AccessKeyId,
+			Status:      k.Status,
+			CreateDate:  k.CreateDate.Format(time.RFC3339),
+		})
+	}
+
+	resp := iamListAccessKeysResponse{
+		Xmlns:                iamXmlns,
+		ListAccessKeysResult: result,
+		ResponseMetadata:     iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+// --- Stub IAM list actions (return empty lists) ---
+
+type iamListUserPoliciesResponse struct {
+	XMLName                xml.Name                  `xml:"ListUserPoliciesResponse"`
+	Xmlns                  string                    `xml:"xmlns,attr,omitempty"`
+	ListUserPoliciesResult iamListUserPoliciesResult `xml:"ListUserPoliciesResult"`
+	ResponseMetadata       iamResponseMetadata       `xml:"ResponseMetadata"`
+}
+
+type iamListUserPoliciesResult struct {
+	PolicyNames []string `xml:"PolicyNames>member,omitempty"`
+	IsTruncated bool     `xml:"IsTruncated"`
+}
+
+func (h *Handler) handleIAMListUserPolicies(w http.ResponseWriter, r *http.Request) {
+	resp := iamListUserPoliciesResponse{
+		Xmlns:                  iamXmlns,
+		ListUserPoliciesResult: iamListUserPoliciesResult{IsTruncated: false},
+		ResponseMetadata:       iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+type iamListAttachedUserPoliciesResponse struct {
+	XMLName                        xml.Name                          `xml:"ListAttachedUserPoliciesResponse"`
+	Xmlns                          string                            `xml:"xmlns,attr,omitempty"`
+	ListAttachedUserPoliciesResult iamListAttachedUserPoliciesResult `xml:"ListAttachedUserPoliciesResult"`
+	ResponseMetadata               iamResponseMetadata               `xml:"ResponseMetadata"`
+}
+
+type iamListAttachedUserPoliciesResult struct {
+	AttachedPolicies []string `xml:"AttachedPolicies>member,omitempty"`
+	IsTruncated      bool     `xml:"IsTruncated"`
+}
+
+func (h *Handler) handleIAMListAttachedUserPolicies(w http.ResponseWriter, r *http.Request) {
+	resp := iamListAttachedUserPoliciesResponse{
+		Xmlns:                          iamXmlns,
+		ListAttachedUserPoliciesResult: iamListAttachedUserPoliciesResult{IsTruncated: false},
+		ResponseMetadata:               iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+type iamListGroupsResponse struct {
+	XMLName          xml.Name            `xml:"ListGroupsResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ListGroupsResult iamListGroupsResult `xml:"ListGroupsResult"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type iamListGroupsResult struct {
+	Groups      []string `xml:"Groups>member,omitempty"`
+	IsTruncated bool     `xml:"IsTruncated"`
+}
+
+func (h *Handler) handleIAMListGroups(w http.ResponseWriter, r *http.Request) {
+	resp := iamListGroupsResponse{
+		Xmlns:            iamXmlns,
+		ListGroupsResult: iamListGroupsResult{IsTruncated: false},
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+type iamListRolesResponse struct {
+	XMLName          xml.Name            `xml:"ListRolesResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ListRolesResult  iamListRolesResult  `xml:"ListRolesResult"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type iamListRolesResult struct {
+	Roles       []string `xml:"Roles>member,omitempty"`
+	IsTruncated bool     `xml:"IsTruncated"`
+}
+
+func (h *Handler) handleIAMListRoles(w http.ResponseWriter, r *http.Request) {
+	resp := iamListRolesResponse{
+		Xmlns:            iamXmlns,
+		ListRolesResult:  iamListRolesResult{IsTruncated: false},
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+type iamListOpenIDConnectProvidersResponse struct {
+	XMLName                          xml.Name                            `xml:"ListOpenIDConnectProvidersResponse"`
+	Xmlns                            string                              `xml:"xmlns,attr,omitempty"`
+	ListOpenIDConnectProvidersResult iamListOpenIDConnectProvidersResult `xml:"ListOpenIDConnectProvidersResult"`
+	ResponseMetadata                 iamResponseMetadata                 `xml:"ResponseMetadata"`
+}
+
+type iamListOpenIDConnectProvidersResult struct {
+	OpenIDConnectProviderList []string `xml:"OpenIDConnectProviderList>member,omitempty"`
+}
+
+func (h *Handler) handleIAMListOpenIDConnectProviders(w http.ResponseWriter, r *http.Request) {
+	resp := iamListOpenIDConnectProvidersResponse{
+		Xmlns:                            iamXmlns,
+		ListOpenIDConnectProvidersResult: iamListOpenIDConnectProvidersResult{},
+		ResponseMetadata:                 iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
 }

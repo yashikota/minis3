@@ -416,7 +416,7 @@ func (b *Backend) GetBucketPolicy(bucketName string) (string, error) {
 }
 
 // PutBucketPolicy sets the bucket policy.
-func (b *Backend) PutBucketPolicy(bucketName, policy string) error {
+func (b *Backend) PutBucketPolicy(bucketName, policy string, denySelfAccess bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -434,6 +434,7 @@ func (b *Backend) PutBucketPolicy(bucketName, policy string) error {
 	}
 
 	bucket.Policy = policy
+	bucket.PolicyDenySelfAccess = denySelfAccess
 	return nil
 }
 
@@ -448,6 +449,7 @@ func (b *Backend) DeleteBucketPolicy(bucketName string) error {
 	}
 
 	bucket.Policy = ""
+	bucket.PolicyDenySelfAccess = false
 	return nil
 }
 
