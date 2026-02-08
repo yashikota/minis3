@@ -87,9 +87,6 @@ type Object struct {
 	LegalHoldStatus string     // ON or OFF
 	// Storage class
 	StorageClass string // e.g., STANDARD, REDUCED_REDUNDANCY, etc.
-	// Restore fields (for GLACIER / DEEP_ARCHIVE)
-	Restored          bool       // true after RestoreObject has been called
-	RestoreExpiryDate *time.Time // non-nil for temporary restores
 	// Server-Side Encryption fields
 	ServerSideEncryption string // AES256, aws:kms, etc.
 	SSEKMSKeyId          string // KMS key ID (only for aws:kms)
@@ -97,6 +94,9 @@ type Object struct {
 	SSECustomerKeyMD5    string // MD5 of customer-provided key (for SSE-C)
 	// Website redirect
 	WebsiteRedirectLocation string // x-amz-website-redirect-location
+	// Restore (GLACIER) fields
+	RestoreOngoing    bool       // true while restore is in progress
+	RestoreExpiryDate *time.Time // when the restored copy expires
 	// Multipart part info (populated after CompleteMultipartUpload)
 	Parts []ObjectPart
 }
@@ -213,6 +213,9 @@ var (
 	)
 	ErrInvalidObjectState = errors.New(
 		"the operation is not valid for the object's storage class",
+	)
+	ErrRestoreAlreadyInProgress = errors.New(
+		"object restore is already in progress",
 	)
 )
 

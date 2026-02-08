@@ -1,103 +1,216 @@
 package backend
 
 import (
+	"errors"
 	"testing"
+	"time"
 )
 
-func TestRestoreObject(t *testing.T) {
+func TestRestoreObjectHappyPath(t *testing.T) {
 	b := New()
 	if err := b.CreateBucket("bucket"); err != nil {
-		t.Fatalf("CreateBucket failed: %v", err)
+		t.Fatalf("CreateBucket: %v", err)
 	}
 
-	// Put a GLACIER object
-	_, err := b.PutObject("bucket", "glacier-obj", []byte("data"), PutObjectOptions{
+	_, err := b.PutObject("bucket", "key", []byte("data"), PutObjectOptions{
 		StorageClass: "GLACIER",
 	})
 	if err != nil {
-		t.Fatalf("PutObject failed: %v", err)
+		t.Fatalf("PutObject: %v", err)
 	}
 
-	// Put a STANDARD object
-	_, err = b.PutObject("bucket", "standard-obj", []byte("data"), PutObjectOptions{})
+	// New restore returns 202
+	result, err := b.RestoreObject("bucket", "key", "", 1)
 	if err != nil {
-		t.Fatalf("PutObject failed: %v", err)
+		t.Fatalf("RestoreObject: %v", err)
+	}
+	if result.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", result.StatusCode)
 	}
 
-	t.Run("restore GLACIER object with days", func(t *testing.T) {
-		err := b.RestoreObject("bucket", "glacier-obj", "", 7)
-		if err != nil {
-			t.Fatalf("RestoreObject failed: %v", err)
-		}
-		obj, err := b.GetObject("bucket", "glacier-obj")
-		if err != nil {
-			t.Fatalf("GetObject failed: %v", err)
-		}
-		if !obj.Restored {
-			t.Fatal("expected Restored=true")
-		}
-		if obj.RestoreExpiryDate == nil {
-			t.Fatal("expected non-nil RestoreExpiryDate for temporary restore")
-		}
-	})
+	// Already restored returns 200
+	result, err = b.RestoreObject("bucket", "key", "", 5)
+	if err != nil {
+		t.Fatalf("RestoreObject second call: %v", err)
+	}
+	if result.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", result.StatusCode)
+	}
+}
 
-	t.Run("restore GLACIER object permanent", func(t *testing.T) {
-		err := b.RestoreObject("bucket", "glacier-obj", "", 0)
-		if err != nil {
-			t.Fatalf("RestoreObject failed: %v", err)
-		}
-		obj, err := b.GetObject("bucket", "glacier-obj")
-		if err != nil {
-			t.Fatalf("GetObject failed: %v", err)
-		}
-		if !obj.Restored {
-			t.Fatal("expected Restored=true")
-		}
-		if obj.RestoreExpiryDate != nil {
-			t.Fatal("expected nil RestoreExpiryDate for permanent restore")
-		}
-	})
+func TestRestoreObjectDeepArchive(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("bucket"); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
 
-	t.Run("restore non-archived object fails", func(t *testing.T) {
-		err := b.RestoreObject("bucket", "standard-obj", "", 7)
-		if err != ErrInvalidObjectState {
-			t.Fatalf("expected ErrInvalidObjectState, got %v", err)
-		}
+	_, err := b.PutObject("bucket", "key", []byte("data"), PutObjectOptions{
+		StorageClass: "DEEP_ARCHIVE",
 	})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
 
-	t.Run("restore nonexistent bucket", func(t *testing.T) {
-		err := b.RestoreObject("no-such-bucket", "key", "", 7)
-		if err != ErrBucketNotFound {
-			t.Fatalf("expected ErrBucketNotFound, got %v", err)
-		}
-	})
+	result, err := b.RestoreObject("bucket", "key", "", 3)
+	if err != nil {
+		t.Fatalf("RestoreObject: %v", err)
+	}
+	if result.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", result.StatusCode)
+	}
+}
 
-	t.Run("restore nonexistent object", func(t *testing.T) {
-		err := b.RestoreObject("bucket", "no-such-key", "", 7)
-		if err != ErrObjectNotFound {
-			t.Fatalf("expected ErrObjectNotFound, got %v", err)
-		}
-	})
+func TestRestoreObjectNonGlacierFails(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("bucket"); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
 
-	t.Run("restore DEEP_ARCHIVE object", func(t *testing.T) {
-		_, err := b.PutObject("bucket", "deep-obj", []byte("data"), PutObjectOptions{
-			StorageClass: "DEEP_ARCHIVE",
-		})
-		if err != nil {
-			t.Fatalf("PutObject failed: %v", err)
-		}
-		err = b.RestoreObject("bucket", "deep-obj", "", 3)
-		if err != nil {
-			t.Fatalf("RestoreObject failed: %v", err)
-		}
-		obj, err := b.GetObject("bucket", "deep-obj")
-		if err != nil {
-			t.Fatalf("GetObject failed: %v", err)
-		}
-		if !obj.Restored {
-			t.Fatal("expected Restored=true")
-		}
+	_, err := b.PutObject("bucket", "key", []byte("data"), PutObjectOptions{})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+
+	_, err = b.RestoreObject("bucket", "key", "", 1)
+	if !errors.Is(err, ErrInvalidObjectState) {
+		t.Fatalf("expected ErrInvalidObjectState, got %v", err)
+	}
+}
+
+func TestRestoreObjectBucketNotFound(t *testing.T) {
+	b := New()
+	_, err := b.RestoreObject("no-bucket", "key", "", 1)
+	if !errors.Is(err, ErrBucketNotFound) {
+		t.Fatalf("expected ErrBucketNotFound, got %v", err)
+	}
+}
+
+func TestRestoreObjectKeyNotFound(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("bucket"); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+
+	_, err := b.RestoreObject("bucket", "no-key", "", 1)
+	if !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+}
+
+func TestRestoreObjectVersionNotFound(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("bucket"); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+
+	_, err := b.PutObject("bucket", "key", []byte("data"), PutObjectOptions{
+		StorageClass: "GLACIER",
 	})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+
+	_, err = b.RestoreObject("bucket", "key", "bad-version", 1)
+	if !errors.Is(err, ErrVersionNotFound) {
+		t.Fatalf("expected ErrVersionNotFound, got %v", err)
+	}
+}
+
+func TestRestoreObjectDeleteMarker(t *testing.T) {
+	b := New()
+	if err := b.CreateBucketWithObjectLock("bucket"); err != nil {
+		t.Fatalf("CreateBucketWithObjectLock: %v", err)
+	}
+
+	_, err := b.PutObject("bucket", "key", []byte("data"), PutObjectOptions{
+		StorageClass: "GLACIER",
+	})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+
+	// Create a delete marker
+	_, err = b.DeleteObject("bucket", "key", false)
+	if err != nil {
+		t.Fatalf("DeleteObject: %v", err)
+	}
+
+	// Restore against delete marker should fail
+	_, err = b.RestoreObject("bucket", "key", "", 1)
+	if !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+}
+
+func TestRestoreObjectPermanent(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("bucket"); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+
+	_, err := b.PutObject("bucket", "key", []byte("data"), PutObjectOptions{
+		StorageClass: "GLACIER",
+	})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+
+	// Permanent restore (days=0)
+	result, err := b.RestoreObject("bucket", "key", "", 0)
+	if err != nil {
+		t.Fatalf("RestoreObject: %v", err)
+	}
+	if result.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", result.StatusCode)
+	}
+
+	// Verify the object is restored
+	obj, err := b.GetObject("bucket", "key")
+	if err != nil {
+		t.Fatalf("GetObject: %v", err)
+	}
+	if obj.RestoreOngoing {
+		t.Fatal("expected RestoreOngoing=false")
+	}
+	if obj.RestoreExpiryDate == nil {
+		t.Fatal("expected RestoreExpiryDate to be set")
+	}
+	// Permanent restore should have far-future expiry
+	if !obj.RestoreExpiryDate.After(time.Now().AddDate(99, 0, 0)) {
+		t.Fatal("expected far-future RestoreExpiryDate for permanent restore")
+	}
+}
+
+func TestRestoreObjectWithVersionId(t *testing.T) {
+	b := New()
+	if err := b.CreateBucketWithObjectLock("bucket"); err != nil {
+		t.Fatalf("CreateBucketWithObjectLock: %v", err)
+	}
+
+	obj, err := b.PutObject("bucket", "key", []byte("v1"), PutObjectOptions{
+		StorageClass: "GLACIER",
+	})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+	vid := obj.VersionId
+
+	// Put another version
+	_, err = b.PutObject("bucket", "key", []byte("v2"), PutObjectOptions{
+		StorageClass: "GLACIER",
+	})
+	if err != nil {
+		t.Fatalf("PutObject v2: %v", err)
+	}
+
+	// Restore the first version
+	result, err := b.RestoreObject("bucket", "key", vid, 2)
+	if err != nil {
+		t.Fatalf("RestoreObject: %v", err)
+	}
+	if result.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", result.StatusCode)
+	}
 }
 
 func TestIsArchivedStorageClass(t *testing.T) {

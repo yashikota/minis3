@@ -148,6 +148,18 @@ type RestoreStatus struct {
 	RestoreExpiryDate   string `xml:"RestoreExpiryDate,omitempty"`
 }
 
+// RestoreRequest represents the XML body for POST /{key}?restore.
+type RestoreRequest struct {
+	XMLName              xml.Name              `xml:"RestoreRequest"`
+	Days                 int                   `xml:"Days,omitempty"`
+	GlacierJobParameters *GlacierJobParameters `xml:"GlacierJobParameters,omitempty"`
+}
+
+// GlacierJobParameters configures the retrieval tier for GLACIER restores.
+type GlacierJobParameters struct {
+	Tier string `xml:"Tier"` // Standard, Expedited, Bulk
+}
+
 type CommonPrefix struct {
 	Prefix string `xml:"Prefix"`
 }
@@ -819,18 +831,6 @@ type PostBucketLoggingResult struct {
 	XMLName              xml.Name `xml:"PostBucketLoggingResult"`
 	Xmlns                string   `xml:"xmlns,attr,omitempty"`
 	FlushedLoggingObject string   `xml:"FlushedLoggingObject,omitempty"`
-}
-
-// RestoreRequest is the XML body for POST ?restore (RestoreObject).
-type RestoreRequest struct {
-	XMLName              xml.Name              `xml:"RestoreRequest"`
-	Days                 int                   `xml:"Days,omitempty"`
-	GlacierJobParameters *GlacierJobParameters `xml:"GlacierJobParameters,omitempty"`
-}
-
-// GlacierJobParameters contains parameters for Glacier restore jobs.
-type GlacierJobParameters struct {
-	Tier string `xml:"Tier"`
 }
 
 // IsArchivedStorageClass returns true if the storage class is an archived tier.

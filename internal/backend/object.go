@@ -354,6 +354,9 @@ func (b *Backend) PutObject(
 		obj.LegalHoldStatus = opts.LegalHoldStatus
 	}
 
+	// Apply bucket default retention when no explicit retention was set
+	applyDefaultRetention(bucket, obj)
+
 	addVersionToObject(bucket, key, obj)
 
 	return obj, nil
@@ -733,6 +736,9 @@ func (b *Backend) CopyObject(
 		obj.Owner = OwnerForAccessKey(dstBkt.OwnerAccessKey)
 		obj.ACL = NewDefaultACLForOwner(obj.Owner)
 	}
+
+	// Apply bucket default retention when no explicit retention was set
+	applyDefaultRetention(dstBkt, obj)
 
 	addVersionToObject(dstBkt, dstKey, obj)
 
@@ -1361,54 +1367,4 @@ func (b *Backend) DeleteObjectTagging(bucketName, key, versionId string) (string
 
 	obj.Tags = nil
 	return obj.VersionId, nil
-}
-
-// RestoreObject restores an archived object (GLACIER or DEEP_ARCHIVE).
-// For minis3, restore is instantaneous (no async retrieval).
-func (b *Backend) RestoreObject(bucketName, key, versionID string, days int) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	bucket, ok := b.buckets[bucketName]
-	if !ok {
-		return ErrBucketNotFound
-	}
-
-	versions, ok := bucket.Objects[key]
-	if !ok || len(versions.Versions) == 0 {
-		return ErrObjectNotFound
-	}
-
-	var obj *Object
-	if versionID == "" || versionID == NullVersionId {
-		obj = versions.Versions[0]
-	} else {
-		for _, v := range versions.Versions {
-			if v.VersionId == versionID {
-				obj = v
-				break
-			}
-		}
-		if obj == nil {
-			return ErrVersionNotFound
-		}
-	}
-
-	if obj.IsDeleteMarker {
-		return ErrObjectNotFound
-	}
-
-	if !IsArchivedStorageClass(obj.StorageClass) {
-		return ErrInvalidObjectState
-	}
-
-	obj.Restored = true
-	if days > 0 {
-		expiry := time.Now().UTC().Add(time.Duration(days) * 24 * time.Hour)
-		obj.RestoreExpiryDate = &expiry
-	} else {
-		obj.RestoreExpiryDate = nil
-	}
-
-	return nil
 }

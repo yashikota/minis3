@@ -275,3 +275,212 @@ func TestPutObjectRetentionVersionNotFound(t *testing.T) {
 		t.Fatalf("expected ErrVersionNotFound, got %v", err)
 	}
 }
+
+func TestApplyDefaultRetentionOnPutObject(t *testing.T) {
+	b := New()
+	if err := b.CreateBucketWithObjectLock("default-retention"); err != nil {
+		t.Fatalf("CreateBucketWithObjectLock: %v", err)
+	}
+
+	t.Run("days-based default retention", func(t *testing.T) {
+		err := b.PutObjectLockConfiguration("default-retention", &ObjectLockConfiguration{
+			ObjectLockEnabled: "Enabled",
+			Rule: &ObjectLockRule{
+				DefaultRetention: &DefaultRetention{
+					Mode: RetentionModeGovernance,
+					Days: 10,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutObjectLockConfiguration: %v", err)
+		}
+
+		obj, err := b.PutObject("default-retention", "key1", []byte("data"), PutObjectOptions{})
+		if err != nil {
+			t.Fatalf("PutObject: %v", err)
+		}
+		if obj.RetentionMode != RetentionModeGovernance {
+			t.Fatalf("expected GOVERNANCE, got %q", obj.RetentionMode)
+		}
+		if obj.RetainUntilDate == nil {
+			t.Fatal("expected RetainUntilDate to be set")
+		}
+		expected := obj.LastModified.AddDate(0, 0, 10)
+		if !obj.RetainUntilDate.Equal(expected) {
+			t.Fatalf("expected %v, got %v", expected, *obj.RetainUntilDate)
+		}
+	})
+
+	t.Run("years-based default retention", func(t *testing.T) {
+		err := b.PutObjectLockConfiguration("default-retention", &ObjectLockConfiguration{
+			ObjectLockEnabled: "Enabled",
+			Rule: &ObjectLockRule{
+				DefaultRetention: &DefaultRetention{
+					Mode:  RetentionModeCompliance,
+					Years: 2,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutObjectLockConfiguration: %v", err)
+		}
+
+		obj, err := b.PutObject("default-retention", "key2", []byte("data"), PutObjectOptions{})
+		if err != nil {
+			t.Fatalf("PutObject: %v", err)
+		}
+		if obj.RetentionMode != RetentionModeCompliance {
+			t.Fatalf("expected COMPLIANCE, got %q", obj.RetentionMode)
+		}
+		expected := obj.LastModified.AddDate(2, 0, 0)
+		if !obj.RetainUntilDate.Equal(expected) {
+			t.Fatalf("expected %v, got %v", expected, *obj.RetainUntilDate)
+		}
+	})
+
+	t.Run("explicit retention overrides default", func(t *testing.T) {
+		err := b.PutObjectLockConfiguration("default-retention", &ObjectLockConfiguration{
+			ObjectLockEnabled: "Enabled",
+			Rule: &ObjectLockRule{
+				DefaultRetention: &DefaultRetention{
+					Mode: RetentionModeGovernance,
+					Days: 10,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("PutObjectLockConfiguration: %v", err)
+		}
+
+		explicitDate := time.Now().UTC().Add(365 * 24 * time.Hour)
+		obj, err := b.PutObject("default-retention", "key3", []byte("data"), PutObjectOptions{
+			RetentionMode:   RetentionModeCompliance,
+			RetainUntilDate: &explicitDate,
+		})
+		if err != nil {
+			t.Fatalf("PutObject: %v", err)
+		}
+		if obj.RetentionMode != RetentionModeCompliance {
+			t.Fatalf("expected COMPLIANCE, got %q", obj.RetentionMode)
+		}
+		// Explicit retention should not be overridden by default
+		if !obj.RetainUntilDate.Equal(explicitDate) {
+			t.Fatalf("expected explicit date, got %v", *obj.RetainUntilDate)
+		}
+	})
+
+	t.Run("no default retention configured", func(t *testing.T) {
+		err := b.PutObjectLockConfiguration("default-retention", &ObjectLockConfiguration{
+			ObjectLockEnabled: "Enabled",
+		})
+		if err != nil {
+			t.Fatalf("PutObjectLockConfiguration: %v", err)
+		}
+
+		obj, err := b.PutObject("default-retention", "key4", []byte("data"), PutObjectOptions{})
+		if err != nil {
+			t.Fatalf("PutObject: %v", err)
+		}
+		if obj.RetentionMode != "" {
+			t.Fatalf("expected empty retention mode, got %q", obj.RetentionMode)
+		}
+		if obj.RetainUntilDate != nil {
+			t.Fatal("expected nil RetainUntilDate")
+		}
+	})
+}
+
+func TestApplyDefaultRetentionOnCopyObject(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("src-bucket"); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+	if err := b.CreateBucketWithObjectLock("dst-bucket"); err != nil {
+		t.Fatalf("CreateBucketWithObjectLock: %v", err)
+	}
+
+	err := b.PutObjectLockConfiguration("dst-bucket", &ObjectLockConfiguration{
+		ObjectLockEnabled: "Enabled",
+		Rule: &ObjectLockRule{
+			DefaultRetention: &DefaultRetention{
+				Mode: RetentionModeGovernance,
+				Days: 5,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutObjectLockConfiguration: %v", err)
+	}
+
+	_, err = b.PutObject("src-bucket", "src-key", []byte("data"), PutObjectOptions{})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+
+	obj, _, err := b.CopyObject(
+		"src-bucket",
+		"src-key",
+		"",
+		"dst-bucket",
+		"dst-key",
+		CopyObjectOptions{},
+	)
+	if err != nil {
+		t.Fatalf("CopyObject: %v", err)
+	}
+	if obj.RetentionMode != RetentionModeGovernance {
+		t.Fatalf("expected GOVERNANCE, got %q", obj.RetentionMode)
+	}
+	if obj.RetainUntilDate == nil {
+		t.Fatal("expected RetainUntilDate to be set")
+	}
+}
+
+func TestApplyDefaultRetentionOnCompleteMultipartUpload(t *testing.T) {
+	b := New()
+	if err := b.CreateBucketWithObjectLock("mpu-bucket"); err != nil {
+		t.Fatalf("CreateBucketWithObjectLock: %v", err)
+	}
+
+	err := b.PutObjectLockConfiguration("mpu-bucket", &ObjectLockConfiguration{
+		ObjectLockEnabled: "Enabled",
+		Rule: &ObjectLockRule{
+			DefaultRetention: &DefaultRetention{
+				Mode: RetentionModeCompliance,
+				Days: 30,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutObjectLockConfiguration: %v", err)
+	}
+
+	upload, err := b.CreateMultipartUpload("mpu-bucket", "mpu-key", CreateMultipartUploadOptions{})
+	if err != nil {
+		t.Fatalf("CreateMultipartUpload: %v", err)
+	}
+
+	data := make([]byte, 5*1024*1024)
+	part, err := b.UploadPart("mpu-bucket", "mpu-key", upload.UploadId, 1, data)
+	if err != nil {
+		t.Fatalf("UploadPart: %v", err)
+	}
+
+	obj, err := b.CompleteMultipartUpload("mpu-bucket", "mpu-key", upload.UploadId, []CompletePart{
+		{PartNumber: 1, ETag: part.ETag},
+	})
+	if err != nil {
+		t.Fatalf("CompleteMultipartUpload: %v", err)
+	}
+	if obj.RetentionMode != RetentionModeCompliance {
+		t.Fatalf("expected COMPLIANCE, got %q", obj.RetentionMode)
+	}
+	if obj.RetainUntilDate == nil {
+		t.Fatal("expected RetainUntilDate to be set")
+	}
+	expected := obj.LastModified.AddDate(0, 0, 30)
+	if !obj.RetainUntilDate.Equal(expected) {
+		t.Fatalf("expected %v, got %v", expected, *obj.RetainUntilDate)
+	}
+}

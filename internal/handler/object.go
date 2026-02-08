@@ -213,6 +213,28 @@ func setStorageAndEncryptionHeaders(w http.ResponseWriter, obj *backend.Object) 
 	}
 }
 
+// isArchivedStorageClass returns true for storage classes that require restore before access.
+func isArchivedStorageClass(sc string) bool {
+	return sc == "GLACIER" || sc == "DEEP_ARCHIVE"
+}
+
+// isObjectRestored returns true if the object has been restored and the restore has not expired.
+func isObjectRestored(obj *backend.Object) bool {
+	return obj.RestoreExpiryDate != nil && obj.RestoreExpiryDate.After(time.Now().UTC())
+}
+
+// setRestoreHeader sets the x-amz-restore header for objects with restore information.
+func setRestoreHeader(w http.ResponseWriter, obj *backend.Object) {
+	if obj.RestoreExpiryDate != nil {
+		if obj.RestoreOngoing {
+			w.Header().Set("x-amz-restore", `ongoing-request="true"`)
+		} else {
+			expiry := obj.RestoreExpiryDate.Format(http.TimeFormat)
+			w.Header().Set("x-amz-restore", fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`, expiry))
+		}
+	}
+}
+
 func (h *Handler) setLifecycleExpirationHeader(
 	w http.ResponseWriter,
 	bucketName, key string,
@@ -1333,6 +1355,11 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
+		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
+		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
+			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
+		}
+
 		// Check PartNumber validity before SSE-C access (invalid part takes priority)
 		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
 			partNumber, parseErr := strconv.Atoi(partNumberStr)
@@ -1411,20 +1438,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		setObjectLockHeaders(w, obj)
 		// Set StorageClass and SSE headers
 		setStorageAndEncryptionHeaders(w, obj)
+		// Set x-amz-restore header for archived objects
 		setRestoreHeader(w, obj)
 		h.setLifecycleExpirationHeader(w, bucketName, key, obj)
 		// Set Website Redirect Location header
 		if obj.WebsiteRedirectLocation != "" {
 			w.Header().Set("x-amz-website-redirect-location", obj.WebsiteRedirectLocation)
-		}
-
-		// Block GET on non-restored archived objects.
-		// If archived and restored, allow read-through. If not restored,
-		// auto-restore inline (mock test expects read-through to work).
-		if backend.IsArchivedStorageClass(obj.StorageClass) && !obj.Restored {
-			// Auto-restore inline for read-through support
-			_ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
-			obj.Restored = true
 		}
 
 		// Apply response header overrides from query parameters
@@ -1614,6 +1633,11 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
+		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
+			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
+		}
+
 		// Validate SSE-C access
 		if validateSSECAccess(w, r, obj) {
 			return
@@ -1675,6 +1699,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		setObjectLockHeaders(w, obj)
 		// Set StorageClass and SSE headers
 		setStorageAndEncryptionHeaders(w, obj)
+		// Set x-amz-restore header for archived objects
 		setRestoreHeader(w, obj)
 		h.setLifecycleExpirationHeader(w, bucketName, key, obj)
 		// Set Website Redirect Location header
@@ -2814,7 +2839,7 @@ func (h *Handler) handleGetObjectAttributes(
 	_, _ = w.Write(output)
 }
 
-// handleRestoreObject handles POST ?restore (RestoreObject).
+// handleRestoreObject handles POST /{key}?restore requests.
 func (h *Handler) handleRestoreObject(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -2825,21 +2850,17 @@ func (h *Handler) handleRestoreObject(
 		return
 	}
 
-	defer func() { _ = r.Body.Close() }()
+	versionId := r.URL.Query().Get("versionId")
+
 	body, err := readAllFn(r.Body)
 	if err != nil {
-		backend.WriteError(
-			w,
-			http.StatusBadRequest,
-			"InvalidRequest",
-			"Failed to read request body.",
-		)
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 
-	var req backend.RestoreRequest
+	var restoreReq backend.RestoreRequest
 	if len(body) > 0 {
-		if err := xml.Unmarshal(body, &req); err != nil {
+		if xmlErr := xml.Unmarshal(body, &restoreReq); xmlErr != nil {
 			backend.WriteError(
 				w,
 				http.StatusBadRequest,
@@ -2850,58 +2871,26 @@ func (h *Handler) handleRestoreObject(
 		}
 	}
 
-	versionID := r.URL.Query().Get("versionId")
-	err = h.backend.RestoreObject(bucketName, key, versionID, req.Days)
+	result, err := h.backend.RestoreObject(bucketName, key, versionId, restoreReq.Days)
 	if err != nil {
 		switch {
 		case errors.Is(err, backend.ErrBucketNotFound):
-			backend.WriteError(
-				w,
-				http.StatusNotFound,
-				"NoSuchBucket",
-				"The specified bucket does not exist.",
-			)
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket",
+				"The specified bucket does not exist.")
 		case errors.Is(err, backend.ErrObjectNotFound):
-			backend.WriteError(
-				w,
-				http.StatusNotFound,
-				"NoSuchKey",
-				"The specified key does not exist.",
-			)
+			backend.WriteError(w, http.StatusNotFound, "NoSuchKey",
+				"The specified key does not exist.")
 		case errors.Is(err, backend.ErrVersionNotFound):
-			backend.WriteError(
-				w,
-				http.StatusNotFound,
-				"NoSuchVersion",
-				"The specified version does not exist.",
-			)
+			backend.WriteError(w, http.StatusNotFound, "NoSuchVersion",
+				"The specified version does not exist.")
 		case errors.Is(err, backend.ErrInvalidObjectState):
-			backend.WriteError(
-				w,
-				http.StatusForbidden,
-				"InvalidObjectState",
-				"The operation is not valid for the object's storage class.",
-			)
+			backend.WriteError(w, http.StatusForbidden, "InvalidObjectState",
+				"The operation is not valid for the object's storage class.")
 		default:
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-}
-
-// setRestoreHeader sets the x-amz-restore header on a response if the object
-// has been restored from an archived storage class.
-func setRestoreHeader(w http.ResponseWriter, obj *backend.Object) {
-	if obj == nil || !obj.Restored {
-		return
-	}
-	if obj.RestoreExpiryDate != nil {
-		w.Header().Set("x-amz-restore",
-			fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`,
-				obj.RestoreExpiryDate.Format(http.TimeFormat)))
-	} else {
-		w.Header().Set("x-amz-restore", `ongoing-request="false"`)
-	}
+	w.WriteHeader(result.StatusCode)
 }
