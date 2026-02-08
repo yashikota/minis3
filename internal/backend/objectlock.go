@@ -188,6 +188,7 @@ func (b *Backend) PutObjectRetention(
 		if err != nil {
 			return ErrInvalidRequest
 		}
+		t = t.UTC().Truncate(time.Second)
 		newRetainUntil = &t
 	}
 

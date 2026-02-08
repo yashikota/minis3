@@ -344,6 +344,21 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 	if denied {
 		t.Fatal("expected access to be denied with non-matching existing object tag")
 	}
+
+	ownerReq := httptest.NewRequest(http.MethodGet, "/policy-context-bucket/obj", nil)
+	ownerReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	ownerAllowed := h.checkAccessWithContext(
+		ownerReq,
+		"policy-context-bucket",
+		"s3:GetObject",
+		"obj",
+		backend.PolicyEvalContext{
+			ExistingObjectTags: map[string]string{"Project": "beta"},
+		},
+	)
+	if !ownerAllowed {
+		t.Fatal("expected bucket owner to remain allowed without explicit deny")
+	}
 }
 
 func TestCheckAccessBucketACLCanonicalUserPermissions(t *testing.T) {
@@ -494,17 +509,27 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 	if err := xml.Unmarshal(getRes.Body.Bytes(), &acl); err != nil {
 		t.Fatalf("failed to parse GetObjectAcl response: %v", err)
 	}
-	if len(acl.AccessControlList.Grants) != 5 {
+	if len(acl.AccessControlList.Grants) != 6 {
 		t.Fatalf("unexpected grant count: %d", len(acl.AccessControlList.Grants))
 	}
 	seen := make(map[string]bool, 5)
+	ownerSeen := false
+	owner := backend.OwnerForAccessKey("minis3-access-key")
 	for _, grant := range acl.AccessControlList.Grants {
-		if grant.Grantee == nil ||
-			grant.Grantee.ID != alt.ID ||
-			grant.Grantee.DisplayName != alt.DisplayName {
-			t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
+		if grant.Grantee == nil {
+			t.Fatalf("unexpected nil grantee in grant")
 		}
-		seen[grant.Permission] = true
+		if grant.Grantee.ID == alt.ID && grant.Grantee.DisplayName == alt.DisplayName {
+			seen[grant.Permission] = true
+			continue
+		}
+		if owner != nil &&
+			grant.Grantee.ID == owner.ID &&
+			grant.Permission == backend.PermissionFullControl {
+			ownerSeen = true
+			continue
+		}
+		t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
 	}
 	for _, permission := range []string{
 		backend.PermissionRead,
@@ -520,6 +545,9 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 				acl.AccessControlList.Grants,
 			)
 		}
+	}
+	if !ownerSeen {
+		t.Fatalf("missing owner full control grant: %+v", acl.AccessControlList.Grants)
 	}
 }
 
@@ -557,16 +585,27 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 	if err := xml.Unmarshal(getRes.Body.Bytes(), &acl); err != nil {
 		t.Fatalf("failed to parse GetBucketAcl response: %v", err)
 	}
-	if len(acl.AccessControlList.Grants) != 5 {
+	if len(acl.AccessControlList.Grants) != 6 {
 		t.Fatalf("unexpected grant count: %d", len(acl.AccessControlList.Grants))
 	}
 	seen := make(map[string]bool, 5)
+	ownerSeen := false
+	owner := backend.OwnerForAccessKey("minis3-access-key")
 	for _, grant := range acl.AccessControlList.Grants {
-		if grant.Grantee == nil || grant.Grantee.ID != alt.ID ||
-			grant.Grantee.DisplayName != alt.DisplayName {
-			t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
+		if grant.Grantee == nil {
+			t.Fatalf("unexpected nil grantee in grant")
 		}
-		seen[grant.Permission] = true
+		if grant.Grantee.ID == alt.ID && grant.Grantee.DisplayName == alt.DisplayName {
+			seen[grant.Permission] = true
+			continue
+		}
+		if owner != nil &&
+			grant.Grantee.ID == owner.ID &&
+			grant.Permission == backend.PermissionFullControl {
+			ownerSeen = true
+			continue
+		}
+		t.Fatalf("unexpected grantee in grant: %+v", grant.Grantee)
 	}
 	for _, permission := range []string{
 		backend.PermissionRead,
@@ -582,6 +621,9 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 				acl.AccessControlList.Grants,
 			)
 		}
+	}
+	if !ownerSeen {
+		t.Fatalf("missing owner full control grant: %+v", acl.AccessControlList.Grants)
 	}
 }
 

@@ -399,3 +399,37 @@ func TestHandleObjectDeleteAdditionalBranches(t *testing.T) {
 		requireS3ErrorCode(t, w, "AccessDenied")
 	})
 }
+
+func TestPutObjectRetainUntilDateTruncatesFractionalSeconds(t *testing.T) {
+	h, b := newTestHandler(t)
+	mustCreateObjectLockBucket(t, b, "lock-retain-truncate")
+
+	retainUntil := time.Now().UTC().Add(30 * time.Second).Add(789 * time.Millisecond)
+	w := doRequest(
+		h,
+		newRequest(
+			http.MethodPut,
+			"http://example.test/lock-retain-truncate/key",
+			"data",
+			map[string]string{
+				"x-amz-object-lock-mode":              backend.RetentionModeGovernance,
+				"x-amz-object-lock-retain-until-date": retainUntil.Format(time.RFC3339Nano),
+			},
+		),
+	)
+	requireStatus(t, w, http.StatusOK)
+
+	obj, err := b.GetObject("lock-retain-truncate", "key")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	if obj.RetainUntilDate == nil {
+		t.Fatal("expected RetainUntilDate to be set")
+	}
+	if obj.RetainUntilDate.Nanosecond() != 0 {
+		t.Fatalf(
+			"expected retain-until date to be second-precision, got %v",
+			obj.RetainUntilDate,
+		)
+	}
+}

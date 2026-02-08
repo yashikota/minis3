@@ -280,6 +280,14 @@ func TestValidateSSEHeaders(t *testing.T) {
 			t.Fatalf("expected valid headers, got code=%q msg=%q", code, msg)
 		}
 	})
+
+	t.Run("kms algorithm without key id", func(t *testing.T) {
+		r := req()
+		r.Header.Set("x-amz-server-side-encryption", "aws:kms")
+		if code, _ := validateSSEHeaders(r); code != "InvalidArgument" {
+			t.Fatalf("expected InvalidArgument, got %q", code)
+		}
+	})
 }
 
 func TestValidateSSECAccess(t *testing.T) {
