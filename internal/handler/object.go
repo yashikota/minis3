@@ -1405,26 +1405,8 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		// Handle PartNumber query parameter
 		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
-			partNumber, err := strconv.Atoi(partNumberStr)
-			if err != nil || partNumber < 1 {
-				backend.WriteError(
-					w,
-					http.StatusBadRequest,
-					"InvalidArgument",
-					"Part number must be a positive integer.",
-				)
-				return
-			}
-			partData, partSize, partInfo, found := getPartData(obj, partNumber)
-			if !found {
-				backend.WriteError(
-					w,
-					http.StatusBadRequest,
-					"InvalidPart",
-					"The requested part number is not valid.",
-				)
-				return
-			}
+			partNumber, _ := strconv.Atoi(partNumberStr)
+			partData, partSize, partInfo, _ := getPartData(obj, partNumber)
 			setPartChecksumResponseHeaders(w, obj.ChecksumType, partInfo)
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", partSize))
 			w.WriteHeader(http.StatusPartialContent)

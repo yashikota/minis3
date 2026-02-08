@@ -169,7 +169,7 @@ type iamResponseMetadata struct {
 
 func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 	accessKey := extractAccessKey(r)
-	owner := backend.OwnerForAccessKey(accessKey)
+	owner := ownerForAccessKeyFn(accessKey)
 	if owner == nil {
 		owner = backend.DefaultOwner()
 	}
@@ -195,7 +195,7 @@ func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xml.Marshal(resp)
+	output, err := xmlMarshalFn(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return

@@ -168,6 +168,51 @@ var (
 	deletePublicAccessBlockFn = func(h *Handler, bucketName string) error {
 		return h.backend.DeletePublicAccessBlock(bucketName)
 	}
+	getBucketOwnershipControlsFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.OwnershipControls, error) {
+		return h.backend.GetBucketOwnershipControls(bucketName)
+	}
+	putBucketOwnershipControlsFn = func(
+		h *Handler,
+		bucketName string,
+		controls *backend.OwnershipControls,
+	) error {
+		return h.backend.PutBucketOwnershipControls(bucketName, controls)
+	}
+	deleteBucketOwnershipControlsFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucketOwnershipControls(bucketName)
+	}
+	getBucketRequestPaymentFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.RequestPaymentConfiguration, error) {
+		return h.backend.GetBucketRequestPayment(bucketName)
+	}
+	putBucketRequestPaymentFn = func(
+		h *Handler,
+		bucketName string,
+		cfg *backend.RequestPaymentConfiguration,
+	) error {
+		return h.backend.PutBucketRequestPayment(bucketName, cfg)
+	}
+	getBucketLoggingFn = func(
+		h *Handler,
+		bucketName string,
+	) (*backend.BucketLoggingStatus, error) {
+		return h.backend.GetBucketLogging(bucketName)
+	}
+	putBucketLoggingFn = func(
+		h *Handler,
+		bucketName string,
+		status *backend.BucketLoggingStatus,
+	) error {
+		return h.backend.PutBucketLogging(bucketName, status)
+	}
+	deleteBucketLoggingFn = func(h *Handler, bucketName string) error {
+		return h.backend.DeleteBucketLogging(bucketName)
+	}
 )
 
 func isAnonymousRequest(r *http.Request) bool {
@@ -863,7 +908,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		// Set the owner access key
 		h.backend.SetBucketOwner(bucketName, requestAccessKey)
 		if requestedOwnership != "" {
-			if err := h.backend.PutBucketOwnershipControls(bucketName, &backend.OwnershipControls{
+			if err := putBucketOwnershipControlsFn(h, bucketName, &backend.OwnershipControls{
 				Rules: []backend.OwnershipControlsRule{{ObjectOwnership: requestedOwnership}},
 			}); err != nil {
 				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -2240,7 +2285,7 @@ func (h *Handler) handleGetBucketOwnershipControls(
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
-	controls, err := h.backend.GetBucketOwnershipControls(bucketName)
+	controls, err := getBucketOwnershipControlsFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
@@ -2258,7 +2303,7 @@ func (h *Handler) handleGetBucketOwnershipControls(
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, marshalErr := xml.Marshal(controls)
+	output, marshalErr := xmlMarshalFn(controls)
 	if marshalErr != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", marshalErr.Error())
 		return
@@ -2291,7 +2336,7 @@ func (h *Handler) handlePutBucketOwnershipControls(
 		)
 		return
 	}
-	if err := h.backend.PutBucketOwnershipControls(bucketName, &controls); err != nil {
+	if err := putBucketOwnershipControlsFn(h, bucketName, &controls); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
@@ -2313,7 +2358,7 @@ func (h *Handler) handleDeleteBucketOwnershipControls(
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
-	if err := h.backend.DeleteBucketOwnershipControls(bucketName); err != nil {
+	if err := deleteBucketOwnershipControlsFn(h, bucketName); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
 		} else {
@@ -2333,7 +2378,7 @@ func (h *Handler) handleGetBucketRequestPayment(
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
-	cfg, err := h.backend.GetBucketRequestPayment(bucketName)
+	cfg, err := getBucketRequestPaymentFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
@@ -2344,7 +2389,7 @@ func (h *Handler) handleGetBucketRequestPayment(
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, marshalErr := xml.Marshal(cfg)
+	output, marshalErr := xmlMarshalFn(cfg)
 	if marshalErr != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", marshalErr.Error())
 		return
@@ -2377,7 +2422,7 @@ func (h *Handler) handlePutBucketRequestPayment(
 		)
 		return
 	}
-	if err := h.backend.PutBucketRequestPayment(bucketName, &cfg); err != nil {
+	if err := putBucketRequestPaymentFn(h, bucketName, &cfg); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
@@ -2404,7 +2449,7 @@ func (h *Handler) handleGetBucketLogging(
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
-	status, err := h.backend.GetBucketLogging(bucketName)
+	status, err := getBucketLoggingFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
@@ -2418,7 +2463,7 @@ func (h *Handler) handleGetBucketLogging(
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, marshalErr := xml.Marshal(status)
+	output, marshalErr := xmlMarshalFn(status)
 	if marshalErr != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", marshalErr.Error())
 		return
@@ -2506,7 +2551,7 @@ func (h *Handler) handlePutBucketLogging(
 			return
 		}
 	}
-	if err := h.backend.PutBucketLogging(bucketName, &status); err != nil {
+	if err := putBucketLoggingFn(h, bucketName, &status); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
 		} else if errors.Is(err, backend.ErrObjectNotFound) {
@@ -2535,7 +2580,7 @@ func (h *Handler) handleDeleteBucketLogging(
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
-	if err := h.backend.DeleteBucketLogging(bucketName); err != nil {
+	if err := deleteBucketLoggingFn(h, bucketName); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
 		} else {

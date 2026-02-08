@@ -72,8 +72,15 @@ var (
 	lifecycleIntervalOnce  sync.Once
 	lifecycleIntervalValue time.Duration
 
-	verifyPresignedURLFn         = verifyPresignedURL
-	verifyAuthorizationHeaderFn  = verifyAuthorizationHeader
+	verifyPresignedURLFn        = verifyPresignedURL
+	verifyAuthorizationHeaderFn = verifyAuthorizationHeader
+	ownerForAccessKeyFn         = backend.OwnerForAccessKey
+	getBucketForLoggingFn       = func(h *Handler, bucketName string) (*backend.Bucket, bool) {
+		return h.backend.GetBucket(bucketName)
+	}
+	requestURIForLoggingFn = func(r *http.Request) string {
+		return r.URL.RequestURI()
+	}
 	getBucketACLForAccessCheckFn = func(
 		h *Handler,
 		bucketName string,
@@ -266,7 +273,7 @@ func tenantFromAccessKey(accessKey string) string {
 	if accessKey == "" {
 		return ""
 	}
-	owner := backend.OwnerForAccessKey(accessKey)
+	owner := ownerForAccessKeyFn(accessKey)
 	if owner == nil {
 		return ""
 	}
@@ -313,11 +320,11 @@ func (h *Handler) emitServerAccessLog(
 	if bucketName == "" {
 		return
 	}
-	logging, err := h.backend.GetBucketLogging(bucketName)
+	logging, err := getBucketLoggingFn(h, bucketName)
 	if err != nil || logging == nil || logging.LoggingEnabled == nil {
 		return
 	}
-	sourceBucket, ok := h.backend.GetBucket(bucketName)
+	sourceBucket, ok := getBucketForLoggingFn(h, bucketName)
 	if !ok {
 		return
 	}
@@ -345,7 +352,7 @@ func (h *Handler) emitServerAccessLog(
 		requester = "-"
 	}
 	op := mapRequestToLoggingOperation(r, key)
-	requestURI := r.URL.RequestURI()
+	requestURI := requestURIForLoggingFn(r)
 	if requestURI == "" {
 		requestURI = r.URL.Path
 	}
@@ -769,13 +776,13 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		}
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionWriteACP)
 	case "s3:GetBucketOwnershipControls", "s3:GetBucketLogging", "s3:GetBucketRequestPayment":
-		acl, err := h.backend.GetBucketACL(bucketName)
+		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
 		}
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
 	case "s3:PutBucketOwnershipControls", "s3:DeleteBucketOwnershipControls", "s3:PutBucketLogging", "s3:PutBucketRequestPayment":
-		acl, err := h.backend.GetBucketACL(bucketName)
+		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
 		}
@@ -884,7 +891,7 @@ func (h *Handler) getBucketPublicAccessBlock(
 }
 
 func requesterOwner(r *http.Request) *backend.Owner {
-	return backend.OwnerForAccessKey(extractAccessKey(r))
+	return ownerForAccessKeyFn(extractAccessKey(r))
 }
 
 func (h *Handler) bucketOwner(bucketName string) *backend.Owner {
@@ -892,7 +899,7 @@ func (h *Handler) bucketOwner(bucketName string) *backend.Owner {
 	if !ok {
 		return backend.DefaultOwner()
 	}
-	return backend.OwnerForAccessKey(bucket.OwnerAccessKey)
+	return ownerForAccessKeyFn(bucket.OwnerAccessKey)
 }
 
 func isPublicACL(acl *backend.AccessControlPolicy) bool {
