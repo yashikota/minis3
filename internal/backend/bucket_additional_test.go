@@ -892,7 +892,7 @@ func TestPutBucketPolicyRejectsAllowNotPrincipal(t *testing.T) {
 	}
 
 	invalid := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","NotPrincipal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-notprincipal/*"}]}`
-	if err := b.PutBucketPolicy("policy-notprincipal", invalid); !errors.Is(
+	if err := b.PutBucketPolicy("policy-notprincipal", invalid, false); !errors.Is(
 		err,
 		ErrMalformedPolicy,
 	) {
@@ -900,7 +900,7 @@ func TestPutBucketPolicyRejectsAllowNotPrincipal(t *testing.T) {
 	}
 
 	valid := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","NotPrincipal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-notprincipal/*"}]}`
-	if err := b.PutBucketPolicy("policy-notprincipal", valid); err != nil {
+	if err := b.PutBucketPolicy("policy-notprincipal", valid, false); err != nil {
 		t.Fatalf("PutBucketPolicy deny-notprincipal failed: %v", err)
 	}
 }

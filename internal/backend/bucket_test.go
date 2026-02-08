@@ -192,7 +192,7 @@ func TestBucketPolicy(t *testing.T) {
 	})
 
 	t.Run("put valid policy", func(t *testing.T) {
-		err := b.PutBucketPolicy("test-bucket", validPolicy)
+		err := b.PutBucketPolicy("test-bucket", validPolicy, false)
 		if err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
@@ -208,7 +208,7 @@ func TestBucketPolicy(t *testing.T) {
 	})
 
 	t.Run("put invalid policy", func(t *testing.T) {
-		err := b.PutBucketPolicy("test-bucket", invalidPolicy)
+		err := b.PutBucketPolicy("test-bucket", invalidPolicy, false)
 		if !errors.Is(err, ErrMalformedPolicy) {
 			t.Errorf("expected ErrMalformedPolicy, got %v", err)
 		}
@@ -216,7 +216,7 @@ func TestBucketPolicy(t *testing.T) {
 
 	t.Run("delete policy", func(t *testing.T) {
 		// First set a valid policy
-		_ = b.PutBucketPolicy("test-bucket", validPolicy)
+		_ = b.PutBucketPolicy("test-bucket", validPolicy, false)
 
 		err := b.DeleteBucketPolicy("test-bucket")
 		if err != nil {

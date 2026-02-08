@@ -97,6 +97,14 @@ var (
 
 // New creates a new Handler with the given backend.
 func New(b *backend.Backend) *Handler {
+	// Wire up credential lookup to include dynamic IAM credentials.
+	credentialLookupFn = func(accessKey string) (string, bool) {
+		if secret, ok := DefaultCredentials()[accessKey]; ok {
+			return secret, true
+		}
+		return b.LookupCredential(accessKey)
+	}
+
 	return &Handler{
 		backend:           b,
 		pendingLogBatches: make(map[string]*serverAccessLogBatch),
@@ -785,9 +793,15 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 
 	effect := backend.EvaluateBucketPolicyAccess(bucket.Policy, ctx)
 
-	// Explicit Deny overrides everything, even for owner
+	// Explicit Deny overrides everything, even for owner —
+	// UNLESS the owner is managing bucket policy operations and the policy
+	// was NOT set with ConfirmRemoveSelfBucketAccess.
 	if effect == backend.PolicyEffectDeny {
-		return false
+		if isOwner && !bucket.PolicyDenySelfAccess && isBucketPolicyAction(action) {
+			// Owner exempt from deny for bucket policy management
+		} else {
+			return false
+		}
 	}
 
 	publicBlock := h.getBucketPublicAccessBlock(bucketName)
@@ -1006,6 +1020,18 @@ func ownerBypassesObjectACL(action string) bool {
 	}
 }
 
+// isBucketPolicyAction returns true for bucket policy management actions.
+// The bucket owner is exempt from Deny for these actions unless
+// ConfirmRemoveSelfBucketAccess was set.
+func isBucketPolicyAction(action string) bool {
+	switch action {
+	case "s3:GetBucketPolicy", "s3:PutBucketPolicy", "s3:DeleteBucketPolicy":
+		return true
+	default:
+		return false
+	}
+}
+
 // checkAccessWithContext evaluates bucket policy with additional context (tags, etc.).
 func (h *Handler) checkAccessWithContext(
 	r *http.Request,
@@ -1041,7 +1067,11 @@ func (h *Handler) checkAccessWithContext(
 	effect := backend.EvaluateBucketPolicyAccess(bucket.Policy, ctx)
 
 	if effect == backend.PolicyEffectDeny {
-		return false
+		if isOwner && !bucket.PolicyDenySelfAccess && isBucketPolicyAction(action) {
+			// Owner exempt from deny for bucket policy management
+		} else {
+			return false
+		}
 	}
 
 	publicBlock := h.getBucketPublicAccessBlock(bucketName)

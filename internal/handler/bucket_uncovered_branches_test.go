@@ -765,7 +765,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		getBucketPolicyFn = origGetPolicy
 
 		origPutPolicy := putBucketPolicyFn
-		putBucketPolicyFn = func(*Handler, string, string) error { return errors.New("policy put boom") }
+		putBucketPolicyFn = func(*Handler, string, string, bool) error { return errors.New("policy put boom") }
 		wPutPolicy := doRequest(
 			h,
 			newRequest(

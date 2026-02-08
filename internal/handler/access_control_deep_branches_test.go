@@ -74,7 +74,7 @@ func TestCheckAccessAdditionalBranches(t *testing.T) {
 
 	t.Run("restrict public buckets blocks non-owner even with public policy", func(t *testing.T) {
 		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Principal":"*","Resource":"arn:aws:s3:::access-branch/*"}]}`
-		if err := b.PutBucketPolicy("access-branch", policy); err != nil {
+		if err := b.PutBucketPolicy("access-branch", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 		if err := b.PutPublicAccessBlock(
@@ -154,7 +154,7 @@ func TestCheckAccessWithContextAdditionalBranches(t *testing.T) {
 
 	t.Run("explicit deny is rejected", func(t *testing.T) {
 		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:ListBucket","Principal":"*","Resource":"arn:aws:s3:::ctx-branch"}]}`
-		if err := b.PutBucketPolicy("ctx-branch", policy); err != nil {
+		if err := b.PutBucketPolicy("ctx-branch", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 

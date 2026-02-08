@@ -34,6 +34,13 @@ func DefaultCredentials() map[string]string {
 	}
 }
 
+// credentialLookupFn resolves an access key to its secret key.
+// Overridden at handler initialization to also check dynamic IAM credentials.
+var credentialLookupFn = func(accessKey string) (string, bool) {
+	secret, ok := DefaultCredentials()[accessKey]
+	return secret, ok
+}
+
 // isPresignedURL checks if the request is a presigned URL request.
 func isPresignedURL(r *http.Request) bool {
 	query := r.URL.Query()
@@ -49,8 +56,7 @@ func verifyAuthorizationHeader(r *http.Request) error {
 
 	if strings.HasPrefix(auth, "AWS4-HMAC-SHA256") {
 		accessKey := extractAccessKey(r)
-		credentials := DefaultCredentials()
-		secretKey, ok := credentials[accessKey]
+		secretKey, ok := credentialLookupFn(accessKey)
 		if !ok {
 			return &presignedError{
 				code:    "InvalidAccessKeyId",
@@ -293,8 +299,7 @@ func verifyPresignedURLV4(r *http.Request) error {
 	service := credParts[3]
 
 	// Look up secret key
-	credentials := DefaultCredentials()
-	secretKey, ok := credentials[accessKey]
+	secretKey, ok := credentialLookupFn(accessKey)
 	if !ok {
 		return &presignedError{
 			code:    "InvalidAccessKeyId",

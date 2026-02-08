@@ -24,7 +24,7 @@ func TestBucketBranchCoverage(t *testing.T) {
 		if err := b.DeleteBucketTagging("missing"); !errors.Is(err, ErrBucketNotFound) {
 			t.Fatalf("expected ErrBucketNotFound from DeleteBucketTagging, got %v", err)
 		}
-		if err := b.PutBucketPolicy("missing", `{"Version":"2012-10-17","Statement":[]}`); !errors.Is(
+		if err := b.PutBucketPolicy("missing", `{"Version":"2012-10-17","Statement":[]}`, false); !errors.Is(
 			err,
 			ErrBucketNotFound,
 		) {
