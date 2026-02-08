@@ -1,11 +1,16 @@
 package handler
 
 import (
+	"context"
 	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"hash/crc32"
+	"hash/crc64"
 	"net/http"
 	"net/url"
 	"sort"
@@ -46,6 +51,9 @@ var (
 		return h.backend.GetObjectACL(bucketName, key, versionID)
 	}
 )
+
+// Inverted NVME polynomial value used by Go's crc64 implementation.
+const crc64NVME = 0x9a6c9329ac4bc9b5
 
 // extractMetadata extracts x-amz-meta-* headers from the request.
 // AWS S3 lowercases all metadata keys, so we do the same for compatibility.
@@ -419,8 +427,14 @@ func setChecksumResponseHeaders(w http.ResponseWriter, obj *backend.Object) {
 	if obj.ChecksumAlgorithm != "" {
 		w.Header().Set("x-amz-checksum-algorithm", obj.ChecksumAlgorithm)
 	}
+	if obj.ChecksumType != "" {
+		w.Header().Set("x-amz-checksum-type", obj.ChecksumType)
+	}
 	if obj.ChecksumCRC32C != "" {
 		w.Header().Set("x-amz-checksum-crc32c", obj.ChecksumCRC32C)
+	}
+	if obj.ChecksumCRC64NVME != "" {
+		w.Header().Set("x-amz-checksum-crc64nvme", obj.ChecksumCRC64NVME)
 	}
 	if obj.ChecksumSHA1 != "" {
 		w.Header().Set("x-amz-checksum-sha1", obj.ChecksumSHA1)
@@ -433,6 +447,34 @@ func setChecksumResponseHeaders(w http.ResponseWriter, obj *backend.Object) {
 	}
 }
 
+func setPartChecksumResponseHeaders(
+	w http.ResponseWriter,
+	checksumType string,
+	part *backend.ObjectPart,
+) {
+	if part == nil {
+		return
+	}
+	if checksumType != "" {
+		w.Header().Set("x-amz-checksum-type", checksumType)
+	}
+	if part.ChecksumCRC32 != "" {
+		w.Header().Set("x-amz-checksum-crc32", part.ChecksumCRC32)
+	}
+	if part.ChecksumCRC32C != "" {
+		w.Header().Set("x-amz-checksum-crc32c", part.ChecksumCRC32C)
+	}
+	if part.ChecksumCRC64NVME != "" {
+		w.Header().Set("x-amz-checksum-crc64nvme", part.ChecksumCRC64NVME)
+	}
+	if part.ChecksumSHA1 != "" {
+		w.Header().Set("x-amz-checksum-sha1", part.ChecksumSHA1)
+	}
+	if part.ChecksumSHA256 != "" {
+		w.Header().Set("x-amz-checksum-sha256", part.ChecksumSHA256)
+	}
+}
+
 // inferChecksumAlgorithmFromTrailer infers the checksum algorithm from the x-amz-trailer header value.
 // The trailer header contains the name of the trailing header, e.g. "x-amz-checksum-crc32c".
 func inferChecksumAlgorithmFromTrailer(trailer string) string {
@@ -442,6 +484,8 @@ func inferChecksumAlgorithmFromTrailer(trailer string) string {
 		return "CRC32C"
 	case strings.Contains(trailer, "checksum-crc32"):
 		return "CRC32"
+	case strings.Contains(trailer, "checksum-crc64nvme"):
+		return "CRC64NVME"
 	case strings.Contains(trailer, "checksum-sha1"):
 		return "SHA1"
 	case strings.Contains(trailer, "checksum-sha256"):
@@ -452,14 +496,17 @@ func inferChecksumAlgorithmFromTrailer(trailer string) string {
 }
 
 // getPartData returns the data slice and size for a specific part number of a multipart object.
-// Returns (data, size, found). If the object has no parts or the part number is invalid, found is false.
-func getPartData(obj *backend.Object, partNumber int) ([]byte, int64, bool) {
+// Returns (data, size, partInfo, found). If the object has no parts or the part number is invalid, found is false.
+func getPartData(
+	obj *backend.Object,
+	partNumber int,
+) ([]byte, int64, *backend.ObjectPart, bool) {
 	if len(obj.Parts) == 0 {
 		// Non-multipart object: PartNumber=1 returns entire object
 		if partNumber == 1 {
-			return obj.Data, obj.Size, true
+			return obj.Data, obj.Size, nil, true
 		}
-		return nil, 0, false
+		return nil, 0, nil, false
 	}
 
 	var offset int64
@@ -469,11 +516,12 @@ func getPartData(obj *backend.Object, partNumber int) ([]byte, int64, bool) {
 			if end > int64(len(obj.Data)) {
 				end = int64(len(obj.Data))
 			}
-			return obj.Data[offset:end], p.Size, true
+			partCopy := p
+			return obj.Data[offset:end], p.Size, &partCopy, true
 		}
 		offset += p.Size
 	}
-	return nil, 0, false
+	return nil, 0, nil, false
 }
 
 // parseExpires parses the Expires header value.
@@ -594,6 +642,86 @@ func evaluateCopySourceConditionals(r *http.Request, srcObj *backend.Object) Con
 	return ConditionalResult{false, 0}
 }
 
+func parseTimestampFlexible(value string) (*time.Time, error) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, http.TimeFormat} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return &t, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid timestamp")
+}
+
+func evaluateDeletePreconditions(
+	r *http.Request,
+	obj *backend.Object,
+) (int, string, string) {
+	// DeleteObject is idempotent when the target does not exist, so preconditions
+	// are ignored in that case.
+	if obj == nil {
+		return 0, "", ""
+	}
+
+	ifMatch := r.Header.Get("If-Match")
+	if ifMatch != "" {
+		if strings.TrimSpace(ifMatch) != "*" {
+			if obj.IsDeleteMarker || !matchesETag(ifMatch, obj.ETag) {
+				return http.StatusPreconditionFailed, "PreconditionFailed",
+					"At least one of the pre-conditions you specified did not hold."
+			}
+		}
+	}
+	if v := strings.TrimSpace(r.Header.Get("x-amz-if-match-last-modified-time")); v != "" {
+		t, err := parseTimestampFlexible(v)
+		if err != nil {
+			return http.StatusBadRequest, "InvalidArgument", "Invalid last-modified-time value."
+		}
+		if !obj.LastModified.UTC().Truncate(time.Second).Equal(t.UTC().Truncate(time.Second)) {
+			return http.StatusPreconditionFailed, "PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold."
+		}
+	}
+	if v := strings.TrimSpace(r.Header.Get("x-amz-if-match-size")); v != "" {
+		size, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || size < 0 {
+			return http.StatusBadRequest, "InvalidArgument", "Invalid size value."
+		}
+		if obj.Size != size {
+			return http.StatusPreconditionFailed, "PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold."
+		}
+	}
+	return 0, "", ""
+}
+
+func computePartChecksums(data []byte, algorithm string) backend.GetObjectAttributesPartItem {
+	item := backend.GetObjectAttributesPartItem{}
+	switch strings.ToUpper(algorithm) {
+	case "CRC32":
+		h := crc32.NewIEEE()
+		_, _ = h.Write(data)
+		item.ChecksumCRC32 = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	case "CRC32C":
+		h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+		_, _ = h.Write(data)
+		item.ChecksumCRC32C = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	case "CRC64NVME":
+		table := crc64.MakeTable(crc64NVME)
+		sum := crc64.Checksum(data, table)
+		buf := []byte{
+			byte(sum >> 56), byte(sum >> 48), byte(sum >> 40), byte(sum >> 32),
+			byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum),
+		}
+		item.ChecksumCRC64NVME = base64.StdEncoding.EncodeToString(buf)
+	case "SHA1":
+		sum := sha1.Sum(data)
+		item.ChecksumSHA1 = base64.StdEncoding.EncodeToString(sum[:])
+	case "SHA256":
+		sum := sha256.Sum256(data)
+		item.ChecksumSHA256 = base64.StdEncoding.EncodeToString(sum[:])
+	}
+	return item
+}
+
 // matchesETag checks if the given header value matches the object's ETag.
 // Supports wildcard "*" and comma-separated ETags.
 func matchesETag(header, etag string) bool {
@@ -704,6 +832,15 @@ func parseRangeHeader(rangeHeader string, size int64) (int64, int64, error) {
 
 // handleObject handles object-level operations.
 func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketName, key string) {
+	if r.URL.Query().Has("torrent") && r.Method == http.MethodGet {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchKey",
+			"The specified key does not exist.",
+		)
+		return
+	}
 	// Handle Object Tagging operations
 	if r.URL.Query().Has("tagging") {
 		switch r.Method {
@@ -821,6 +958,10 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 	switch r.Method {
 	case http.MethodPut:
+		if err := h.flushServerAccessLogsIfDue(bucketName); err != nil {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
 		copySource := r.Header.Get("x-amz-copy-source")
 		if copySource != "" {
 			h.handleCopyObject(w, r, bucketName, key, copySource)
@@ -974,6 +1115,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if v := r.Header.Get("x-amz-checksum-crc32c"); v != "" {
 			opts.ChecksumCRC32C = v
 		}
+		if v := r.Header.Get("x-amz-checksum-crc64nvme"); v != "" {
+			opts.ChecksumCRC64NVME = v
+		}
 		if v := r.Header.Get("x-amz-checksum-sha1"); v != "" {
 			opts.ChecksumSHA1 = v
 		}
@@ -983,7 +1127,44 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		requestOwner := requesterOwner(r)
 		bucketOwner := h.bucketOwner(bucketName)
-		requestedACL := backend.NewDefaultACLForOwner(requestOwner)
+		bucketOwnership := backend.ObjectOwnershipObjectWriter
+		if bucket, ok := h.backend.GetBucket(bucketName); ok && bucket.ObjectOwnership != "" {
+			bucketOwnership = bucket.ObjectOwnership
+		}
+		grantHeadersPresent := r.Header.Get("x-amz-grant-full-control") != "" ||
+			r.Header.Get("x-amz-grant-read") != "" ||
+			r.Header.Get("x-amz-grant-write") != "" ||
+			r.Header.Get("x-amz-grant-read-acp") != "" ||
+			r.Header.Get("x-amz-grant-write-acp") != ""
+		if strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) &&
+			(grantHeadersPresent ||
+				(r.Header.Get("x-amz-acl") != "" &&
+					!strings.EqualFold(r.Header.Get("x-amz-acl"), string(backend.ACLBucketOwnerFull)))) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"AccessControlListNotSupported",
+				"The bucket does not allow ACLs",
+			)
+			return
+		}
+		switch bucketOwnership {
+		case backend.ObjectOwnershipBucketOwnerEnforced:
+			opts.Owner = bucketOwner
+		case backend.ObjectOwnershipBucketOwnerPreferred:
+			if strings.EqualFold(r.Header.Get("x-amz-acl"), string(backend.ACLBucketOwnerFull)) {
+				opts.Owner = bucketOwner
+			} else {
+				opts.Owner = requestOwner
+			}
+		default:
+			opts.Owner = requestOwner
+		}
+		aclOwner := opts.Owner
+		if aclOwner == nil {
+			aclOwner = requestOwner
+		}
+		requestedACL := backend.NewDefaultACLForOwner(aclOwner)
 		headerACL, aclErr := aclFromGrantHeaders(r, requestOwner)
 		if aclErr != nil {
 			backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
@@ -992,7 +1173,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if headerACL != nil {
 			requestedACL = headerACL
 		} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
-			requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, requestOwner, bucketOwner)
+			requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, aclOwner, bucketOwner)
 		}
 		config := h.getBucketPublicAccessBlock(bucketName)
 		if config != nil && config.BlockPublicAcls && isPublicACL(requestedACL) {
@@ -1011,6 +1192,15 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 				)
 				return
 			}
+			if errors.Is(err, backend.ErrBadDigest) {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"BadDigest",
+					"The Content-MD5 you specified did not match what we received.",
+				)
+				return
+			}
 			backend.WriteError(
 				w,
 				http.StatusNotFound,
@@ -1019,9 +1209,20 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
-		if err := putObjectACLFn(h, bucketName, key, obj.VersionId, requestedACL); err != nil {
-			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-			return
+		if !strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
+			if err := putObjectACLFn(h, bucketName, key, obj.VersionId, requestedACL); err != nil {
+				if errors.Is(err, backend.ErrAccessControlListNotSupported) {
+					backend.WriteError(
+						w,
+						http.StatusBadRequest,
+						"AccessControlListNotSupported",
+						"The bucket does not allow ACLs",
+					)
+				} else {
+					backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+				}
+				return
+			}
 		}
 		w.Header().Set("ETag", obj.ETag)
 		// Add version ID header if versioning is enabled
@@ -1113,7 +1314,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 					"Part number must be a positive integer.")
 				return
 			}
-			_, _, found := getPartData(obj, partNumber)
+			_, _, _, found := getPartData(obj, partNumber)
 			if !found {
 				backend.WriteError(w, http.StatusBadRequest, "InvalidPart",
 					"The requested part number is not valid.")
@@ -1204,9 +1405,27 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		// Handle PartNumber query parameter
 		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
-			// partNumber has already been validated above.
-			partNumber, _ := strconv.Atoi(partNumberStr)
-			partData, partSize, _ := getPartData(obj, partNumber)
+			partNumber, err := strconv.Atoi(partNumberStr)
+			if err != nil || partNumber < 1 {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Part number must be a positive integer.",
+				)
+				return
+			}
+			partData, partSize, partInfo, found := getPartData(obj, partNumber)
+			if !found {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidPart",
+					"The requested part number is not valid.",
+				)
+				return
+			}
+			setPartChecksumResponseHeaders(w, obj.ChecksumType, partInfo)
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", partSize))
 			w.WriteHeader(http.StatusPartialContent)
 			_, _ = w.Write(partData)
@@ -1248,6 +1467,35 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 
 		versionId := r.URL.Query().Get("versionId")
+		var conditionalObj *backend.Object
+		if versionId != "" {
+			conditionalObj, _ = h.backend.GetObjectVersion(bucketName, key, versionId)
+		} else {
+			conditionalObj, _ = h.backend.GetObject(bucketName, key)
+			if conditionalObj != nil && conditionalObj.IsDeleteMarker {
+				if bucket, ok := h.backend.GetBucket(bucketName); ok {
+					if versions, exists := bucket.Objects[key]; exists {
+						hasLiveVersion := false
+						for i, version := range versions.Versions {
+							if i == 0 {
+								continue
+							}
+							if !version.IsDeleteMarker {
+								hasLiveVersion = true
+								break
+							}
+						}
+						if !hasLiveVersion {
+							conditionalObj = nil
+						}
+					}
+				}
+			}
+		}
+		if status, code, msg := evaluateDeletePreconditions(r, conditionalObj); status != 0 {
+			backend.WriteError(w, status, code, msg)
+			return
+		}
 		bypassGovernance := strings.EqualFold(
 			r.Header.Get("x-amz-bypass-governance-retention"),
 			"true",
@@ -1433,7 +1681,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 				)
 				return
 			}
-			_, partSize, found := getPartData(obj, partNumber)
+			_, partSize, partInfo, found := getPartData(obj, partNumber)
 			if !found {
 				backend.WriteError(
 					w,
@@ -1443,6 +1691,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 				)
 				return
 			}
+			setPartChecksumResponseHeaders(w, obj.ChecksumType, partInfo)
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", partSize))
 			w.WriteHeader(http.StatusPartialContent)
 			return
@@ -1505,6 +1754,17 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		)
 		return
 	}
+	loggedKeys := make([]string, 0, len(deleteReq.Objects))
+	for _, obj := range deleteReq.Objects {
+		if obj.Key == "" {
+			continue
+		}
+		loggedKeys = append(loggedKeys, obj.Key)
+	}
+	if len(loggedKeys) > 0 {
+		ctx := context.WithValue(r.Context(), deleteLogKeysContextKey, loggedKeys)
+		*r = *r.WithContext(ctx)
+	}
 
 	bypassGovernance := strings.EqualFold(r.Header.Get("x-amz-bypass-governance-retention"), "true")
 	results, err := h.backend.DeleteObjects(bucketName, deleteReq.Objects, bypassGovernance)
@@ -1529,6 +1789,9 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 			if errors.Is(result.Error, backend.ErrObjectLocked) {
 				errCode = "AccessDenied"
 				errMsg = "Access Denied"
+			} else if errors.Is(result.Error, backend.ErrPreconditionFailed) {
+				errCode = "PreconditionFailed"
+				errMsg = "At least one of the pre-conditions you specified did not hold."
 			}
 			resp.Errors = append(resp.Errors, backend.DeleteError{
 				Key:       result.Key,
@@ -1765,7 +2028,37 @@ func (h *Handler) handleCopyObject(
 
 	requestOwner := requesterOwner(r)
 	bucketOwner := h.bucketOwner(dstBucket)
-	requestedACL := backend.NewDefaultACLForOwner(requestOwner)
+	dstOwnership := backend.ObjectOwnershipObjectWriter
+	if bucket, ok := h.backend.GetBucket(dstBucket); ok && bucket.ObjectOwnership != "" {
+		dstOwnership = bucket.ObjectOwnership
+	}
+	grantHeadersPresent := r.Header.Get("x-amz-grant-full-control") != "" ||
+		r.Header.Get("x-amz-grant-read") != "" ||
+		r.Header.Get("x-amz-grant-write") != "" ||
+		r.Header.Get("x-amz-grant-read-acp") != "" ||
+		r.Header.Get("x-amz-grant-write-acp") != ""
+	if strings.EqualFold(dstOwnership, backend.ObjectOwnershipBucketOwnerEnforced) &&
+		(grantHeadersPresent ||
+			(r.Header.Get("x-amz-acl") != "" &&
+				!strings.EqualFold(r.Header.Get("x-amz-acl"), string(backend.ACLBucketOwnerFull)))) {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"AccessControlListNotSupported",
+			"The bucket does not allow ACLs",
+		)
+		return
+	}
+	aclOwner := requestOwner
+	switch dstOwnership {
+	case backend.ObjectOwnershipBucketOwnerEnforced:
+		aclOwner = bucketOwner
+	case backend.ObjectOwnershipBucketOwnerPreferred:
+		if strings.EqualFold(r.Header.Get("x-amz-acl"), string(backend.ACLBucketOwnerFull)) {
+			aclOwner = bucketOwner
+		}
+	}
+	requestedACL := backend.NewDefaultACLForOwner(aclOwner)
 	headerACL, aclErr := aclFromGrantHeaders(r, requestOwner)
 	if aclErr != nil {
 		backend.WriteError(w, http.StatusBadRequest, aclErr.code, aclErr.message)
@@ -1774,7 +2067,7 @@ func (h *Handler) handleCopyObject(
 	if headerACL != nil {
 		requestedACL = headerACL
 	} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
-		requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, requestOwner, bucketOwner)
+		requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, aclOwner, bucketOwner)
 	}
 	config := h.getBucketPublicAccessBlock(dstBucket)
 	if config != nil && config.BlockPublicAcls && isPublicACL(requestedACL) {
@@ -1816,9 +2109,20 @@ func (h *Handler) handleCopyObject(
 		}
 		return
 	}
-	if err := putObjectACLFn(h, dstBucket, dstKey, obj.VersionId, requestedACL); err != nil {
-		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-		return
+	if !strings.EqualFold(dstOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
+		if err := putObjectACLFn(h, dstBucket, dstKey, obj.VersionId, requestedACL); err != nil {
+			if errors.Is(err, backend.ErrAccessControlListNotSupported) {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"AccessControlListNotSupported",
+					"The bucket does not allow ACLs",
+				)
+			} else {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			}
+			return
+		}
 	}
 
 	// Add source version ID header if specified
@@ -1998,6 +2302,13 @@ func (h *Handler) writePutObjectACLError(w http.ResponseWriter, err error) {
 			"NoSuchVersion",
 			"The specified version does not exist.",
 		)
+	} else if errors.Is(err, backend.ErrAccessControlListNotSupported) {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"AccessControlListNotSupported",
+			"The bucket does not allow ACLs",
+		)
 	} else {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 	}
@@ -2169,6 +2480,10 @@ func (h *Handler) handleGetObjectAttributes(
 	r *http.Request,
 	bucketName, key string,
 ) {
+	if !h.checkAccess(r, bucketName, "s3:GetObject", key) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
 	versionId := r.URL.Query().Get("versionId")
 
 	// Get the requested attributes from header
@@ -2185,8 +2500,16 @@ func (h *Handler) handleGetObjectAttributes(
 
 	// Parse requested attributes
 	requestedAttrs := make(map[string]bool)
+	validAttr := map[string]bool{
+		"ETag": true, "Checksum": true, "ObjectSize": true, "StorageClass": true, "ObjectParts": true,
+	}
 	for _, attr := range strings.Split(attributesHeader, ",") {
-		requestedAttrs[strings.TrimSpace(attr)] = true
+		trimmed := strings.TrimSpace(attr)
+		if trimmed == "" || !validAttr[trimmed] {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid object attributes value.")
+			return
+		}
+		requestedAttrs[trimmed] = true
 	}
 
 	// Get object
@@ -2239,6 +2562,44 @@ func (h *Handler) handleGetObjectAttributes(
 		)
 		return
 	}
+	if validateSSECAccess(w, r, obj) {
+		return
+	}
+	maxParts := 1000
+	if requestedAttrs["ObjectParts"] {
+		maxPartsRaw := r.URL.Query().Get("max-parts")
+		if maxPartsRaw == "" {
+			maxPartsRaw = strings.TrimSpace(r.Header.Get("x-amz-max-parts"))
+		}
+		if maxPartsRaw != "" {
+			parsed, parseErr := strconv.Atoi(maxPartsRaw)
+			if parseErr != nil || parsed < 0 {
+				backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "max-parts must be a non-negative integer.")
+				return
+			}
+			maxParts = parsed
+		}
+	}
+	partNumberMarker := 0
+	if requestedAttrs["ObjectParts"] {
+		markerRaw := r.URL.Query().Get("part-number-marker")
+		if markerRaw == "" {
+			markerRaw = strings.TrimSpace(r.Header.Get("x-amz-part-number-marker"))
+		}
+		if markerRaw != "" {
+			parsed, parseErr := strconv.Atoi(markerRaw)
+			if parseErr != nil || parsed < 0 {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"part-number-marker must be a non-negative integer.",
+				)
+				return
+			}
+			partNumberMarker = parsed
+		}
+	}
 
 	// Build response based on requested attributes
 	resp := backend.GetObjectAttributesResponse{
@@ -2246,14 +2607,17 @@ func (h *Handler) handleGetObjectAttributes(
 	}
 
 	if requestedAttrs["ETag"] {
-		resp.ETag = obj.ETag
+		resp.ETag = strings.Trim(obj.ETag, "\"")
 	}
 
 	if requestedAttrs["Checksum"] {
-		if obj.ChecksumCRC32 != "" {
-			resp.Checksum = &backend.GetObjectAttributesChecksum{
-				ChecksumCRC32: obj.ChecksumCRC32,
-			}
+		resp.Checksum = &backend.GetObjectAttributesChecksum{
+			ChecksumType:      obj.ChecksumType,
+			ChecksumCRC32:     obj.ChecksumCRC32,
+			ChecksumCRC32C:    obj.ChecksumCRC32C,
+			ChecksumCRC64NVME: obj.ChecksumCRC64NVME,
+			ChecksumSHA1:      obj.ChecksumSHA1,
+			ChecksumSHA256:    obj.ChecksumSHA256,
 		}
 	}
 
@@ -2267,6 +2631,68 @@ func (h *Handler) handleGetObjectAttributes(
 			storageClass = "STANDARD"
 		}
 		resp.StorageClass = storageClass
+	}
+	if requestedAttrs["ObjectParts"] && len(obj.Parts) > 0 {
+		total := len(obj.Parts)
+		objectParts := &backend.GetObjectAttributesObjectParts{
+			PartNumberMarker: partNumberMarker,
+			MaxParts:         maxParts,
+			PartsCount:       total,
+			TotalPartsCount:  total,
+		}
+		start := 0
+		for start < total && obj.Parts[start].PartNumber <= partNumberMarker {
+			start++
+		}
+		end := start + maxParts
+		if maxParts == 0 {
+			end = start
+		}
+		if end > total {
+			end = total
+		}
+		objectParts.IsTruncated = end < total
+		if objectParts.IsTruncated && end > start {
+			objectParts.NextPartNumberMarker = obj.Parts[end-1].PartNumber
+		}
+
+		offset := int64(0)
+		for i, p := range obj.Parts {
+			if i < start {
+				offset += p.Size
+				continue
+			}
+			if i >= end {
+				break
+			}
+			partDataStart := offset
+			partDataEnd := offset + p.Size
+			if partDataStart < 0 || partDataEnd > int64(len(obj.Data)) {
+				partDataStart = 0
+				partDataEnd = 0
+			}
+			checksumItem := computePartChecksums(obj.Data[partDataStart:partDataEnd], obj.ChecksumAlgorithm)
+			checksumItem.PartNumber = p.PartNumber
+			checksumItem.Size = p.Size
+			if p.ChecksumCRC32 != "" {
+				checksumItem.ChecksumCRC32 = p.ChecksumCRC32
+			}
+			if p.ChecksumCRC32C != "" {
+				checksumItem.ChecksumCRC32C = p.ChecksumCRC32C
+			}
+			if p.ChecksumCRC64NVME != "" {
+				checksumItem.ChecksumCRC64NVME = p.ChecksumCRC64NVME
+			}
+			if p.ChecksumSHA1 != "" {
+				checksumItem.ChecksumSHA1 = p.ChecksumSHA1
+			}
+			if p.ChecksumSHA256 != "" {
+				checksumItem.ChecksumSHA256 = p.ChecksumSHA256
+			}
+			objectParts.Parts = append(objectParts.Parts, checksumItem)
+			offset += p.Size
+		}
+		resp.ObjectParts = objectParts
 	}
 
 	// Set version ID header

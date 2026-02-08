@@ -1,8 +1,14 @@
 package handler
 
 import (
+	"bytes"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/xml"
 	"errors"
+	"hash/crc32"
+	"hash/crc64"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -82,6 +88,141 @@ var (
 	decodeURIFn = decodeURI
 )
 
+func normalizeChecksumType(algorithm, checksumType string) string {
+	algorithm = strings.ToUpper(strings.TrimSpace(algorithm))
+	checksumType = strings.ToUpper(strings.TrimSpace(checksumType))
+	if checksumType != "" {
+		return checksumType
+	}
+	switch algorithm {
+	case "SHA1", "SHA256":
+		return "COMPOSITE"
+	default:
+		return "FULL_OBJECT"
+	}
+}
+
+func checksumFromCompletePart(algorithm string, p backend.CompletePart) string {
+	switch strings.ToUpper(algorithm) {
+	case "CRC32":
+		return p.ChecksumCRC32
+	case "CRC32C":
+		return p.ChecksumCRC32C
+	case "CRC64NVME":
+		return p.ChecksumCRC64NVME
+	case "SHA1":
+		return p.ChecksumSHA1
+	case "SHA256":
+		return p.ChecksumSHA256
+	default:
+		return ""
+	}
+}
+
+func checksumFromPartInfo(algorithm string, p *backend.PartInfo) string {
+	if p == nil {
+		return ""
+	}
+	switch strings.ToUpper(algorithm) {
+	case "CRC32":
+		return p.ChecksumCRC32
+	case "CRC32C":
+		return p.ChecksumCRC32C
+	case "CRC64NVME":
+		return p.ChecksumCRC64NVME
+	case "SHA1":
+		return p.ChecksumSHA1
+	case "SHA256":
+		return p.ChecksumSHA256
+	default:
+		return ""
+	}
+}
+
+func checksumFromCompleteHeaders(algorithm string, r *http.Request) string {
+	switch strings.ToUpper(algorithm) {
+	case "CRC32":
+		return r.Header.Get("x-amz-checksum-crc32")
+	case "CRC32C":
+		return r.Header.Get("x-amz-checksum-crc32c")
+	case "CRC64NVME":
+		return r.Header.Get("x-amz-checksum-crc64nvme")
+	case "SHA1":
+		return r.Header.Get("x-amz-checksum-sha1")
+	case "SHA256":
+		return r.Header.Get("x-amz-checksum-sha256")
+	default:
+		return ""
+	}
+}
+
+func setUploadFinalChecksum(upload *backend.MultipartUpload, algorithm, value string) {
+	switch strings.ToUpper(algorithm) {
+	case "CRC32":
+		upload.ChecksumCRC32 = value
+	case "CRC32C":
+		upload.ChecksumCRC32C = value
+	case "CRC64NVME":
+		upload.ChecksumCRC64NVME = value
+	case "SHA1":
+		upload.ChecksumSHA1 = value
+	case "SHA256":
+		upload.ChecksumSHA256 = value
+	}
+}
+
+func computeCompositeChecksum(algorithm string, partChecksums []string) (string, bool) {
+	algorithm = strings.ToUpper(algorithm)
+	if len(partChecksums) == 0 {
+		return "", false
+	}
+	if algorithm != "SHA1" && algorithm != "SHA256" {
+		return "", false
+	}
+	decoded := make([]byte, 0, len(partChecksums)*32)
+	for _, v := range partChecksums {
+		b, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			return "", false
+		}
+		decoded = append(decoded, b...)
+	}
+	var sum string
+	switch algorithm {
+	case "SHA1":
+		h := sha1.Sum(decoded)
+		sum = base64.StdEncoding.EncodeToString(h[:])
+	case "SHA256":
+		h := sha256.Sum256(decoded)
+		sum = base64.StdEncoding.EncodeToString(h[:])
+	}
+	return sum + "-" + strconv.Itoa(len(partChecksums)), true
+}
+
+func computeFullObjectChecksum(algorithm string, data []byte) (string, bool) {
+	switch strings.ToUpper(algorithm) {
+	case "CRC32":
+		h := crc32.NewIEEE()
+		_, _ = h.Write(data)
+		return base64.StdEncoding.EncodeToString(h.Sum(nil)), true
+	case "CRC32C":
+		h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+		_, _ = h.Write(data)
+		return base64.StdEncoding.EncodeToString(h.Sum(nil)), true
+	case "CRC64NVME":
+		sum := crc64.Checksum(data, crc64.MakeTable(crc64NVME))
+		buf := []byte{
+			byte(sum >> 56), byte(sum >> 48), byte(sum >> 40), byte(sum >> 32),
+			byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum),
+		}
+		return base64.StdEncoding.EncodeToString(buf), true
+	case "SHA1", "SHA256":
+		return backend.ComputeChecksumBase64(algorithm, data)
+	default:
+		return "", false
+	}
+}
+
 // handleCreateMultipartUpload handles CreateMultipartUpload requests.
 func (h *Handler) handleCreateMultipartUpload(
 	w http.ResponseWriter,
@@ -104,6 +245,58 @@ func (h *Handler) handleCreateMultipartUpload(
 		ContentEncoding:    r.Header.Get("Content-Encoding"),
 		ContentLanguage:    r.Header.Get("Content-Language"),
 		ContentDisposition: r.Header.Get("Content-Disposition"),
+	}
+	bucketOwnership := backend.ObjectOwnershipObjectWriter
+	if bucket, ok := h.backend.GetBucket(bucketName); ok && bucket.ObjectOwnership != "" {
+		bucketOwnership = bucket.ObjectOwnership
+	}
+	grantHeadersPresent := r.Header.Get("x-amz-grant-full-control") != "" ||
+		r.Header.Get("x-amz-grant-read") != "" ||
+		r.Header.Get("x-amz-grant-write") != "" ||
+		r.Header.Get("x-amz-grant-read-acp") != "" ||
+		r.Header.Get("x-amz-grant-write-acp") != ""
+	if strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) &&
+		(grantHeadersPresent ||
+			(r.Header.Get("x-amz-acl") != "" &&
+				!strings.EqualFold(r.Header.Get("x-amz-acl"), string(backend.ACLBucketOwnerFull)))) {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"AccessControlListNotSupported",
+			"The bucket does not allow ACLs",
+		)
+		return
+	}
+	if strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
+		opts.Owner = h.bucketOwner(bucketName)
+	} else if strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerPreferred) &&
+		strings.EqualFold(r.Header.Get("x-amz-acl"), string(backend.ACLBucketOwnerFull)) {
+		opts.Owner = h.bucketOwner(bucketName)
+	}
+	checksumAlgo := r.Header.Get("x-amz-checksum-algorithm")
+	if checksumAlgo == "" {
+		checksumAlgo = r.Header.Get("x-amz-sdk-checksum-algorithm")
+	}
+	if checksumAlgo != "" {
+		opts.ChecksumAlgorithm = checksumAlgo
+	}
+	if checksumType := r.Header.Get("x-amz-checksum-type"); checksumType != "" {
+		opts.ChecksumType = checksumType
+	}
+	if v := r.Header.Get("x-amz-checksum-crc32"); v != "" {
+		opts.ChecksumCRC32 = v
+	}
+	if v := r.Header.Get("x-amz-checksum-crc32c"); v != "" {
+		opts.ChecksumCRC32C = v
+	}
+	if v := r.Header.Get("x-amz-checksum-crc64nvme"); v != "" {
+		opts.ChecksumCRC64NVME = v
+	}
+	if v := r.Header.Get("x-amz-checksum-sha1"); v != "" {
+		opts.ChecksumSHA1 = v
+	}
+	if v := r.Header.Get("x-amz-checksum-sha256"); v != "" {
+		opts.ChecksumSHA256 = v
 	}
 
 	// Extract Object Lock headers
@@ -162,10 +355,12 @@ func (h *Handler) handleCreateMultipartUpload(
 	}
 
 	resp := backend.InitiateMultipartUploadResult{
-		Xmlns:    backend.S3Xmlns,
-		Bucket:   bucketName,
-		Key:      key,
-		UploadId: upload.UploadId,
+		Xmlns:             backend.S3Xmlns,
+		Bucket:            bucketName,
+		Key:               key,
+		UploadId:          upload.UploadId,
+		ChecksumAlgorithm: upload.ChecksumAlgorithm,
+		ChecksumType:      upload.ChecksumType,
 	}
 
 	// Return SSE headers
@@ -181,6 +376,12 @@ func (h *Handler) handleCreateMultipartUpload(
 	}
 	if upload.SSECustomerKeyMD5 != "" {
 		w.Header().Set("x-amz-server-side-encryption-customer-key-md5", upload.SSECustomerKeyMD5)
+	}
+	if upload.ChecksumAlgorithm != "" {
+		w.Header().Set("x-amz-checksum-algorithm", upload.ChecksumAlgorithm)
+	}
+	if upload.ChecksumType != "" {
+		w.Header().Set("x-amz-checksum-type", upload.ChecksumType)
 	}
 
 	w.Header().Set("Content-Type", "application/xml")
@@ -251,6 +452,21 @@ func (h *Handler) handleUploadPart(
 	}
 
 	w.Header().Set("ETag", part.ETag)
+	if part.ChecksumCRC32 != "" {
+		w.Header().Set("x-amz-checksum-crc32", part.ChecksumCRC32)
+	}
+	if part.ChecksumCRC32C != "" {
+		w.Header().Set("x-amz-checksum-crc32c", part.ChecksumCRC32C)
+	}
+	if part.ChecksumCRC64NVME != "" {
+		w.Header().Set("x-amz-checksum-crc64nvme", part.ChecksumCRC64NVME)
+	}
+	if part.ChecksumSHA1 != "" {
+		w.Header().Set("x-amz-checksum-sha1", part.ChecksumSHA1)
+	}
+	if part.ChecksumSHA256 != "" {
+		w.Header().Set("x-amz-checksum-sha256", part.ChecksumSHA256)
+	}
 
 	// Return SSE headers from the multipart upload
 	if upload, ok := h.backend.GetUpload(uploadId); ok {
@@ -302,6 +518,102 @@ func (h *Handler) handleCompleteMultipartUpload(
 			"The XML you provided was not well-formed.",
 		)
 		return
+	}
+
+	existingObj, getObjErr := getObjectForMultipartCompletionFn(h, bucketName, key)
+	bucketExists := !errors.Is(getObjErr, backend.ErrBucketNotFound)
+	objectExists := getObjErr == nil && existingObj != nil && !existingObj.IsDeleteMarker
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && bucketExists {
+		if !objectExists {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified key does not exist.",
+			)
+			return
+		}
+		if !matchesETag(ifMatch, existingObj.ETag) {
+			backend.WriteError(
+				w,
+				http.StatusPreconditionFailed,
+				"PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold.",
+			)
+			return
+		}
+	}
+	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch != "" && bucketExists {
+		if objectExists && matchesETag(ifNoneMatch, existingObj.ETag) {
+			backend.WriteError(
+				w,
+				http.StatusPreconditionFailed,
+				"PreconditionFailed",
+				"At least one of the pre-conditions you specified did not hold.",
+			)
+			return
+		}
+	}
+
+	if upload, ok := h.backend.GetUpload(uploadId); ok && upload != nil {
+		algorithm := strings.ToUpper(strings.TrimSpace(upload.ChecksumAlgorithm))
+		if algorithm != "" {
+			checksumType := normalizeChecksumType(algorithm, upload.ChecksumType)
+			upload.ChecksumType = checksumType
+
+			partChecksums := make([]string, 0, len(completeReq.Parts))
+			partsData := make([][]byte, 0, len(completeReq.Parts))
+			canValidate := true
+			for _, p := range completeReq.Parts {
+				part, exists := upload.Parts[p.PartNumber]
+				if !exists {
+					canValidate = false
+					break
+				}
+				expected := checksumFromPartInfo(algorithm, part)
+				if expected == "" {
+					canValidate = false
+					break
+				}
+				provided := checksumFromCompletePart(algorithm, p)
+				if provided != "" && provided != expected {
+					backend.WriteError(
+						w,
+						http.StatusBadRequest,
+						"BadDigest",
+						"The Content-MD5 you specified did not match what we received.",
+					)
+					return
+				}
+				partChecksums = append(partChecksums, expected)
+				partsData = append(partsData, part.Data)
+			}
+
+			if canValidate {
+				combinedData := bytes.Join(partsData, nil)
+				finalChecksum := ""
+				computed := false
+				if checksumType == "COMPOSITE" {
+					finalChecksum, computed = computeCompositeChecksum(algorithm, partChecksums)
+				}
+				if !computed {
+					finalChecksum, computed = computeFullObjectChecksum(algorithm, combinedData)
+				}
+				if computed {
+					if provided := checksumFromCompleteHeaders(algorithm, r); provided != "" &&
+						provided != finalChecksum {
+						backend.WriteError(
+							w,
+							http.StatusBadRequest,
+							"BadDigest",
+							"The Content-MD5 you specified did not match what we received.",
+						)
+						return
+					}
+					setUploadFinalChecksum(upload, algorithm, finalChecksum)
+				}
+			}
+		}
 	}
 
 	obj, err := completeMultipartUploadFn(h, bucketName, key, uploadId, completeReq.Parts)
@@ -361,6 +673,14 @@ func (h *Handler) handleCompleteMultipartUpload(
 				"Bucket is missing Object Lock Configuration",
 			)
 			return
+		} else if errors.Is(err, backend.ErrBadDigest) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"BadDigest",
+				"The Content-MD5 you specified did not match what we received.",
+			)
+			return
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			return
@@ -371,11 +691,17 @@ func (h *Handler) handleCompleteMultipartUpload(
 	location := "http://" + r.Host + "/" + bucketName + "/" + key
 
 	resp := backend.CompleteMultipartUploadResult{
-		Xmlns:    backend.S3Xmlns,
-		Location: location,
-		Bucket:   bucketName,
-		Key:      key,
-		ETag:     obj.ETag,
+		Xmlns:             backend.S3Xmlns,
+		Location:          location,
+		Bucket:            bucketName,
+		Key:               key,
+		ETag:              obj.ETag,
+		ChecksumCRC32:     obj.ChecksumCRC32,
+		ChecksumCRC32C:    obj.ChecksumCRC32C,
+		ChecksumCRC64NVME: obj.ChecksumCRC64NVME,
+		ChecksumSHA1:      obj.ChecksumSHA1,
+		ChecksumSHA256:    obj.ChecksumSHA256,
+		ChecksumType:      obj.ChecksumType,
 	}
 
 	// Add version ID header if versioning is enabled
@@ -385,6 +711,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 
 	// Return SSE headers
 	setStorageAndEncryptionHeaders(w, obj)
+	setChecksumResponseHeaders(w, obj)
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
@@ -607,10 +934,15 @@ func (h *Handler) handleListParts(
 
 	for _, part := range result.Parts {
 		resp.Parts = append(resp.Parts, backend.PartItem{
-			PartNumber:   part.PartNumber,
-			LastModified: part.LastModified,
-			ETag:         part.ETag,
-			Size:         part.Size,
+			PartNumber:        part.PartNumber,
+			LastModified:      part.LastModified,
+			ETag:              part.ETag,
+			Size:              part.Size,
+			ChecksumCRC32:     part.ChecksumCRC32,
+			ChecksumCRC32C:    part.ChecksumCRC32C,
+			ChecksumCRC64NVME: part.ChecksumCRC64NVME,
+			ChecksumSHA1:      part.ChecksumSHA1,
+			ChecksumSHA256:    part.ChecksumSHA256,
 		})
 	}
 

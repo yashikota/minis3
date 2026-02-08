@@ -3,8 +3,12 @@ package backend
 import (
 	"bytes"
 	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"sort"
 	"strings"
@@ -30,6 +34,13 @@ type CreateMultipartUploadOptions struct {
 	SSEKMSKeyId          string
 	SSECustomerAlgorithm string
 	SSECustomerKeyMD5    string
+	ChecksumAlgorithm    string
+	ChecksumType         string
+	ChecksumCRC32        string
+	ChecksumCRC32C       string
+	ChecksumCRC64NVME    string
+	ChecksumSHA1         string
+	ChecksumSHA256       string
 }
 
 // CreateMultipartUpload initiates a multipart upload and returns an upload ID.
@@ -40,7 +51,8 @@ func (b *Backend) CreateMultipartUpload(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if _, ok := b.buckets[bucketName]; !ok {
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
 		return nil, ErrBucketNotFound
 	}
 
@@ -48,6 +60,12 @@ func (b *Backend) CreateMultipartUpload(
 	owner := opts.Owner
 	if owner == nil {
 		owner = DefaultOwner()
+	}
+	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
+		owner = OwnerForAccessKey(bucket.OwnerAccessKey)
+		if owner == nil {
+			owner = DefaultOwner()
+		}
 	}
 	upload := &MultipartUpload{
 		UploadId:             uploadId,
@@ -73,6 +91,13 @@ func (b *Backend) CreateMultipartUpload(
 		SSEKMSKeyId:          opts.SSEKMSKeyId,
 		SSECustomerAlgorithm: opts.SSECustomerAlgorithm,
 		SSECustomerKeyMD5:    opts.SSECustomerKeyMD5,
+		ChecksumAlgorithm:    strings.ToUpper(strings.TrimSpace(opts.ChecksumAlgorithm)),
+		ChecksumType:         strings.ToUpper(strings.TrimSpace(opts.ChecksumType)),
+		ChecksumCRC32:        opts.ChecksumCRC32,
+		ChecksumCRC32C:       opts.ChecksumCRC32C,
+		ChecksumCRC64NVME:    opts.ChecksumCRC64NVME,
+		ChecksumSHA1:         opts.ChecksumSHA1,
+		ChecksumSHA256:       opts.ChecksumSHA256,
 	}
 
 	b.uploads[uploadId] = upload
@@ -113,6 +138,24 @@ func (b *Backend) UploadPart(
 		Size:         int64(len(data)),
 		Data:         data,
 		LastModified: time.Now().UTC().Format(time.RFC3339),
+	}
+	switch strings.ToUpper(upload.ChecksumAlgorithm) {
+	case "CRC32":
+		h := crc32.NewIEEE()
+		_, _ = h.Write(data)
+		part.ChecksumCRC32 = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	case "CRC32C":
+		h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+		_, _ = h.Write(data)
+		part.ChecksumCRC32C = base64.StdEncoding.EncodeToString(h.Sum(nil))
+	case "CRC64NVME":
+		part.ChecksumCRC64NVME = checksumCRC64NVMEBase64(data)
+	case "SHA1":
+		sum := sha1.Sum(data)
+		part.ChecksumSHA1 = base64.StdEncoding.EncodeToString(sum[:])
+	case "SHA256":
+		sum := sha256.Sum256(data)
+		part.ChecksumSHA256 = base64.StdEncoding.EncodeToString(sum[:])
 	}
 
 	upload.Parts[partNumber] = part
@@ -247,7 +290,55 @@ func (b *Backend) CompleteMultipartUpload(
 		SSEKMSKeyId:          upload.SSEKMSKeyId,
 		SSECustomerAlgorithm: upload.SSECustomerAlgorithm,
 		SSECustomerKeyMD5:    upload.SSECustomerKeyMD5,
+		Owner:                upload.Owner,
 		ACL:                  NewDefaultACLForOwner(upload.Owner),
+	}
+	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
+		obj.Owner = OwnerForAccessKey(bucket.OwnerAccessKey)
+		if obj.Owner == nil {
+			obj.Owner = DefaultOwner()
+		}
+		obj.ACL = NewDefaultACLForOwner(obj.Owner)
+	}
+	obj.ChecksumAlgorithm = upload.ChecksumAlgorithm
+	obj.ChecksumType = upload.ChecksumType
+	switch strings.ToUpper(upload.ChecksumAlgorithm) {
+	case "CRC32":
+		if upload.ChecksumCRC32 != "" {
+			obj.ChecksumCRC32 = upload.ChecksumCRC32
+		} else {
+			h := crc32.NewIEEE()
+			_, _ = h.Write(data)
+			obj.ChecksumCRC32 = base64.StdEncoding.EncodeToString(h.Sum(nil))
+		}
+	case "CRC32C":
+		if upload.ChecksumCRC32C != "" {
+			obj.ChecksumCRC32C = upload.ChecksumCRC32C
+		} else {
+			h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+			_, _ = h.Write(data)
+			obj.ChecksumCRC32C = base64.StdEncoding.EncodeToString(h.Sum(nil))
+		}
+	case "CRC64NVME":
+		if upload.ChecksumCRC64NVME != "" {
+			obj.ChecksumCRC64NVME = upload.ChecksumCRC64NVME
+		} else {
+			obj.ChecksumCRC64NVME = checksumCRC64NVMEBase64(data)
+		}
+	case "SHA1":
+		if upload.ChecksumSHA1 != "" {
+			obj.ChecksumSHA1 = upload.ChecksumSHA1
+		} else {
+			sum := sha1.Sum(data)
+			obj.ChecksumSHA1 = base64.StdEncoding.EncodeToString(sum[:])
+		}
+	case "SHA256":
+		if upload.ChecksumSHA256 != "" {
+			obj.ChecksumSHA256 = upload.ChecksumSHA256
+		} else {
+			sum := sha256.Sum256(data)
+			obj.ChecksumSHA256 = base64.StdEncoding.EncodeToString(sum[:])
+		}
 	}
 
 	// Save part information for PartNumber support in GetObject/HeadObject
@@ -256,9 +347,14 @@ func (b *Backend) CompleteMultipartUpload(
 	for _, p := range normalizedParts {
 		uploadedPart := upload.Parts[p.PartNumber]
 		objectParts = append(objectParts, ObjectPart{
-			PartNumber: p.PartNumber,
-			Size:       uploadedPart.Size,
-			ETag:       uploadedPart.ETag,
+			PartNumber:        p.PartNumber,
+			Size:              uploadedPart.Size,
+			ETag:              uploadedPart.ETag,
+			ChecksumCRC32:     uploadedPart.ChecksumCRC32,
+			ChecksumCRC32C:    uploadedPart.ChecksumCRC32C,
+			ChecksumCRC64NVME: uploadedPart.ChecksumCRC64NVME,
+			ChecksumSHA1:      uploadedPart.ChecksumSHA1,
+			ChecksumSHA256:    uploadedPart.ChecksumSHA256,
 		})
 		offset += uploadedPart.Size
 	}

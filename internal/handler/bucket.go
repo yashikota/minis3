@@ -606,6 +606,18 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 
 	switch r.Method {
 	case http.MethodGet:
+		if r.URL.Query().Has("ownershipControls") {
+			h.handleGetBucketOwnershipControls(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("requestPayment") {
+			h.handleGetBucketRequestPayment(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("logging") {
+			h.handleGetBucketLogging(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Has("versioning") {
 			h.handleGetBucketVersioning(w, r, bucketName)
 			return
@@ -670,6 +682,18 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		h.handlePostObjectFormUpload(w, r, bucketName)
 	case http.MethodPut:
+		if r.URL.Query().Has("ownershipControls") {
+			h.handlePutBucketOwnershipControls(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("requestPayment") {
+			h.handlePutBucketRequestPayment(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("logging") {
+			h.handlePutBucketLogging(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Has("versioning") {
 			h.handlePutBucketVersioning(w, r, bucketName)
 			return
@@ -707,7 +731,7 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		locationConstraint := ""
-
+		requestedOwnership := strings.TrimSpace(r.Header.Get("x-amz-object-ownership"))
 		// Parse CreateBucketConfiguration from request body if present
 		if r.Body != nil && r.ContentLength > 0 {
 			defer func() { _ = r.Body.Close() }()
@@ -734,7 +758,43 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 					return
 				}
 				locationConstraint = strings.TrimSpace(config.LocationConstraint)
+				// LocationConstraint is accepted but ignored (single-region mock)
+				if requestedOwnership == "" {
+					requestedOwnership = strings.TrimSpace(config.ObjectOwnership)
+				}
 			}
+		}
+		if requestedOwnership != "" {
+			switch requestedOwnership {
+			case backend.ObjectOwnershipBucketOwnerEnforced,
+				backend.ObjectOwnershipBucketOwnerPreferred,
+				backend.ObjectOwnershipObjectWriter:
+			default:
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Invalid value for x-amz-object-ownership.",
+				)
+				return
+			}
+		}
+		grantHeadersPresent := r.Header.Get("x-amz-grant-full-control") != "" ||
+			r.Header.Get("x-amz-grant-read") != "" ||
+			r.Header.Get("x-amz-grant-write") != "" ||
+			r.Header.Get("x-amz-grant-read-acp") != "" ||
+			r.Header.Get("x-amz-grant-write-acp") != ""
+		if requestedOwnership == backend.ObjectOwnershipBucketOwnerEnforced &&
+			(grantHeadersPresent ||
+				(r.Header.Get("x-amz-acl") != "" &&
+					!strings.EqualFold(r.Header.Get("x-amz-acl"), string(backend.ACLBucketOwnerFull)))) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"AccessControlListNotSupported",
+				"The bucket does not allow ACLs",
+			)
+			return
 		}
 
 		// Check if Object Lock is requested
@@ -802,6 +862,14 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Set the owner access key
 		h.backend.SetBucketOwner(bucketName, requestAccessKey)
+		if requestedOwnership != "" {
+			if err := h.backend.PutBucketOwnershipControls(bucketName, &backend.OwnershipControls{
+				Rules: []backend.OwnershipControlsRule{{ObjectOwnership: requestedOwnership}},
+			}); err != nil {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+				return
+			}
+		}
 		owner := backend.OwnerForAccessKey(requestAccessKey)
 		requestedACL := backend.NewDefaultACLForOwner(owner)
 		headerACL, aclErr := aclFromGrantHeaders(r, owner)
@@ -814,13 +882,32 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
 			requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, owner, owner)
 		}
-		if err := putBucketACLFn(h, bucketName, requestedACL); err != nil {
-			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-			return
+		if requestedOwnership != backend.ObjectOwnershipBucketOwnerEnforced {
+			if err := putBucketACLFn(h, bucketName, requestedACL); err != nil {
+				if errors.Is(err, backend.ErrAccessControlListNotSupported) {
+					backend.WriteError(
+						w,
+						http.StatusBadRequest,
+						"AccessControlListNotSupported",
+						"The bucket does not allow ACLs",
+					)
+				} else {
+					backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+				}
+				return
+			}
 		}
 		w.Header().Set("Location", "/"+bucketName)
 		w.WriteHeader(http.StatusOK)
 	case http.MethodDelete:
+		if r.URL.Query().Has("ownershipControls") {
+			h.handleDeleteBucketOwnershipControls(w, r, bucketName)
+			return
+		}
+		if r.URL.Query().Has("logging") {
+			h.handleDeleteBucketLogging(w, r, bucketName)
+			return
+		}
 		if r.URL.Query().Has("tagging") {
 			h.handleDeleteBucketTagging(w, r, bucketName)
 			return
@@ -1002,6 +1089,30 @@ func (h *Handler) handlePostObjectFormUpload(
 		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Checksum validation failed")
 		return
 	}
+	requestOwner := requesterOwner(r)
+	bucketOwner := h.bucketOwner(bucketName)
+	bucketOwnership := backend.ObjectOwnershipObjectWriter
+	if bucket, ok := h.backend.GetBucket(bucketName); ok && bucket.ObjectOwnership != "" {
+		bucketOwnership = bucket.ObjectOwnership
+	}
+	formACL := getMultipartFormValue(formFields, "acl")
+	if strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
+		if formACL != "" && !strings.EqualFold(formACL, string(backend.ACLBucketOwnerFull)) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"AccessControlListNotSupported",
+				"The bucket does not allow ACLs",
+			)
+			return
+		}
+		opts.Owner = bucketOwner
+	} else if strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerPreferred) &&
+		strings.EqualFold(formACL, string(backend.ACLBucketOwnerFull)) {
+		opts.Owner = bucketOwner
+	} else {
+		opts.Owner = requestOwner
+	}
 
 	obj, err := postObjectPutFn(h, bucketName, key, body, opts)
 	if err != nil {
@@ -1018,14 +1129,32 @@ func (h *Handler) handlePostObjectFormUpload(
 		return
 	}
 
-	requestOwner := requesterOwner(r)
-	objectACL := backend.NewDefaultACLForOwner(requestOwner)
-	if acl := getMultipartFormValue(formFields, "acl"); acl != "" {
-		objectACL = backend.CannedACLToPolicyForOwner(acl, requestOwner, h.bucketOwner(bucketName))
+	aclOwner := opts.Owner
+	if aclOwner == nil {
+		aclOwner = requestOwner
 	}
-	if err := postObjectPutACLFn(h, bucketName, key, obj.VersionId, objectACL); err != nil {
-		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
-		return
+	objectACL := backend.NewDefaultACLForOwner(aclOwner)
+	if formACL != "" {
+		if strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
+			objectACL = backend.NewDefaultACLForOwner(bucketOwner)
+		} else {
+			objectACL = backend.CannedACLToPolicyForOwner(formACL, aclOwner, bucketOwner)
+		}
+	}
+	if !strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
+		if err := postObjectPutACLFn(h, bucketName, key, obj.VersionId, objectACL); err != nil {
+			if errors.Is(err, backend.ErrAccessControlListNotSupported) {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"AccessControlListNotSupported",
+					"The bucket does not allow ACLs",
+				)
+			} else {
+				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+			}
+			return
+		}
 	}
 
 	if redirectURL := getMultipartFormValue(formFields, "success_action_redirect"); redirectURL != "" {
@@ -2030,6 +2159,13 @@ func (h *Handler) handlePutBucketACL(
 					"NoSuchBucket",
 					"The specified bucket does not exist.",
 				)
+			} else if errors.Is(err, backend.ErrAccessControlListNotSupported) {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"AccessControlListNotSupported",
+					"The bucket does not allow ACLs",
+				)
 			} else {
 				backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 			}
@@ -2079,6 +2215,13 @@ func (h *Handler) handlePutBucketACL(
 				"NoSuchBucket",
 				"The specified bucket does not exist.",
 			)
+		} else if errors.Is(err, backend.ErrAccessControlListNotSupported) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"AccessControlListNotSupported",
+				"The bucket does not allow ACLs",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -2086,6 +2229,563 @@ func (h *Handler) handlePutBucketACL(
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) handleGetBucketOwnershipControls(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:GetBucketOwnershipControls", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	controls, err := h.backend.GetBucketOwnershipControls(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else if errors.Is(err, backend.ErrOwnershipControlsNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"OwnershipControlsNotFoundError",
+				"The bucket ownership controls were not found",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, marshalErr := xml.Marshal(controls)
+	if marshalErr != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", marshalErr.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+func (h *Handler) handlePutBucketOwnershipControls(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:PutBucketOwnershipControls", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Failed to read request body.")
+		return
+	}
+	var controls backend.OwnershipControls
+	if err := xml.Unmarshal(body, &controls); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+	if err := h.backend.PutBucketOwnershipControls(bucketName, &controls); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else if errors.Is(err, backend.ErrInvalidRequest) {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Invalid ownership controls.")
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) handleDeleteBucketOwnershipControls(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:DeleteBucketOwnershipControls", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	if err := h.backend.DeleteBucketOwnershipControls(bucketName); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleGetBucketRequestPayment(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:GetBucketRequestPayment", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	cfg, err := h.backend.GetBucketRequestPayment(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, marshalErr := xml.Marshal(cfg)
+	if marshalErr != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", marshalErr.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+func (h *Handler) handlePutBucketRequestPayment(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:PutBucketRequestPayment", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Failed to read request body.")
+		return
+	}
+	var cfg backend.RequestPaymentConfiguration
+	if err := xml.Unmarshal(body, &cfg); err != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
+	if err := h.backend.PutBucketRequestPayment(bucketName, &cfg); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else if errors.Is(err, backend.ErrInvalidRequest) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"MalformedXML",
+				"The XML you provided was not well-formed or did not validate against our published schema.",
+			)
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) handleGetBucketLogging(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:GetBucketLogging", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	status, err := h.backend.GetBucketLogging(bucketName)
+	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	if bucket, ok := h.backend.GetBucket(bucketName); ok && !bucket.LoggingConfigModifiedAt.IsZero() {
+		w.Header().Set("Last-Modified", bucket.LoggingConfigModifiedAt.UTC().Format(http.TimeFormat))
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, marshalErr := xml.Marshal(status)
+	if marshalErr != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", marshalErr.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+func (h *Handler) handlePutBucketLogging(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:PutBucketLogging", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	sourceBucket, exists := h.backend.GetBucket(bucketName)
+	if !exists {
+		backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		return
+	}
+	if sourceBucket.OwnerAccessKey != extractAccessKey(r) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	defer func() { _ = r.Body.Close() }()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Failed to read request body.")
+		return
+	}
+	var status backend.BucketLoggingStatus
+	if len(body) > 0 {
+		if err := xml.Unmarshal(body, &status); err != nil {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"MalformedXML",
+				"The XML you provided was not well-formed or did not validate against our published schema.",
+			)
+			return
+		}
+	}
+	if status.LoggingEnabled != nil {
+		resolvedTargetBucket := h.resolveLoggingTargetBucketName(
+			extractAccessKey(r),
+			status.LoggingEnabled.TargetBucket,
+		)
+		if resolvedTargetBucket == "" {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Invalid bucket logging configuration.",
+			)
+			return
+		}
+		status.LoggingEnabled.TargetBucket = resolvedTargetBucket
+
+		if format := status.LoggingEnabled.TargetObjectKeyFormat; format != nil &&
+			format.PartitionedPrefix != nil {
+			src := format.PartitionedPrefix.PartitionDateSource
+			if src != "" && src != "DeliveryTime" && src != "EventTime" {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"MalformedXML",
+					"The XML you provided was not well-formed or did not validate against our published schema.",
+				)
+				return
+			}
+		}
+
+		allowed, errCode := h.bucketLoggingTargetAllowed(
+			bucketName,
+			resolvedTargetBucket,
+			status.LoggingEnabled.TargetPrefix,
+		)
+		if !allowed {
+			if errCode == "NoSuchKey" {
+				backend.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+			} else {
+				backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			}
+			return
+		}
+	}
+	if err := h.backend.PutBucketLogging(bucketName, &status); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else if errors.Is(err, backend.ErrObjectNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified key does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrInvalidRequest) {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid bucket logging configuration.")
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) handleDeleteBucketLogging(
+	w http.ResponseWriter,
+	r *http.Request,
+	bucketName string,
+) {
+	if !h.checkAccess(r, bucketName, "s3:PutBucketLogging", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+	if err := h.backend.DeleteBucketLogging(bucketName); err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else {
+			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func policyValueToStrings(v any) []string {
+	switch vv := v.(type) {
+	case string:
+		return []string{vv}
+	case []any:
+		res := make([]string, 0, len(vv))
+		for _, item := range vv {
+			if s, ok := item.(string); ok {
+				res = append(res, s)
+			}
+		}
+		return res
+	default:
+		return nil
+	}
+}
+
+func wildcardMatch(pattern, value string) bool {
+	if pattern == "*" {
+		return true
+	}
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		return pattern == value
+	}
+	if !strings.HasPrefix(value, parts[0]) {
+		return false
+	}
+	offset := len(parts[0])
+	for i := 1; i < len(parts)-1; i++ {
+		part := parts[i]
+		if part == "" {
+			continue
+		}
+		pos := strings.Index(value[offset:], part)
+		if pos < 0 {
+			return false
+		}
+		offset += pos + len(part)
+	}
+	return strings.HasSuffix(value, parts[len(parts)-1])
+}
+
+func principalHasLoggingService(principal any) bool {
+	switch p := principal.(type) {
+	case string:
+		return p == "*" // permissive for tests
+	case map[string]any:
+		if service, ok := p["Service"]; ok {
+			for _, s := range policyValueToStrings(service) {
+				if s == "logging.s3.amazonaws.com" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func splitQualifiedBucketName(name string) (string, string) {
+	if idx := strings.Index(name, ":"); idx >= 0 {
+		return name[:idx], name[idx+1:]
+	}
+	return "", name
+}
+
+func qualifiedBucketARN(name string, suffix string) string {
+	tenant, bucket := splitQualifiedBucketName(name)
+	if tenant == "" {
+		if suffix == "" {
+			return fmt.Sprintf("arn:aws:s3:::%s", bucket)
+		}
+		return fmt.Sprintf("arn:aws:s3:::%s/%s", bucket, suffix)
+	}
+	if suffix == "" {
+		return fmt.Sprintf("arn:aws:s3::%s:%s", tenant, bucket)
+	}
+	return fmt.Sprintf("arn:aws:s3::%s:%s/%s", tenant, bucket, suffix)
+}
+
+func qualifiedBucketObjectARN(name, prefix string) string {
+	tenant, bucket := splitQualifiedBucketName(name)
+	if tenant == "" {
+		return fmt.Sprintf("arn:aws:s3:::%s/%s", bucket, prefix)
+	}
+	return fmt.Sprintf("arn:aws:s3::%s:%s/%s", tenant, bucket, prefix)
+}
+
+func (h *Handler) resolveLoggingTargetBucketName(sourceAccessKey, targetBucketName string) string {
+	targetBucketName = strings.TrimSpace(targetBucketName)
+	if targetBucketName == "" {
+		return ""
+	}
+	if idx := strings.Index(targetBucketName, ":"); idx >= 0 {
+		tenant := targetBucketName[:idx]
+		bucket := targetBucketName[idx+1:]
+		if bucket == "" {
+			return ""
+		}
+		if tenant == "" {
+			return bucket
+		}
+		return tenant + ":" + bucket
+	}
+	sourceTenant := tenantFromAccessKey(sourceAccessKey)
+	if sourceTenant == "" {
+		return targetBucketName
+	}
+	return sourceTenant + ":" + targetBucketName
+}
+
+func (h *Handler) bucketLoggingTargetAllowed(
+	sourceBucketName, targetBucketName, targetPrefix string,
+) (bool, string) {
+	sourceBucket, ok := h.backend.GetBucket(sourceBucketName)
+	if !ok {
+		return false, "NoSuchBucket"
+	}
+	targetBucket, ok := h.backend.GetBucket(targetBucketName)
+	if !ok {
+		return false, "NoSuchKey"
+	}
+
+	sourceOwner := backend.OwnerForAccessKey(sourceBucket.OwnerAccessKey)
+
+	sourceAccount := ""
+	if sourceOwner != nil {
+		sourceAccount = sourceOwner.ID
+	}
+	targetResources := []string{qualifiedBucketObjectARN(targetBucketName, targetPrefix)}
+	sourceArns := []string{qualifiedBucketARN(sourceBucketName, "")}
+
+	if strings.TrimSpace(targetBucket.Policy) == "" {
+		return false, "AccessDenied"
+	}
+
+	var policy map[string]any
+	if err := json.Unmarshal([]byte(targetBucket.Policy), &policy); err != nil {
+		return false, "AccessDenied"
+	}
+
+	statementsRaw, ok := policy["Statement"]
+	if !ok {
+		return false, "AccessDenied"
+	}
+
+	var statements []any
+	switch s := statementsRaw.(type) {
+	case []any:
+		statements = s
+	case map[string]any:
+		statements = []any{s}
+	default:
+		return false, "AccessDenied"
+	}
+
+	for _, stmtRaw := range statements {
+		stmt, ok := stmtRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if !strings.EqualFold(fmt.Sprintf("%v", stmt["Effect"]), "Allow") {
+			continue
+		}
+		if !principalHasLoggingService(stmt["Principal"]) {
+			continue
+		}
+
+		actionOK := false
+		for _, action := range policyValueToStrings(stmt["Action"]) {
+			if action == "s3:PutObject" || action == "*" {
+				actionOK = true
+				break
+			}
+		}
+		if !actionOK {
+			continue
+		}
+
+		resourceOK := false
+		for _, resource := range policyValueToStrings(stmt["Resource"]) {
+			for _, expected := range targetResources {
+				if wildcardMatch(resource, expected) {
+					resourceOK = true
+					break
+				}
+			}
+			if resourceOK {
+				break
+			}
+		}
+		if !resourceOK {
+			continue
+		}
+
+		conditions, _ := stmt["Condition"].(map[string]any)
+		if len(conditions) > 0 {
+			arnLikeOK := false
+			if arnLike, ok := conditions["ArnLike"].(map[string]any); ok {
+				for _, pattern := range policyValueToStrings(arnLike["aws:SourceArn"]) {
+					for _, sourceArn := range sourceArns {
+						if wildcardMatch(pattern, sourceArn) {
+							arnLikeOK = true
+							break
+						}
+					}
+					if arnLikeOK {
+						break
+					}
+				}
+			}
+			if !arnLikeOK {
+				continue
+			}
+
+			accountOK := false
+			for _, condName := range []string{"StringEquals", "StringLike"} {
+				m, ok := conditions[condName].(map[string]any)
+				if !ok {
+					continue
+				}
+				for _, pattern := range policyValueToStrings(m["aws:SourceAccount"]) {
+					if wildcardMatch(pattern, sourceAccount) {
+						accountOK = true
+						break
+					}
+				}
+				if accountOK {
+					break
+				}
+			}
+			if !accountOK {
+				continue
+			}
+		}
+
+		return true, ""
+	}
+
+	return false, "AccessDenied"
 }
 
 // handleGetBucketLifecycleConfiguration handles GetBucketLifecycleConfiguration requests.

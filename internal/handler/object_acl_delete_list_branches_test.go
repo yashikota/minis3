@@ -371,12 +371,13 @@ func TestListObjectsBranchExpansion(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "list-branch")
 	b.SetBucketOwner("list-branch", "owner-ak")
+	rootChecksum, _ := backend.ComputeChecksumBase64("SHA256", []byte("root"))
 
 	if _, err := b.PutObject(
 		"list-branch",
 		"root space.txt",
 		[]byte("root"),
-		backend.PutObjectOptions{ChecksumAlgorithm: "SHA256", ChecksumSHA256: "dummy"},
+		backend.PutObjectOptions{ChecksumAlgorithm: "SHA256", ChecksumSHA256: rootChecksum},
 	); err != nil {
 		t.Fatalf("PutObject(root space) failed: %v", err)
 	}
