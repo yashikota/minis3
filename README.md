@@ -4,6 +4,99 @@
 
 Sometimes you want to test code which uses S3, without making it a full-blown integration test. Minis3 implements (parts of) the S3 server, to be used in unittests. It enables a simple, cheap, in-memory, S3 replacement, with a real TCP interface. Think of it as the S3 version of `net/http/httptest`
 
+## Usage
+
+```bash
+go get github.com/yashikota/minis3
+```
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/yashikota/minis3"
+)
+
+func main() {
+	// 1. Start minis3
+	server := minis3.New()
+	server.Start()
+	defer server.Close()
+	fmt.Printf("minis3 started at %s\n", server.Addr())
+
+	// 2. Configure AWS SDK to use minis3
+	cfg, err := config.LoadDefaultConfig(
+		context.TODO(),
+		config.WithRegion("us-east-1"),
+		config.WithCredentialsProvider(
+			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+				return aws.Credentials{
+					AccessKeyID:     "minis3",
+					SecretAccessKey: "minis3",
+					SessionToken:    "",
+				}, nil
+			}),
+		),
+	)
+	if err != nil {
+		log.Fatalf("unable to load SDK config, %v", err)
+	}
+
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String("http://" + server.Addr())
+		o.UsePathStyle = true // Important: minis3 currently supports path style
+	})
+
+	// 3. Create Bucket
+	bucketName := "example-bucket"
+	_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		log.Fatalf("failed to create bucket: %v", err)
+	}
+	fmt.Printf("Created bucket: %s\n", bucketName)
+
+	// 4. Put Object
+	key := "example-key"
+	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+		Body:   strings.NewReader("Hello from minis3 example!"),
+	})
+	if err != nil {
+		log.Fatalf("failed to put object: %v", err)
+	}
+	fmt.Printf("Put object: %s\n", key)
+
+	// 5. Get Object
+	resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		log.Fatalf("failed to get object: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("failed to read object body: %v", err)
+	}
+	fmt.Printf("Got object content body: %s\n", string(bodyBytes))
+	fmt.Printf("Got object content type: %s\n", *resp.ContentType)
+}
+```
+
 ## 📋 Supported Operations
 
 **Legend:** ✅ = Full support | ⚠️ = Partial support (basic features only) | ⌛ = Not implemented
@@ -105,101 +198,6 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 - **Request IDs:** `x-amz-request-id` and `x-amz-id-2` headers on every response
 - **Metadata/Tagging Directives:** `x-amz-metadata-directive` and `x-amz-tagging-directive` for CopyObject
 - **Content-Type Default:** Defaults to `application/octet-stream` when not specified
-
-## Installation
-
-```bash
-go get github.com/yashikota/minis3
-```
-
-## Example
-
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"io"
-	"log"
-	"strings"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/yashikota/minis3"
-)
-
-func main() {
-	// 1. Start minis3
-	server := minis3.New()
-	server.Start()
-	defer server.Close()
-	fmt.Printf("minis3 started at %s\n", server.Addr())
-
-	// 2. Configure AWS SDK to use minis3
-	cfg, err := config.LoadDefaultConfig(
-		context.TODO(),
-		config.WithRegion("us-east-1"),
-		config.WithCredentialsProvider(
-			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
-				return aws.Credentials{
-					AccessKeyID:     "minis3",
-					SecretAccessKey: "minis3",
-					SessionToken:    "",
-				}, nil
-			}),
-		),
-	)
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
-
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String("http://" + server.Addr())
-		o.UsePathStyle = true // Important: minis3 currently supports path style
-	})
-
-	// 3. Create Bucket
-	bucketName := "example-bucket"
-	_, err = client.CreateBucket(context.TODO(), &s3.CreateBucketInput{
-		Bucket: aws.String(bucketName),
-	})
-	if err != nil {
-		log.Fatalf("failed to create bucket: %v", err)
-	}
-	fmt.Printf("Created bucket: %s\n", bucketName)
-
-	// 4. Put Object
-	key := "example-key"
-	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(key),
-		Body:   strings.NewReader("Hello from minis3 example!"),
-	})
-	if err != nil {
-		log.Fatalf("failed to put object: %v", err)
-	}
-	fmt.Printf("Put object: %s\n", key)
-
-	// 5. Get Object
-	resp, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		log.Fatalf("failed to get object: %v", err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalf("failed to read object body: %v", err)
-	}
-	fmt.Printf("Got object content body: %s\n", string(bodyBytes))
-	fmt.Printf("Got object content type: %s\n", *resp.ContentType)
-}
-```
 
 ## Credits
 
