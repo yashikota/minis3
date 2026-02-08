@@ -52,7 +52,7 @@ tasks:
           echo "Error: s3-test.log not found. Run 'task s3-test' first."
           exit 1
         fi
-        result_line=$(rg -o '\d+ failed, \d+ passed, \d+ skipped(, \d+ errors?)?' s3-test.log | tail -1)
+        result_line=$(rg -o '\d+ (failed|passed|skipped|deselected|warnings?|errors?)(, \d+ (failed|passed|skipped|deselected|warnings?|errors?))*' s3-test.log | tail -1)
         if [ -n "$result_line" ]; then
           echo ""
           echo "=========================================="
@@ -60,10 +60,10 @@ tasks:
           echo "=========================================="
 
           # Parse numbers
-          failed=$(echo "$result_line" | cut -d' ' -f1)
-          passed=$(echo "$result_line" | cut -d' ' -f3)
-          skipped=$(echo "$result_line" | cut -d' ' -f5)
-          errors=$(echo "$result_line" | cut -d' ' -f7)
+          failed=$(echo "$result_line" | rg -o '\d+ failed' | rg -o '\d+' || echo 0)
+          passed=$(echo "$result_line" | rg -o '\d+ passed' | rg -o '\d+' || echo 0)
+          skipped=$(echo "$result_line" | rg -o '\d+ skipped' | rg -o '\d+' || echo 0)
+          errors=$(echo "$result_line" | rg -o '\d+ errors?' | rg -o '\d+' || echo 0)
 
           passed=${passed:-0}
           failed=${failed:-0}
