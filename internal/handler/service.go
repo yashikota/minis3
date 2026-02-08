@@ -151,6 +151,10 @@ func (h *Handler) handleIAMAction(w http.ResponseWriter, r *http.Request, action
 		h.handleIAMDeleteUserPolicy(w, r)
 	case "ListGroups":
 		h.handleIAMListGroups(w, r)
+	case "CreateAccessKey":
+		h.handleIAMCreateAccessKey(w, r)
+	case "DeleteAccessKey":
+		h.handleIAMDeleteAccessKey(w, r)
 	default:
 		backend.WriteError(w, http.StatusBadRequest, "Unknown", "Unknown")
 	}
@@ -412,6 +416,86 @@ func (h *Handler) handleIAMListGroups(w http.ResponseWriter, _ *http.Request) {
 			Groups:      []iamGroup{},
 			IsTruncated: false,
 		},
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// IAM CreateAccessKey response types
+type iamCreateAccessKeyResponse struct {
+	XMLName              xml.Name                `xml:"CreateAccessKeyResponse"`
+	Xmlns                string                  `xml:"xmlns,attr,omitempty"`
+	CreateAccessKeyResult iamCreateAccessKeyResult `xml:"CreateAccessKeyResult"`
+	ResponseMetadata     iamResponseMetadata     `xml:"ResponseMetadata"`
+}
+
+type iamCreateAccessKeyResult struct {
+	AccessKey iamAccessKey `xml:"AccessKey"`
+}
+
+type iamAccessKey struct {
+	UserName        string `xml:"UserName"`
+	AccessKeyId     string `xml:"AccessKeyId"`
+	Status          string `xml:"Status"`
+	SecretAccessKey string `xml:"SecretAccessKey"`
+	CreateDate      string `xml:"CreateDate"`
+}
+
+func (h *Handler) handleIAMCreateAccessKey(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	userName := r.Form.Get("UserName")
+	if userName == "" {
+		userName = "testuser"
+	}
+
+	// Generate a mock access key
+	accessKeyId := "AKIA" + generateRequestId()[:16]
+	secretKey := generateRequestId() + generateRequestId()
+
+	resp := iamCreateAccessKeyResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		CreateAccessKeyResult: iamCreateAccessKeyResult{
+			AccessKey: iamAccessKey{
+				UserName:        userName,
+				AccessKeyId:     accessKeyId,
+				Status:          "Active",
+				SecretAccessKey: secretKey,
+				CreateDate:      time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// IAM DeleteAccessKey response types
+type iamDeleteAccessKeyResponse struct {
+	XMLName          xml.Name            `xml:"DeleteAccessKeyResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+func (h *Handler) handleIAMDeleteAccessKey(w http.ResponseWriter, _ *http.Request) {
+	resp := iamDeleteAccessKeyResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
 		ResponseMetadata: iamResponseMetadata{
 			RequestID: generateRequestId(),
 		},
