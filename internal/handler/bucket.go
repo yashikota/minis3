@@ -324,7 +324,8 @@ func postPolicyFieldConditionExempt(fieldName string) bool {
 	case "", "file", "policy", "x-amz-signature", "signature", "awsaccesskeyid":
 		return true
 	default:
-		return strings.HasPrefix(fieldName, "x-ignore-")
+		return strings.HasPrefix(fieldName, "x-ignore-") ||
+			strings.HasPrefix(fieldName, "x-amz-checksum-")
 	}
 }
 
@@ -2288,7 +2289,12 @@ func (h *Handler) handleGetBucketOwnershipControls(
 	controls, err := getBucketOwnershipControlsFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
 		} else if errors.Is(err, backend.ErrOwnershipControlsNotFound) {
 			backend.WriteError(
 				w,
@@ -2323,7 +2329,12 @@ func (h *Handler) handlePutBucketOwnershipControls(
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Failed to read request body.")
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
 		return
 	}
 	var controls backend.OwnershipControls
@@ -2338,7 +2349,19 @@ func (h *Handler) handlePutBucketOwnershipControls(
 	}
 	if err := putBucketOwnershipControlsFn(h, bucketName, &controls); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrInvalidBucketAclWithObjectOwnership) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidBucketAclWithObjectOwnership",
+				"Bucket cannot have ACLs set with ObjectOwnership's BucketOwnerEnforced setting",
+			)
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
 			backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Invalid ownership controls.")
 		} else {
@@ -2360,7 +2383,12 @@ func (h *Handler) handleDeleteBucketOwnershipControls(
 	}
 	if err := deleteBucketOwnershipControlsFn(h, bucketName); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -2381,7 +2409,12 @@ func (h *Handler) handleGetBucketRequestPayment(
 	cfg, err := getBucketRequestPaymentFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -2409,7 +2442,12 @@ func (h *Handler) handlePutBucketRequestPayment(
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Failed to read request body.")
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
 		return
 	}
 	var cfg backend.RequestPaymentConfiguration
@@ -2424,7 +2462,12 @@ func (h *Handler) handlePutBucketRequestPayment(
 	}
 	if err := putBucketRequestPaymentFn(h, bucketName, &cfg); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
 			backend.WriteError(
 				w,
@@ -2452,14 +2495,21 @@ func (h *Handler) handleGetBucketLogging(
 	status, err := getBucketLoggingFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
 		return
 	}
-	if bucket, ok := h.backend.GetBucket(bucketName); ok && !bucket.LoggingConfigModifiedAt.IsZero() {
-		w.Header().Set("Last-Modified", bucket.LoggingConfigModifiedAt.UTC().Format(http.TimeFormat))
+	if bucket, ok := h.backend.GetBucket(bucketName); ok &&
+		!bucket.LoggingConfigModifiedAt.IsZero() {
+		w.Header().
+			Set("Last-Modified", bucket.LoggingConfigModifiedAt.UTC().Format(http.TimeFormat))
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
@@ -2482,7 +2532,12 @@ func (h *Handler) handlePutBucketLogging(
 	}
 	sourceBucket, exists := h.backend.GetBucket(bucketName)
 	if !exists {
-		backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchBucket",
+			"The specified bucket does not exist.",
+		)
 		return
 	}
 	if sourceBucket.OwnerAccessKey != extractAccessKey(r) {
@@ -2492,7 +2547,12 @@ func (h *Handler) handlePutBucketLogging(
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Failed to read request body.")
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"InvalidRequest",
+			"Failed to read request body.",
+		)
 		return
 	}
 	var status backend.BucketLoggingStatus
@@ -2544,7 +2604,12 @@ func (h *Handler) handlePutBucketLogging(
 		)
 		if !allowed {
 			if errCode == "NoSuchKey" {
-				backend.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchKey",
+					"The specified key does not exist.",
+				)
 			} else {
 				backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			}
@@ -2553,7 +2618,12 @@ func (h *Handler) handlePutBucketLogging(
 	}
 	if err := putBucketLoggingFn(h, bucketName, &status); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
 		} else if errors.Is(err, backend.ErrObjectNotFound) {
 			backend.WriteError(
 				w,
@@ -2582,7 +2652,12 @@ func (h *Handler) handleDeleteBucketLogging(
 	}
 	if err := deleteBucketLoggingFn(h, bucketName); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchBucket",
+				"The specified bucket does not exist.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}

@@ -53,7 +53,7 @@ func TestValidatePostPolicyFieldRequirementMatrix(t *testing.T) {
 		},
 		{field: "x-amz-date", value: "20260208T000000Z", exempt: false},
 		{field: "x-amz-storage-class", value: "STANDARD_IA", exempt: false},
-		{field: "x-amz-checksum-sha256", value: "abcd", exempt: false},
+		{field: "x-amz-checksum-sha256", value: "abcd", exempt: true},
 		{field: "file", value: "ignored", exempt: true},
 		{field: "policy", value: "ignored", exempt: true},
 		{field: "signature", value: "ignored", exempt: true},

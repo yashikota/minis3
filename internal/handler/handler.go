@@ -346,7 +346,8 @@ func (h *Handler) emitServerAccessLog(
 	now := time.Now().UTC()
 
 	bucketOwnerID := "-"
-	if owner := backend.OwnerForAccessKey(sourceBucket.OwnerAccessKey); owner != nil && owner.ID != "" {
+	if owner := backend.OwnerForAccessKey(sourceBucket.OwnerAccessKey); owner != nil &&
+		owner.ID != "" {
 		bucketOwnerID = owner.ID
 	}
 
@@ -731,7 +732,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 	hasPublicPolicy := backend.IsPolicyPublic(bucket.Policy)
 
 	// RestrictPublicBuckets blocks non-owner access granted by public policy.
-	if restrictPublicBuckets && hasPublicPolicy {
+	if restrictPublicBuckets && hasPublicPolicy && !isOwner && !ownerImplicit {
 		return false
 	}
 
@@ -739,15 +740,14 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 	if effect == backend.PolicyEffectAllow {
 		return true
 	}
+	// Bucket owner access is preserved unless explicitly denied.
+	if isOwner && (key == "" || ownerImplicit || ownerBypassesObjectACL(action)) {
+		return true
+	}
 	// If there is a matching Allow statement but conditions did not match,
 	// the request is denied rather than falling back to ACLs.
 	if backend.HasAllowStatementForRequest(bucket.Policy, ctx) {
 		return false
-	}
-	// Owner bypasses ACL checks for non-ACL object operations unless a matching
-	// policy condition denied the request above.
-	if isOwner && (key == "" || ownerImplicit || ownerBypassesObjectACL(action)) {
-		return true
 	}
 
 	// When ACLs are disabled (BucketOwnerEnforced), only owner/policy can grant access.
@@ -791,7 +791,10 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
-	case "s3:PutBucketOwnershipControls", "s3:DeleteBucketOwnershipControls", "s3:PutBucketLogging", "s3:PutBucketRequestPayment":
+	case "s3:PutBucketOwnershipControls",
+		"s3:DeleteBucketOwnershipControls",
+		"s3:PutBucketLogging",
+		"s3:PutBucketRequestPayment":
 		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
@@ -804,13 +807,19 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		}
 		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
 		if err != nil {
-			if errors.Is(err, backend.ErrObjectNotFound) || errors.Is(err, backend.ErrVersionNotFound) {
+			if errors.Is(err, backend.ErrObjectNotFound) ||
+				errors.Is(err, backend.ErrVersionNotFound) {
 				bucketACL, bucketErr := getBucketACLForAccessCheckFn(h, bucketName)
 				if bucketErr != nil {
 					return false
 				}
 				bucketACL = effectiveACLForResponse(bucketACL, ignorePublicACLs)
-				return aclAllowsACP(bucketACL, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
+				return aclAllowsACP(
+					bucketACL,
+					requesterCanonicalID,
+					isAnonymous,
+					backend.PermissionReadACP,
+				)
 			}
 			return false
 		}
@@ -822,13 +831,19 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		}
 		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
 		if err != nil {
-			if errors.Is(err, backend.ErrObjectNotFound) || errors.Is(err, backend.ErrVersionNotFound) {
+			if errors.Is(err, backend.ErrObjectNotFound) ||
+				errors.Is(err, backend.ErrVersionNotFound) {
 				bucketACL, bucketErr := getBucketACLForAccessCheckFn(h, bucketName)
 				if bucketErr != nil {
 					return false
 				}
 				bucketACL = effectiveACLForResponse(bucketACL, ignorePublicACLs)
-				return aclAllowsACP(bucketACL, requesterCanonicalID, isAnonymous, backend.PermissionWriteACP)
+				return aclAllowsACP(
+					bucketACL,
+					requesterCanonicalID,
+					isAnonymous,
+					backend.PermissionWriteACP,
+				)
 			}
 			return false
 		}
@@ -872,7 +887,10 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 			return aclAllowsRead(bucketACL, requesterCanonicalID, isAnonymous)
 		}
 		return false
-	case "s3:PutObjectTagging", "s3:DeleteObjectTagging", "s3:DeleteObject", "s3:DeleteObjectVersion":
+	case "s3:PutObjectTagging",
+		"s3:DeleteObjectTagging",
+		"s3:DeleteObject",
+		"s3:DeleteObjectVersion":
 		if key == "" {
 			return false
 		}
@@ -950,9 +968,17 @@ func (h *Handler) checkAccessWithContext(
 		return false
 	}
 
+	publicBlock := h.getBucketPublicAccessBlock(bucketName)
+	restrictPublicBuckets := publicBlock != nil && publicBlock.RestrictPublicBuckets
+	hasPublicPolicy := backend.IsPolicyPublic(bucket.Policy)
+	if restrictPublicBuckets && hasPublicPolicy && !isOwner && !ownerImplicit {
+		return false
+	}
+
 	if effect == backend.PolicyEffectAllow {
 		return true
 	}
+	// Bucket owner access is preserved unless explicitly denied.
 	if isOwner && (key == "" || ownerImplicit || ownerBypassesObjectACL(action)) {
 		return true
 	}
@@ -1096,6 +1122,14 @@ func aclAllowsACP(
 ) bool {
 	if acl == nil {
 		return false
+	}
+	// Object and bucket owners retain ACP privileges even when explicit
+	// owner grants are omitted from the ACL.
+	if !isAnonymous &&
+		requesterCanonicalID != "" &&
+		acl.Owner != nil &&
+		acl.Owner.ID == requesterCanonicalID {
+		return true
 	}
 	for _, grant := range acl.AccessControlList.Grants {
 		if grant.Grantee == nil {
@@ -1250,27 +1284,6 @@ func aclFromGrantHeaders(
 		owner = backend.DefaultOwner()
 	}
 
-	hasOwnerFullControl := false
-	for _, grant := range grants {
-		if grant.Grantee == nil {
-			continue
-		}
-		if grant.Grantee.ID == owner.ID && grant.Permission == backend.PermissionFullControl {
-			hasOwnerFullControl = true
-			break
-		}
-	}
-	if !hasOwnerFullControl {
-		grants = append(grants, backend.Grant{
-			Grantee: &backend.Grantee{
-				Type:        "CanonicalUser",
-				ID:          owner.ID,
-				DisplayName: owner.DisplayName,
-			},
-			Permission: backend.PermissionFullControl,
-		})
-	}
-
 	acl := &backend.AccessControlPolicy{
 		Owner: owner,
 		AccessControlList: backend.AccessControlList{
@@ -1301,15 +1314,28 @@ func extractPolicyHeaders(r *http.Request) map[string]string {
 		"x-amz-grant-read-acp",
 		"x-amz-grant-write-acp",
 	} {
-		if v := r.Header.Get(h); v != "" {
+		if v := headerValueAnyCase(r.Header, h); v != "" {
 			headers[h] = v
 		}
 	}
 	// Also capture Referer for aws:Referer conditions
-	if v := r.Header.Get("Referer"); v != "" {
+	if v := headerValueAnyCase(r.Header, "Referer"); v != "" {
 		headers["referer"] = v
 	}
 	return headers
+}
+
+func headerValueAnyCase(hdr http.Header, name string) string {
+	if v := hdr.Get(name); v != "" {
+		return v
+	}
+	for k, values := range hdr {
+		if !strings.EqualFold(k, name) || len(values) == 0 {
+			continue
+		}
+		return values[0]
+	}
+	return ""
 }
 
 // extractBucketAndKey parses the path into bucket and key components.
