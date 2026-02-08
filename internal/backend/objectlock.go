@@ -323,6 +323,31 @@ func (b *Backend) PutObjectLegalHold(
 	return nil
 }
 
+// applyDefaultRetention applies the bucket's default retention configuration
+// to an object that does not already have explicit retention set.
+// Caller must hold the lock.
+func applyDefaultRetention(bucket *Bucket, obj *Object) {
+	if !bucket.ObjectLockEnabled || obj.RetentionMode != "" {
+		return
+	}
+	cfg := bucket.ObjectLockConfiguration
+	if cfg == nil || cfg.Rule == nil || cfg.Rule.DefaultRetention == nil {
+		return
+	}
+	dr := cfg.Rule.DefaultRetention
+	if dr.Mode == "" {
+		return
+	}
+	obj.RetentionMode = dr.Mode
+	retainUntil := obj.LastModified
+	if dr.Days > 0 {
+		retainUntil = retainUntil.AddDate(0, 0, dr.Days)
+	} else if dr.Years > 0 {
+		retainUntil = retainUntil.AddDate(dr.Years, 0, 0)
+	}
+	obj.RetainUntilDate = &retainUntil
+}
+
 // CreateBucketWithObjectLock creates a bucket with Object Lock enabled.
 func (b *Backend) CreateBucketWithObjectLock(name string) error {
 	if err := ValidateBucketName(name); err != nil {

@@ -354,6 +354,9 @@ func (b *Backend) PutObject(
 		obj.LegalHoldStatus = opts.LegalHoldStatus
 	}
 
+	// Apply bucket default retention when no explicit retention was set
+	applyDefaultRetention(bucket, obj)
+
 	addVersionToObject(bucket, key, obj)
 
 	return obj, nil
@@ -733,6 +736,9 @@ func (b *Backend) CopyObject(
 		obj.Owner = OwnerForAccessKey(dstBkt.OwnerAccessKey)
 		obj.ACL = NewDefaultACLForOwner(obj.Owner)
 	}
+
+	// Apply bucket default retention when no explicit retention was set
+	applyDefaultRetention(dstBkt, obj)
 
 	addVersionToObject(dstBkt, dstKey, obj)
 

@@ -370,6 +370,9 @@ func (b *Backend) CompleteMultipartUpload(
 		obj.LegalHoldStatus = upload.LegalHoldStatus
 	}
 
+	// Apply bucket default retention when no explicit retention was set
+	applyDefaultRetention(bucket, obj)
+
 	addVersionToObject(bucket, key, obj)
 
 	// Clean up the upload
