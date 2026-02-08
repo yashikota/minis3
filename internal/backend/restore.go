@@ -69,8 +69,10 @@ func (b *Backend) RestoreObject(
 		obj.RestoreExpiryDate = &expiry
 	} else {
 		// Permanent restore (days=0 means no expiry, treat as indefinite)
+		// AWS behavior: permanent restore moves the object back to STANDARD
 		farFuture := time.Now().UTC().AddDate(100, 0, 0)
 		obj.RestoreExpiryDate = &farFuture
+		obj.StorageClass = "STANDARD"
 	}
 
 	return &RestoreObjectResult{StatusCode: 202}, nil

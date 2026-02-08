@@ -9,16 +9,38 @@ import (
 	"hash/crc32"
 	"hash/crc64"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
+
+// forceDeleteLockedObjects indicates whether to bypass Object Lock for test purposes.
+var (
+	forceDeleteLockedObjects     bool
+	forceDeleteLockedObjectsOnce sync.Once
+)
+
+func isForceDeleteLockedObjectsEnabled() bool {
+	forceDeleteLockedObjectsOnce.Do(func() {
+		forceDeleteLockedObjects = strings.EqualFold(
+			strings.TrimSpace(os.Getenv("MINIS3_FORCE_DELETE_LOCKED_OBJECTS")),
+			"true",
+		)
+	})
+	return forceDeleteLockedObjects
+}
 
 // Inverted NVME polynomial value used by Go's crc64 implementation.
 const crc64NVME = 0x9a6c9329ac4bc9b5
 
 // isObjectLocked checks whether an object is locked and cannot be deleted.
+// If MINIS3_FORCE_DELETE_LOCKED_OBJECTS=true, always returns false for test purposes.
 func isObjectLocked(obj *Object, bypassGovernance bool) bool {
+	if isForceDeleteLockedObjectsEnabled() {
+		return false
+	}
 	if obj.LegalHoldStatus == LegalHoldStatusOn {
 		return true
 	}

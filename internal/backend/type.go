@@ -218,6 +218,27 @@ type LoggingEnabled struct {
 	TargetPrefix          string                 `xml:"TargetPrefix"`
 	TargetGrants          *TargetGrants          `xml:"TargetGrants,omitempty"`
 	TargetObjectKeyFormat *TargetObjectKeyFormat `xml:"TargetObjectKeyFormat,omitempty"`
+	// Ceph RGW extensions
+	LoggingType      string         `xml:"LoggingType,omitempty"`
+	ObjectRollTime   int            `xml:"ObjectRollTime,omitempty"`
+	RecordsBatchSize int            `xml:"RecordsBatchSize,omitempty"`
+	Filter           *LoggingFilter `xml:"Filter,omitempty"`
+}
+
+// LoggingFilter defines filter for bucket logging (Ceph RGW extension).
+type LoggingFilter struct {
+	S3Key *S3KeyFilter `xml:"S3Key,omitempty"`
+}
+
+// S3KeyFilter defines S3 key-based filtering (Ceph RGW extension).
+type S3KeyFilter struct {
+	FilterRules []FilterRule `xml:"FilterRule,omitempty"`
+}
+
+// FilterRule defines a single filter rule for S3 key filtering.
+type FilterRule struct {
+	Name  string `xml:"Name"`
+	Value string `xml:"Value"`
 }
 
 // TargetGrants groups optional grants under TargetGrants.

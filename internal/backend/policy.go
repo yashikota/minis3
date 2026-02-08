@@ -320,10 +320,12 @@ func evaluateCondition(operator, condKey, condValue string, ctx PolicyEvalContex
 	isIfExists := strings.HasSuffix(operator, "IfExists")
 	baseOperator := strings.TrimSuffix(operator, "IfExists")
 
-	actualValue := getConditionKeyValue(condKey, ctx)
+	actualValue, keyExists := getConditionKeyValueWithPresence(condKey, ctx)
 
-	if isIfExists && actualValue == "" {
-		return true // Key doesn't exist, condition is vacuously true
+	// IfExists: if the key doesn't exist, the condition is vacuously true
+	// Note: "key exists but is empty" is different from "key doesn't exist"
+	if isIfExists && !keyExists {
+		return true
 	}
 
 	switch baseOperator {
@@ -336,11 +338,11 @@ func evaluateCondition(operator, condKey, condValue string, ctx PolicyEvalContex
 	case "StringNotLike":
 		return !matchWildcard(condValue, actualValue)
 	case "Null":
-		isNull := actualValue == ""
+		// Null operator checks if the key exists (not if the value is empty)
 		if condValue == "true" {
-			return isNull
+			return !keyExists
 		}
-		return !isNull
+		return keyExists
 	default:
 		return false
 	}
@@ -397,41 +399,53 @@ func wildcardMatch(pattern, s string) bool {
 }
 
 func getConditionKeyValue(condKey string, ctx PolicyEvalContext) string {
+	val, _ := getConditionKeyValueWithPresence(condKey, ctx)
+	return val
+}
+
+// getConditionKeyValueWithPresence returns the condition key value and whether the key exists.
+// This is important for IfExists operators which need to distinguish between
+// "key doesn't exist" (condition satisfied) and "key exists but is empty" (must evaluate).
+func getConditionKeyValueWithPresence(condKey string, ctx PolicyEvalContext) (string, bool) {
 	// ExistingObjectTag condition: s3:ExistingObjectTag/<key>
 	if strings.HasPrefix(condKey, "s3:ExistingObjectTag/") {
 		tagKey := condKey[len("s3:ExistingObjectTag/"):]
 		if ctx.ExistingObjectTags != nil {
-			return ctx.ExistingObjectTags[tagKey]
+			val, exists := ctx.ExistingObjectTags[tagKey]
+			return val, exists
 		}
-		return ""
+		return "", false
 	}
 
 	// RequestObjectTag condition: s3:RequestObjectTag/<key>
 	if strings.HasPrefix(condKey, "s3:RequestObjectTag/") {
 		tagKey := condKey[len("s3:RequestObjectTag/"):]
 		if ctx.RequestObjectTags != nil {
-			return ctx.RequestObjectTags[tagKey]
+			val, exists := ctx.RequestObjectTags[tagKey]
+			return val, exists
 		}
-		return ""
+		return "", false
 	}
 
 	// aws: prefixed conditions (Referer, etc.)
 	if strings.HasPrefix(condKey, "aws:") {
 		headerName := condKey[len("aws:"):]
 		if ctx.Headers != nil {
-			return ctx.Headers[strings.ToLower(headerName)]
+			val, exists := ctx.Headers[strings.ToLower(headerName)]
+			return val, exists
 		}
-		return ""
+		return "", false
 	}
 
 	// s3: prefixed conditions (headers)
 	if strings.HasPrefix(condKey, "s3:") {
 		headerName := condKey[len("s3:"):]
 		if ctx.Headers != nil {
-			return ctx.Headers[headerName]
+			val, exists := ctx.Headers[headerName]
+			return val, exists
 		}
-		return ""
+		return "", false
 	}
 
-	return ""
+	return "", false
 }

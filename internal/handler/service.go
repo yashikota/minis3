@@ -139,6 +139,18 @@ func (h *Handler) handleIAMAction(w http.ResponseWriter, r *http.Request, action
 	switch action {
 	case "GetUser":
 		h.handleIAMGetUser(w, r)
+	case "ListUsers":
+		h.handleIAMListUsers(w, r)
+	case "CreateUser":
+		h.handleIAMCreateUser(w, r)
+	case "DeleteUser":
+		h.handleIAMDeleteUser(w, r)
+	case "PutUserPolicy":
+		h.handleIAMPutUserPolicy(w, r)
+	case "DeleteUserPolicy":
+		h.handleIAMDeleteUserPolicy(w, r)
+	case "ListGroups":
+		h.handleIAMListGroups(w, r)
 	default:
 		backend.WriteError(w, http.StatusBadRequest, "Unknown", "Unknown")
 	}
@@ -197,6 +209,208 @@ func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 				Arn:        arn,
 				CreateDate: time.Now().UTC().Format(time.RFC3339),
 			},
+		},
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// IAM ListUsers response types
+type iamListUsersResponse struct {
+	XMLName          xml.Name            `xml:"ListUsersResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ListUsersResult  iamListUsersResult  `xml:"ListUsersResult"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type iamListUsersResult struct {
+	Users       []iamUser `xml:"Users>member"`
+	IsTruncated bool      `xml:"IsTruncated"`
+	Marker      string    `xml:"Marker,omitempty"`
+}
+
+func (h *Handler) handleIAMListUsers(w http.ResponseWriter, _ *http.Request) {
+	resp := iamListUsersResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		ListUsersResult: iamListUsersResult{
+			Users:       []iamUser{},
+			IsTruncated: false,
+		},
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// IAM CreateUser response types
+type iamCreateUserResponse struct {
+	XMLName          xml.Name            `xml:"CreateUserResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	CreateUserResult iamCreateUserResult `xml:"CreateUserResult"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type iamCreateUserResult struct {
+	User iamUser `xml:"User"`
+}
+
+func (h *Handler) handleIAMCreateUser(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	userName := r.Form.Get("UserName")
+	if userName == "" {
+		userName = "newuser"
+	}
+	path := r.Form.Get("Path")
+	if path == "" {
+		path = "/"
+	}
+
+	accountID := "123456789012"
+	arn := "arn:aws:iam::" + accountID + ":user" + path + userName
+
+	resp := iamCreateUserResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		CreateUserResult: iamCreateUserResult{
+			User: iamUser{
+				Path:       path,
+				UserName:   userName,
+				UserID:     "AIDAEXAMPLEID" + userName,
+				Arn:        arn,
+				CreateDate: time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// IAM DeleteUser response types
+type iamDeleteUserResponse struct {
+	XMLName          xml.Name            `xml:"DeleteUserResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+func (h *Handler) handleIAMDeleteUser(w http.ResponseWriter, _ *http.Request) {
+	resp := iamDeleteUserResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// IAM PutUserPolicy response types
+type iamPutUserPolicyResponse struct {
+	XMLName          xml.Name            `xml:"PutUserPolicyResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+func (h *Handler) handleIAMPutUserPolicy(w http.ResponseWriter, _ *http.Request) {
+	resp := iamPutUserPolicyResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// IAM DeleteUserPolicy response types
+type iamDeleteUserPolicyResponse struct {
+	XMLName          xml.Name            `xml:"DeleteUserPolicyResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+func (h *Handler) handleIAMDeleteUserPolicy(w http.ResponseWriter, _ *http.Request) {
+	resp := iamDeleteUserPolicyResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		ResponseMetadata: iamResponseMetadata{
+			RequestID: generateRequestId(),
+		},
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	_, _ = w.Write([]byte(xml.Header))
+	output, err := xmlMarshalFn(resp)
+	if err != nil {
+		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	_, _ = w.Write(output)
+}
+
+// IAM ListGroups response types
+type iamListGroupsResponse struct {
+	XMLName          xml.Name            `xml:"ListGroupsResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ListGroupsResult iamListGroupsResult `xml:"ListGroupsResult"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+type iamListGroupsResult struct {
+	Groups      []iamGroup `xml:"Groups>member"`
+	IsTruncated bool       `xml:"IsTruncated"`
+	Marker      string     `xml:"Marker,omitempty"`
+}
+
+type iamGroup struct {
+	Path       string `xml:"Path"`
+	GroupName  string `xml:"GroupName"`
+	GroupID    string `xml:"GroupId"`
+	Arn        string `xml:"Arn"`
+	CreateDate string `xml:"CreateDate"`
+}
+
+func (h *Handler) handleIAMListGroups(w http.ResponseWriter, _ *http.Request) {
+	resp := iamListGroupsResponse{
+		Xmlns: "https://iam.amazonaws.com/doc/2010-05-08/",
+		ListGroupsResult: iamListGroupsResult{
+			Groups:      []iamGroup{},
+			IsTruncated: false,
 		},
 		ResponseMetadata: iamResponseMetadata{
 			RequestID: generateRequestId(),

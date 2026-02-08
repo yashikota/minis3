@@ -2590,8 +2590,8 @@ func (h *Handler) handlePutBucketLogging(
 			backend.WriteError(
 				w,
 				http.StatusBadRequest,
-				"InvalidArgument",
-				"Invalid bucket logging configuration.",
+				"MalformedXML",
+				"The XML you provided was not well-formed or did not validate against our published schema.",
 			)
 			return
 		}
@@ -2646,7 +2646,8 @@ func (h *Handler) handlePutBucketLogging(
 				"The specified key does not exist.",
 			)
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
-			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid bucket logging configuration.")
+			backend.WriteError(w, http.StatusBadRequest, "MalformedXML",
+				"The XML you provided was not well-formed or did not validate against our published schema.")
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}

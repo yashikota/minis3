@@ -315,7 +315,7 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 			),
 		)
 		requireStatus(t, wInvalidTarget, http.StatusBadRequest)
-		requireS3ErrorCode(t, wInvalidTarget, "InvalidArgument")
+		requireS3ErrorCode(t, wInvalidTarget, "MalformedXML")
 
 		wInvalidPartition := doRequest(
 			h,
@@ -380,7 +380,7 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 			),
 		)
 		requireStatus(t, wInvalidRequest, http.StatusBadRequest)
-		requireS3ErrorCode(t, wInvalidRequest, "InvalidArgument")
+		requireS3ErrorCode(t, wInvalidRequest, "MalformedXML")
 
 		if err := b.PutBucketRequestPayment(
 			"dst-log",
