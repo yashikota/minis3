@@ -59,6 +59,8 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 			now,
 			dayDuration,
 		)
+		b.applyCloudTransitions(bucket, key, updated.Versions)
+		applyRestoreExpiry(updated.Versions, now)
 		updated.Versions = applyNoncurrentExpirationRules(
 			key,
 			updated.Versions,
@@ -112,6 +114,80 @@ func applyCurrentTransitionRules(
 		if ok {
 			current.StorageClass = targetStorageClass
 		}
+	}
+}
+
+// cloudTargetBucketName returns the Ceph RGW-style cloud target bucket name for a storage class.
+func cloudTargetBucketName(storageClass string) string {
+	return "rgwx-default-" + strings.ToLower(storageClass) + "-cloud-bucket"
+}
+
+// isCloudStorageClass returns true for storage classes that use cloud (offloaded) storage.
+func isCloudStorageClass(sc string) bool {
+	return sc == "GLACIER" || sc == "DEEP_ARCHIVE"
+}
+
+// applyRestoreExpiry clears restored object data when RestoreExpiryDate has passed,
+// returning the object to archived state (empty body until next restore).
+func applyRestoreExpiry(versions []*Object, now time.Time) {
+	for _, obj := range versions {
+		if obj == nil || obj.IsDeleteMarker {
+			continue
+		}
+		if obj.RestoreExpiryDate == nil || obj.RestoreExpiryDate.After(now) {
+			continue
+		}
+		if !isCloudStorageClass(obj.StorageClass) {
+			continue
+		}
+		// Restore expired: clear body so GET returns archived state again
+		obj.Data = nil
+		obj.Size = 0
+		obj.RestoreExpiryDate = nil
+	}
+}
+
+// applyCloudTransitions moves object data to the cloud target bucket for versions that
+// transitioned to GLACIER/DEEP_ARCHIVE, then clears the source object body.
+// Caller must hold b.mu.
+func (b *Backend) applyCloudTransitions(bucket *Bucket, key string, versions []*Object) {
+	for _, obj := range versions {
+		if obj == nil || obj.IsDeleteMarker || obj.Data == nil {
+			continue
+		}
+		if !isCloudStorageClass(obj.StorageClass) || obj.IsCloudTransitioned {
+			continue
+		}
+		targetBucketName := cloudTargetBucketName(obj.StorageClass)
+		if err := b.ensureCloudTargetBucketUnlocked(targetBucketName); err != nil {
+			continue
+		}
+		targetBucket := b.buckets[targetBucketName]
+		targetKey := bucket.Name + "/" + key
+		if obj.VersionId != "" && obj.VersionId != NullVersionId {
+			targetKey += "-" + obj.VersionId
+		}
+		dataCopy := make([]byte, len(obj.Data))
+		copy(dataCopy, obj.Data)
+		copyObj := &Object{
+			Key:            targetKey,
+			VersionId:      NullVersionId,
+			IsLatest:       true,
+			IsDeleteMarker: false,
+			LastModified:   time.Now().UTC(),
+			ETag:           obj.ETag,
+			Size:           int64(len(dataCopy)),
+			ContentType:    obj.ContentType,
+			Data:           dataCopy,
+			StorageClass:   "STANDARD",
+			Owner:          DefaultOwner(),
+		}
+		addVersionToObject(targetBucket, targetKey, copyObj)
+		obj.Data = nil
+		obj.Size = 0
+		obj.IsCloudTransitioned = true
+		obj.CloudTargetBucket = targetBucketName
+		obj.CloudTargetKey = targetKey
 	}
 }
 

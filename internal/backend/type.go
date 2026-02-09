@@ -218,6 +218,10 @@ type LoggingEnabled struct {
 	TargetPrefix          string                 `xml:"TargetPrefix"`
 	TargetGrants          *TargetGrants          `xml:"TargetGrants,omitempty"`
 	TargetObjectKeyFormat *TargetObjectKeyFormat `xml:"TargetObjectKeyFormat,omitempty"`
+	// Ceph RGW extensions
+	LoggingType      string `xml:"LoggingType,omitempty"`
+	ObjectRollTime   int    `xml:"ObjectRollTime,omitempty"`
+	RecordsBatchSize int    `xml:"RecordsBatchSize,omitempty"`
 }
 
 // TargetGrants groups optional grants under TargetGrants.

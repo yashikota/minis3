@@ -1,76 +1,66 @@
 """Runtime patches for the s3-tests container.
 
-Botocore's bundled S3 model does not include Ceph RGW logging extension fields
-under PutBucketLogging. That causes client-side ParamValidationError and the
-related tests get skipped before minis3 receives any request.
-
-This patch only relaxes those specific unknown-parameter validation errors so
-the tests execute against the server.
+Extends botocore's S3 model with Ceph RGW logging extensions so that:
+- PutBucketLogging / GetBucketLogging accept and return LoggingType, ObjectRollTime,
+  RecordsBatchSize, Filter.
+- PostBucketLogging operation is available (POST bucket?logging to flush logs).
 """
 
 import copy
 
 import botocore.client
+import botocore.loaders
 from botocore import validate as _validate
 from botocore.exceptions import ParamValidationError
 
-_ORIGINAL_VALIDATE_PARAMETERS = _validate.validate_parameters
-_ORIGINAL_PARAM_VALIDATOR_VALIDATE = _validate.ParamValidator.validate
+_ORIGINAL_LOAD_SERVICE_MODEL = botocore.loaders.Loader.load_service_model
 _ORIGINAL_MAKE_API_CALL = botocore.client.BaseClient._make_api_call
-_UNKNOWN_PREFIX = 'Unknown parameter in BucketLoggingStatus.LoggingEnabled: "'
-_ALLOWED_FIELD_NAMES = {
-    '"LoggingType"',
-    '"ObjectRollTime"',
-    '"RecordsBatchSize"',
-    '"Filter"',
-}
 
 
-def _is_allowed_bucket_logging_extension_error(message: str) -> bool:
-    lines = [line.strip() for line in message.splitlines() if line.strip()]
-    if not lines:
-        return False
-    if lines[0] == "Parameter validation failed:":
-        unknown_lines = lines[1:]
-    else:
-        unknown_lines = lines
-    if not unknown_lines:
-        return False
-    for line in unknown_lines:
-        if not line.startswith(_UNKNOWN_PREFIX):
-            return False
-        if not any(field_name in line for field_name in _ALLOWED_FIELD_NAMES):
-            return False
-    return True
+def _inject_s3_ceph_logging_model(model):
+    """Inject PostBucketLogging operation and extend LoggingEnabled with Ceph RGW fields."""
+    operations = model.setdefault("operations", {})
+    shapes = model.setdefault("shapes", {})
+
+    # PostBucketLogging: POST /{Bucket}?logging (Ceph RGW extension)
+    operations["PostBucketLogging"] = {
+        "name": "PostBucketLogging",
+        "http": {"method": "POST", "requestUri": "/{Bucket}?logging"},
+        "input": {"shape": "PostBucketLoggingRequest"},
+        "output": {"shape": "PostBucketLoggingOutput"},
+    }
+    shapes["PostBucketLoggingRequest"] = {
+        "type": "structure",
+        "required": ["Bucket"],
+        "members": {"Bucket": {"shape": "BucketName"}},
+    }
+    shapes["PostBucketLoggingOutput"] = {
+        "type": "structure",
+        "members": {"FlushedLoggingObject": {"shape": "ObjectKey"}},
+    }
+
+    # Extend LoggingEnabled with Ceph RGW extension fields
+    if "LoggingEnabled" in shapes:
+        members = shapes["LoggingEnabled"].setdefault("members", {})
+        members.setdefault("LoggingType", {"shape": "LoggingType"})
+        members.setdefault("ObjectRollTime", {"shape": "Integer"})
+        members.setdefault("RecordsBatchSize", {"shape": "Integer"})
+        members.setdefault("Filter", {"shape": "LoggingFilter"})
+    if "LoggingType" not in shapes:
+        shapes["LoggingType"] = {"type": "string"}
+    if "LoggingFilter" not in shapes:
+        shapes["LoggingFilter"] = {"type": "structure", "members": {}}
 
 
-def _validate_parameters_with_ceph_logging_extensions(params, shape):
-    try:
-        return _ORIGINAL_VALIDATE_PARAMETERS(params, shape)
-    except ParamValidationError as err:
-        if _is_allowed_bucket_logging_extension_error(str(err)):
-            return
-        raise
-
-
-def _param_validator_validate_with_ceph_logging_extensions(self, params, shape):
-    report = _ORIGINAL_PARAM_VALIDATOR_VALIDATE(self, params, shape)
-    if report.has_errors() and _is_allowed_bucket_logging_extension_error(report.generate_report()):
-        return _validate.ValidationErrors()
-    return report
+def _load_service_model_with_s3_extensions(self, service_name, type_name, api_version=None):
+    result = _ORIGINAL_LOAD_SERVICE_MODEL(self, service_name, type_name, api_version)
+    if service_name == "s3" and type_name == "service-2":
+        _inject_s3_ceph_logging_model(result)
+    return result
 
 
 def _make_api_call_with_ceph_logging_extensions(self, operation_name, api_params):
     service_name = self.meta.service_model.service_name
-
-    if service_name == "s3" and operation_name == "PutBucketLogging":
-        api_params = copy.deepcopy(api_params)
-        logging_enabled = api_params.get("BucketLoggingStatus", {}).get("LoggingEnabled")
-        if isinstance(logging_enabled, dict):
-            logging_enabled.pop("LoggingType", None)
-            logging_enabled.pop("ObjectRollTime", None)
-            logging_enabled.pop("RecordsBatchSize", None)
-            logging_enabled.pop("Filter", None)
 
     response = _ORIGINAL_MAKE_API_CALL(self, operation_name, api_params)
 
@@ -96,6 +86,6 @@ def _make_api_call_with_ceph_logging_extensions(self, operation_name, api_params
     return response
 
 
-_validate.validate_parameters = _validate_parameters_with_ceph_logging_extensions
-_validate.ParamValidator.validate = _param_validator_validate_with_ceph_logging_extensions
+# Patch loader so S3 service-2 model includes Ceph RGW logging extensions and PostBucketLogging.
+botocore.loaders.Loader.load_service_model = _load_service_model_with_s3_extensions
 botocore.client.BaseClient._make_api_call = _make_api_call_with_ceph_logging_extensions

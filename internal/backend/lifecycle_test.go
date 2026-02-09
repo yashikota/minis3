@@ -378,6 +378,21 @@ func TestApplyLifecycleTransitionsCurrentObjectStorageClass(t *testing.T) {
 	if obj.StorageClass != "GLACIER" {
 		t.Fatalf("expected GLACIER after second transition, got %q", obj.StorageClass)
 	}
+	// Cloud transition: data moved to cloud bucket, source body cleared
+	if obj.Data != nil {
+		t.Fatal("expected cloud-transitioned object to have nil Data")
+	}
+	if !obj.IsCloudTransitioned || obj.CloudTargetBucket == "" || obj.CloudTargetKey == "" {
+		t.Fatalf("expected cloud transition metadata, got IsCloudTransitioned=%v bucket=%q key=%q",
+			obj.IsCloudTransitioned, obj.CloudTargetBucket, obj.CloudTargetKey)
+	}
+	cloudObj, err := b.GetObject(obj.CloudTargetBucket, obj.CloudTargetKey)
+	if err != nil {
+		t.Fatalf("expected object in cloud bucket: %v", err)
+	}
+	if string(cloudObj.Data) != "data" {
+		t.Fatalf("expected cloud bucket object body %q, got %q", "data", string(cloudObj.Data))
+	}
 }
 
 func TestApplyLifecycleTransitionsNoncurrentVersionsStorageClass(t *testing.T) {

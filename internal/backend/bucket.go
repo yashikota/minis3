@@ -129,6 +129,27 @@ func (b *Backend) CreateBucket(name string) error {
 	return nil
 }
 
+// ensureCloudTargetBucketUnlocked creates the cloud target bucket if it does not exist.
+// Must be called with b.mu held. Used by lifecycle cloud transition.
+func (b *Backend) ensureCloudTargetBucketUnlocked(name string) error {
+	if _, exists := b.buckets[name]; exists {
+		return nil
+	}
+	if err := ValidateBucketName(name); err != nil {
+		return err
+	}
+	b.buckets[name] = &Bucket{
+		Name:                 name,
+		CreationDate:         time.Now().UTC(),
+		VersioningStatus:     VersioningUnset,
+		MFADelete:            MFADeleteDisabled,
+		Objects:              make(map[string]*ObjectVersions),
+		ObjectOwnership:      "",
+		RequestPaymentPayer:  RequestPayerBucketOwner,
+	}
+	return nil
+}
+
 // SetBucketOwner sets the owner access key for a bucket.
 func (b *Backend) SetBucketOwner(name, ownerAccessKey string) {
 	b.mu.Lock()

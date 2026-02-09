@@ -345,6 +345,7 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 		t.Fatal("expected access to be denied with non-matching existing object tag")
 	}
 
+	// Bucket owner with non-matching condition must be denied when policy has a conditional Allow for this action (HasAllowStatementForRequest before owner check).
 	ownerReq := httptest.NewRequest(http.MethodGet, "/policy-context-bucket/obj", nil)
 	ownerReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	ownerAllowed := h.checkAccessWithContext(
@@ -356,8 +357,8 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 			ExistingObjectTags: map[string]string{"Project": "beta"},
 		},
 	)
-	if !ownerAllowed {
-		t.Fatal("expected bucket owner to remain allowed without explicit deny")
+	if ownerAllowed {
+		t.Fatal("expected bucket owner to be denied when conditional Allow (ExistingObjectTag) does not match")
 	}
 }
 
@@ -388,6 +389,36 @@ func TestCheckAccessWithContextStringLikeIfExistsRefererMismatch(t *testing.T) {
 	)
 	if allowed {
 		t.Fatal("expected referer mismatch to deny access for StringLikeIfExists policy")
+	}
+}
+
+func TestCheckAccessWithContextStringLikeIfExistsOwnerDeniedWhenConditionMismatch(t *testing.T) {
+	b := backend.New()
+	if err := b.CreateBucket("policy-referer-owner-bucket"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	b.SetBucketOwner("policy-referer-owner-bucket", "minis3-access-key")
+	h := New(b)
+
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Principal":"*","Resource":"arn:aws:s3:::policy-referer-owner-bucket/*","Condition":{"StringLikeIfExists":{"aws:Referer":"http://www.example.com/*"}}}]}`
+	if err := b.PutBucketPolicy("policy-referer-owner-bucket", policy, false); err != nil {
+		t.Fatalf("PutBucketPolicy failed: %v", err)
+	}
+
+	// Bucket owner with non-matching referer must be denied (HasAllowStatementForRequest before owner check).
+	req := httptest.NewRequest(http.MethodGet, "/policy-referer-owner-bucket/obj", nil)
+	req.Header.Set("Authorization", "AWS minis3-access-key:sig")
+	req.Header["referer"] = []string{"http://example.com"}
+
+	allowed := h.checkAccessWithContext(
+		req,
+		"policy-referer-owner-bucket",
+		"s3:GetObject",
+		"obj",
+		backend.PolicyEvalContext{},
+	)
+	if allowed {
+		t.Fatal("expected bucket owner to be denied when conditional Allow (Referer) does not match")
 	}
 }
 

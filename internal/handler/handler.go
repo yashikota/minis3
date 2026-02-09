@@ -69,8 +69,10 @@ func (rw *recordingResponseWriter) Write(b []byte) (int, error) {
 }
 
 var (
-	lifecycleIntervalOnce  sync.Once
-	lifecycleIntervalValue time.Duration
+	lifecycleIntervalOnce     sync.Once
+	lifecycleIntervalValue    time.Duration
+	readThroughRestoreDaysOnce sync.Once
+	readThroughRestoreDaysVal  int
 
 	verifyPresignedURLFn        = verifyPresignedURL
 	verifyAuthorizationHeaderFn = verifyAuthorizationHeader
@@ -252,6 +254,21 @@ func lifecycleDebugInterval() time.Duration {
 		lifecycleIntervalValue = time.Duration(seconds) * time.Second
 	})
 	return lifecycleIntervalValue
+}
+
+// readThroughRestoreDays returns the number of days for read-through auto-restore (Ceph RGW style).
+// 0 means permanent restore; positive means temporary restore. Default 1.
+func readThroughRestoreDays() int {
+	readThroughRestoreDaysOnce.Do(func() {
+		const defaultDays = 1
+		readThroughRestoreDaysVal = defaultDays
+		if raw := strings.TrimSpace(os.Getenv("MINIS3_READ_THROUGH_RESTORE_DAYS")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+				readThroughRestoreDaysVal = parsed
+			}
+		}
+	})
+	return readThroughRestoreDaysVal
 }
 
 // handleAdmin handles non-S3 admin endpoints for test server management.
@@ -1084,12 +1101,13 @@ func (h *Handler) checkAccessWithContext(
 	if effect == backend.PolicyEffectAllow {
 		return true
 	}
+	// If policy has a conditional Allow for this request but conditions didn't match, deny (including for owner).
+	if backend.HasAllowStatementForRequest(bucket.Policy, ctx) {
+		return false
+	}
 	// Bucket owner access is preserved unless explicitly denied.
 	if isOwner && (key == "" || ownerImplicit || ownerBypassesObjectACL(action)) {
 		return true
-	}
-	if backend.HasAllowStatementForRequest(bucket.Policy, ctx) {
-		return false
 	}
 
 	return h.checkAccess(r, bucketName, action, key)

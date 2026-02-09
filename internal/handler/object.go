@@ -1357,7 +1357,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
-			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
+			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), readThroughRestoreDays())
 		}
 
 		// Check PartNumber validity before SSE-C access (invalid part takes priority)
@@ -1635,7 +1635,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
-			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
+			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), readThroughRestoreDays())
 		}
 
 		// Validate SSE-C access

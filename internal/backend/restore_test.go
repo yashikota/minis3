@@ -213,6 +213,57 @@ func TestRestoreObjectWithVersionId(t *testing.T) {
 	}
 }
 
+func TestRestoreObjectCloudTransitionedPermanent(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("bucket"); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+	payload := []byte("cloud-data")
+	_, err := b.PutObject("bucket", "key", payload, PutObjectOptions{})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				ID:     "rule1",
+				Status: LifecycleStatusEnabled,
+				Transition: []LifecycleTransition{
+					{Days: 1, StorageClass: "GLACIER"},
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("bucket", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration: %v", err)
+	}
+	bucket, _ := b.GetBucket("bucket")
+	obj := bucket.Objects["key"].Versions[0]
+	base := obj.LastModified
+	b.ApplyLifecycle(base.Add(11*time.Second), 10*time.Second)
+	// Object is now cloud-transitioned (Data nil, StorageClass GLACIER)
+	result, err := b.RestoreObject("bucket", "key", "", 0)
+	if err != nil {
+		t.Fatalf("RestoreObject (permanent): %v", err)
+	}
+	if result.StatusCode != 202 {
+		t.Fatalf("expected 202, got %d", result.StatusCode)
+	}
+	restored, err := b.GetObject("bucket", "key")
+	if err != nil {
+		t.Fatalf("GetObject after restore: %v", err)
+	}
+	if restored.StorageClass != "STANDARD" {
+		t.Fatalf("expected STANDARD after permanent restore, got %q", restored.StorageClass)
+	}
+	if string(restored.Data) != string(payload) {
+		t.Fatalf("expected restored data %q, got %q", payload, restored.Data)
+	}
+	if restored.IsCloudTransitioned {
+		t.Fatal("expected IsCloudTransitioned=false after permanent restore")
+	}
+}
+
 func TestIsArchivedStorageClass(t *testing.T) {
 	tests := []struct {
 		sc   string

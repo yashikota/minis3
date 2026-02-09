@@ -2529,6 +2529,15 @@ func (h *Handler) handleGetBucketLogging(
 		w.Header().
 			Set("Last-Modified", bucket.LoggingConfigModifiedAt.UTC().Format(http.TimeFormat))
 	}
+	// Ceph RGW extension defaults for GetBucketLogging response
+	if status.LoggingEnabled != nil {
+		if status.LoggingEnabled.LoggingType == "" {
+			status.LoggingEnabled.LoggingType = "Standard"
+		}
+		if status.LoggingEnabled.ObjectRollTime == 0 {
+			status.LoggingEnabled.ObjectRollTime = 5
+		}
+	}
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
 	output, marshalErr := xmlMarshalFn(status)

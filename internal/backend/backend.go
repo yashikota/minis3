@@ -125,6 +125,10 @@ type Object struct {
 	// Restore (GLACIER) fields
 	RestoreOngoing    bool       // true while restore is in progress
 	RestoreExpiryDate *time.Time // when the restored copy expires
+	// Cloud transition (Ceph RGW-style: data moved to cloud bucket)
+	IsCloudTransitioned bool   // true when object body was moved to cloud target bucket
+	CloudTargetBucket  string // target bucket name for cloud storage
+	CloudTargetKey     string // target object key in cloud bucket
 	// Multipart part info (populated after CompleteMultipartUpload)
 	Parts []ObjectPart
 }

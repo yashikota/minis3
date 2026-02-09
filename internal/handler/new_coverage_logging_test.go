@@ -897,3 +897,36 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		}
 	})
 }
+
+func TestGetBucketLoggingReturnsCephExtensionDefaults(t *testing.T) {
+	h, b := newTestHandler(t)
+	mustCreateBucket(t, b, "ceph-src")
+	mustCreateBucket(t, b, "ceph-dst")
+	b.SetBucketOwner("ceph-src", "minis3-access-key")
+	b.SetBucketOwner("ceph-dst", "minis3-access-key")
+	owner := backend.OwnerForAccessKey("minis3-access-key")
+	if owner == nil {
+		t.Fatal("owner must not be nil")
+	}
+	mustPutBucketPolicy(t, b, "ceph-dst", allowLoggingPolicy("ceph-src", "ceph-dst", "log/", owner.ID))
+	if err := b.PutBucketLogging("ceph-src", &backend.BucketLoggingStatus{
+		LoggingEnabled: &backend.LoggingEnabled{
+			TargetBucket: "ceph-dst",
+			TargetPrefix: "log/",
+		},
+	}); err != nil {
+		t.Fatalf("PutBucketLogging failed: %v", err)
+	}
+	req := newRequest(http.MethodGet, "http://example.test/ceph-src?logging", "", map[string]string{
+		"Authorization": authHeader("minis3-access-key"),
+	})
+	w := doRequest(h, req)
+	requireStatus(t, w, http.StatusOK)
+	body := w.Body.String()
+	if !strings.Contains(body, "LoggingType") || !strings.Contains(body, "Standard") {
+		t.Errorf("GetBucketLogging response should include Ceph default LoggingType Standard, got %s", body)
+	}
+	if !strings.Contains(body, "ObjectRollTime") || !strings.Contains(body, "5") {
+		t.Errorf("GetBucketLogging response should include Ceph default ObjectRollTime 5, got %s", body)
+	}
+}
