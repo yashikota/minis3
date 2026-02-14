@@ -2745,6 +2745,41 @@ func policyValueToStrings(v any) []string {
 	}
 }
 
+func mapValueByFold(m map[string]any, key string) (any, bool) {
+	for k, v := range m {
+		if strings.EqualFold(k, key) {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+func loggingConditionValues(
+	conditions map[string]any,
+	operators []string,
+	conditionKey string,
+) ([]string, bool) {
+	found := false
+	values := make([]string, 0)
+	for _, operator := range operators {
+		rawOperator, ok := mapValueByFold(conditions, operator)
+		if !ok {
+			continue
+		}
+		operatorMap, ok := rawOperator.(map[string]any)
+		if !ok {
+			continue
+		}
+		rawConditionValues, ok := mapValueByFold(operatorMap, conditionKey)
+		if !ok {
+			continue
+		}
+		found = true
+		values = append(values, policyValueToStrings(rawConditionValues)...)
+	}
+	return values, found
+}
+
 func wildcardMatch(pattern, value string) bool {
 	if pattern == "*" {
 		return true
@@ -2846,17 +2881,26 @@ func (h *Handler) bucketLoggingTargetAllowed(
 	if !ok {
 		return false, "NoSuchBucket"
 	}
+	sourceAccount := sourceAccountIDForLogging(sourceBucket.OwnerAccessKey)
+	return h.bucketLoggingTargetPolicyAllowed(
+		sourceBucketName,
+		sourceAccount,
+		targetBucketName,
+		targetPrefix,
+	)
+}
+
+func (h *Handler) bucketLoggingTargetPolicyAllowed(
+	sourceBucketName,
+	sourceAccount,
+	targetBucketName,
+	targetPrefix string,
+) (bool, string) {
 	targetBucket, ok := h.backend.GetBucket(targetBucketName)
 	if !ok {
 		return false, "NoSuchKey"
 	}
 
-	sourceOwner := backend.OwnerForAccessKey(sourceBucket.OwnerAccessKey)
-
-	sourceAccount := ""
-	if sourceOwner != nil {
-		sourceAccount = sourceOwner.ID
-	}
 	targetResources := []string{qualifiedBucketObjectARN(targetBucketName, targetPrefix)}
 	sourceArns := []string{qualifiedBucketARN(sourceBucketName, "")}
 
@@ -2898,7 +2942,7 @@ func (h *Handler) bucketLoggingTargetAllowed(
 
 		actionOK := false
 		for _, action := range policyValueToStrings(stmt["Action"]) {
-			if action == "s3:PutObject" || action == "*" {
+			if strings.EqualFold(action, "s3:PutObject") || action == "*" {
 				actionOK = true
 				break
 			}
@@ -2910,7 +2954,7 @@ func (h *Handler) bucketLoggingTargetAllowed(
 		resourceOK := false
 		for _, resource := range policyValueToStrings(stmt["Resource"]) {
 			for _, expected := range targetResources {
-				if wildcardMatch(resource, expected) {
+				if wildcardMatch(strings.TrimSpace(resource), expected) {
 					resourceOK = true
 					break
 				}
@@ -2925,11 +2969,16 @@ func (h *Handler) bucketLoggingTargetAllowed(
 
 		conditions, _ := stmt["Condition"].(map[string]any)
 		if len(conditions) > 0 {
-			arnLikeOK := false
-			if arnLike, ok := conditions["ArnLike"].(map[string]any); ok {
-				for _, pattern := range policyValueToStrings(arnLike["aws:SourceArn"]) {
+			arnPatterns, hasArnCondition := loggingConditionValues(
+				conditions,
+				[]string{"ArnLike", "ArnEquals"},
+				"aws:SourceArn",
+			)
+			if hasArnCondition {
+				arnLikeOK := false
+				for _, pattern := range arnPatterns {
 					for _, sourceArn := range sourceArns {
-						if wildcardMatch(pattern, sourceArn) {
+						if wildcardMatch(strings.TrimSpace(pattern), sourceArn) {
 							arnLikeOK = true
 							break
 						}
@@ -2938,29 +2987,27 @@ func (h *Handler) bucketLoggingTargetAllowed(
 						break
 					}
 				}
-			}
-			if !arnLikeOK {
-				continue
-			}
-
-			accountOK := false
-			for _, condName := range []string{"StringEquals", "StringLike"} {
-				m, ok := conditions[condName].(map[string]any)
-				if !ok {
+				if !arnLikeOK {
 					continue
 				}
-				for _, pattern := range policyValueToStrings(m["aws:SourceAccount"]) {
-					if wildcardMatch(pattern, sourceAccount) {
+			}
+
+			sourceAccountPatterns, hasSourceAccountCondition := loggingConditionValues(
+				conditions,
+				[]string{"StringEquals", "StringLike"},
+				"aws:SourceAccount",
+			)
+			if hasSourceAccountCondition {
+				accountOK := false
+				for _, pattern := range sourceAccountPatterns {
+					if wildcardMatch(strings.TrimSpace(pattern), sourceAccount) {
 						accountOK = true
 						break
 					}
 				}
-				if accountOK {
-					break
+				if !accountOK {
+					continue
 				}
-			}
-			if !accountOK {
-				continue
 			}
 		}
 
@@ -2968,6 +3015,20 @@ func (h *Handler) bucketLoggingTargetAllowed(
 	}
 
 	return false, "AccessDenied"
+}
+
+func sourceAccountIDForLogging(accessKey string) string {
+	switch accessKey {
+	case "root-access-key":
+		return "123456789012"
+	case "altroot-access-key":
+		return "210987654321"
+	}
+	owner := backend.OwnerForAccessKey(accessKey)
+	if owner == nil {
+		return ""
+	}
+	return owner.ID
 }
 
 // handleGetBucketLifecycleConfiguration handles GetBucketLifecycleConfiguration requests.

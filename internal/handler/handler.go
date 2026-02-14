@@ -29,21 +29,28 @@ type Handler struct {
 
 const serverAccessLogRollInterval = 5 * time.Second
 
+var errLogFlushAccessDenied = errors.New("bucket logging access denied")
+
 type requestContextKey string
 
 const deleteLogKeysContextKey requestContextKey = "deleteLogKeys"
 
 type serverAccessLogEntry struct {
-	SourceBucket string
-	Line         string
+	SourceBucket  string
+	SourceAccount string
+	Line          string
 }
 
 type serverAccessLogBatch struct {
-	TargetBucket    string
-	TargetPrefix    string
-	ObjectKeyFormat *backend.TargetObjectKeyFormat
-	FirstEventAt    time.Time
-	Entries         []serverAccessLogEntry
+	TargetBucket     string
+	TargetPrefix     string
+	LoggingType      string
+	RollInterval     time.Duration
+	RecordsBatchSize int
+	Filter           *backend.LoggingFilter
+	ObjectKeyFormat  *backend.TargetObjectKeyFormat
+	FirstEventAt     time.Time
+	Entries          []serverAccessLogEntry
 }
 
 type recordingResponseWriter struct {
@@ -92,6 +99,12 @@ var (
 		bucketName, key, versionID string,
 	) (*backend.AccessControlPolicy, error) {
 		return h.backend.GetObjectACL(bucketName, key, versionID)
+	}
+	getObjectVersionForLoggingFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+	) (*backend.Object, error) {
+		return h.backend.GetObjectVersion(bucketName, key, versionID)
 	}
 )
 
@@ -352,6 +365,116 @@ func defaultLogField(value, fallback string) string {
 	return value
 }
 
+func queryHasInsensitive(r *http.Request, key string) bool {
+	if r == nil {
+		return false
+	}
+	for k := range r.URL.Query() {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
+}
+
+func queryValueInsensitive(r *http.Request, key string) string {
+	if r == nil {
+		return ""
+	}
+	for k, values := range r.URL.Query() {
+		if !strings.EqualFold(k, key) || len(values) == 0 {
+			continue
+		}
+		return values[0]
+	}
+	return ""
+}
+
+func normalizeLoggingType(loggingType string) string {
+	if strings.EqualFold(loggingType, backend.BucketLoggingTypeJournal) {
+		return backend.BucketLoggingTypeJournal
+	}
+	return backend.BucketLoggingTypeStandard
+}
+
+func loggingRollInterval(logging *backend.LoggingEnabled) time.Duration {
+	if logging == nil || logging.ObjectRollTime <= 0 {
+		return serverAccessLogRollInterval
+	}
+	return time.Duration(logging.ObjectRollTime) * time.Second
+}
+
+func loggingFilterSignature(filter *backend.LoggingFilter) string {
+	if filter == nil || filter.Key == nil || len(filter.Key.FilterRules) == 0 {
+		return "nofilter"
+	}
+	var b strings.Builder
+	for _, rule := range filter.Key.FilterRules {
+		if b.Len() > 0 {
+			b.WriteByte('|')
+		}
+		b.WriteString(strings.ToLower(strings.TrimSpace(rule.Name)))
+		b.WriteByte('=')
+		b.WriteString(rule.Value)
+	}
+	return b.String()
+}
+
+func matchesLoggingFilter(key string, filter *backend.LoggingFilter) bool {
+	if key == "-" || filter == nil || filter.Key == nil {
+		return true
+	}
+	for _, rule := range filter.Key.FilterRules {
+		name := strings.ToLower(strings.TrimSpace(rule.Name))
+		switch name {
+		case "prefix":
+			if !strings.HasPrefix(key, rule.Value) {
+				return false
+			}
+		case "suffix":
+			if !strings.HasSuffix(key, rule.Value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func shouldLogJournalOperation(op string) bool {
+	switch op {
+	case "REST.PUT.ACL",
+		"REST.PUT.LEGAL_HOLD",
+		"REST.PUT.RETENTION",
+		"REST.PUT.OBJECT_TAGGING",
+		"REST.DELETE.OBJECT_TAGGING":
+		return true
+	}
+	return strings.Contains(op, ".OBJECT")
+}
+
+func (h *Handler) loggingJournalMetadata(
+	bucketName, key string,
+	r *http.Request,
+) (string, string, string) {
+	versionID := queryValueInsensitive(r, "versionId")
+	obj, err := getObjectVersionForLoggingFn(h, bucketName, key, versionID)
+	if err != nil && versionID != "" {
+		obj, err = getObjectVersionForLoggingFn(h, bucketName, key, "")
+	}
+	if err != nil || obj == nil {
+		return "-", "-", "-"
+	}
+	size := strconv.FormatInt(obj.Size, 10)
+	etag := obj.ETag
+	if etag == "" {
+		etag = "-"
+	}
+	if obj.VersionId == "" || obj.VersionId == "null" {
+		return size, "-", etag
+	}
+	return size, obj.VersionId, etag
+}
+
 func (h *Handler) emitServerAccessLog(
 	r *http.Request,
 	statusCode int,
@@ -377,6 +500,7 @@ func (h *Handler) emitServerAccessLog(
 	if targetBucket == "" {
 		return
 	}
+	loggingType := normalizeLoggingType(logging.LoggingEnabled.LoggingType)
 	now := time.Now().UTC()
 
 	bucketOwnerID := "-"
@@ -397,6 +521,12 @@ func (h *Handler) emitServerAccessLog(
 		requester = "-"
 	}
 	op := mapRequestToLoggingOperation(r, key)
+	if op == "" {
+		return
+	}
+	if loggingType == backend.BucketLoggingTypeJournal && !shouldLogJournalOperation(op) {
+		return
+	}
 	requestURI := requestURIForLoggingFn(r)
 	if requestURI == "" {
 		requestURI = r.URL.Path
@@ -419,13 +549,11 @@ func (h *Handler) emitServerAccessLog(
 		errorCode = "Error"
 	}
 	sigVersion := "-"
-	if strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256") || r.URL.Query().Has(
-		"X-Amz-Signature",
-	) {
+	if strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256") ||
+		queryHasInsensitive(r, "X-Amz-Signature") {
 		sigVersion = "SigV4"
-	} else if strings.HasPrefix(r.Header.Get("Authorization"), "AWS ") || r.URL.Query().Has(
-		"Signature",
-	) {
+	} else if strings.HasPrefix(r.Header.Get("Authorization"), "AWS ") ||
+		queryHasInsensitive(r, "Signature") {
 		sigVersion = "SigV2"
 	}
 	authType := loggingAuthType(r)
@@ -436,11 +564,23 @@ func (h *Handler) emitServerAccessLog(
 	if key != "" {
 		keysToLog = []string{key}
 	}
-	if r.Method == http.MethodPost && r.URL.Query().Has("delete") {
+	if r.Method == http.MethodPost && queryHasInsensitive(r, "delete") {
 		if deleteKeys, ok := r.Context().Value(deleteLogKeysContextKey).([]string); ok &&
 			len(deleteKeys) > 0 {
 			keysToLog = deleteKeys
 		}
+	}
+	if loggingType == backend.BucketLoggingTypeJournal {
+		filtered := make([]string, 0, len(keysToLog))
+		for _, loggedKey := range keysToLog {
+			if matchesLoggingFilter(loggedKey, logging.LoggingEnabled.Filter) {
+				filtered = append(filtered, loggedKey)
+			}
+		}
+		if len(filtered) == 0 {
+			return
+		}
+		keysToLog = filtered
 	}
 
 	objectKeyFormat := logging.LoggingEnabled.TargetObjectKeyFormat
@@ -453,53 +593,90 @@ func (h *Handler) emitServerAccessLog(
 	if objectKeyFormat.PartitionedPrefix != nil {
 		formatKey = "partitioned:" + objectKeyFormat.PartitionedPrefix.PartitionDateSource
 	}
-	batchKey := targetBucket + "|" + prefix + "|" + formatKey
+	batchKey := strings.Join(
+		[]string{
+			targetBucket,
+			prefix,
+			formatKey,
+			loggingType,
+			strconv.Itoa(int(loggingRollInterval(logging.LoggingEnabled) / time.Second)),
+			strconv.Itoa(logging.LoggingEnabled.RecordsBatchSize),
+			loggingFilterSignature(logging.LoggingEnabled.Filter),
+		},
+		"|",
+	)
 
 	h.loggingMu.Lock()
 	defer h.loggingMu.Unlock()
 	batch, ok := h.pendingLogBatches[batchKey]
 	if !ok {
 		batch = &serverAccessLogBatch{
-			TargetBucket:    targetBucket,
-			TargetPrefix:    prefix,
-			ObjectKeyFormat: objectKeyFormat,
-			FirstEventAt:    now,
+			TargetBucket:     targetBucket,
+			TargetPrefix:     prefix,
+			LoggingType:      loggingType,
+			RollInterval:     loggingRollInterval(logging.LoggingEnabled),
+			RecordsBatchSize: logging.LoggingEnabled.RecordsBatchSize,
+			Filter:           logging.LoggingEnabled.Filter,
+			ObjectKeyFormat:  objectKeyFormat,
+			FirstEventAt:     now,
 		}
 		h.pendingLogBatches[batchKey] = batch
 	}
+	sourceAccount := sourceAccountIDForLogging(sourceBucket.OwnerAccessKey)
 	for _, loggedKey := range keysToLog {
-		logLine := fmt.Sprintf(
-			"%s %s [%s] %s %s %s %s %s \"%s\" %d %s %d %s %s %s \"%s\" \"%s\" %s %s %s %s %s %s %s %s %s",
-			bucketOwnerID,
-			recordBucketName,
-			now.Format("02/Jan/2006:15:04:05 +0000"),
-			remoteAddr,
-			requester,
-			defaultLogField(requestID, "-"),
-			op,
-			loggedKey,
-			requestLine,
-			statusCode,
-			errorCode,
-			responseBytes,
-			objectSize,
-			"0",
-			"0",
-			referrer,
-			userAgent,
-			"-",
-			defaultLogField(hostID, "-"),
-			sigVersion,
-			"-",
-			authType,
-			defaultLogField(r.Host, "-"),
-			"-",
-			"-",
-			aclRequired,
-		)
+		logLine := ""
+		if loggingType == backend.BucketLoggingTypeJournal {
+			journalSize, journalVersionID, journalETag := h.loggingJournalMetadata(
+				bucketName,
+				loggedKey,
+				r,
+			)
+			logLine = fmt.Sprintf(
+				"%s %s [%s] %s %s %s %s %s",
+				bucketOwnerID,
+				recordBucketName,
+				now.Format("02/Jan/2006:15:04:05 +0000"),
+				op,
+				loggedKey,
+				journalSize,
+				journalVersionID,
+				journalETag,
+			)
+		} else {
+			logLine = fmt.Sprintf(
+				"%s %s [%s] %s %s %s %s %s \"%s\" %d %s %d %s %s %s \"%s\" \"%s\" %s %s %s %s %s %s %s %s %s",
+				bucketOwnerID,
+				recordBucketName,
+				now.Format("02/Jan/2006:15:04:05 +0000"),
+				remoteAddr,
+				requester,
+				defaultLogField(requestID, "-"),
+				op,
+				loggedKey,
+				requestLine,
+				statusCode,
+				errorCode,
+				responseBytes,
+				objectSize,
+				"0",
+				"0",
+				referrer,
+				userAgent,
+				"-",
+				defaultLogField(hostID, "-"),
+				sigVersion,
+				"-",
+				authType,
+				defaultLogField(r.Host, "-"),
+				"-",
+				"-",
+				aclRequired,
+			)
+		}
 		batch.Entries = append(batch.Entries, serverAccessLogEntry{
-			SourceBucket: bucketName,
-			Line:         logLine,
+			SourceBucket:  bucketName,
+			SourceAccount: sourceAccount,
+			Line:          logLine,
 		})
 	}
 }
@@ -511,7 +688,11 @@ func (h *Handler) flushServerAccessLogsIfDue(sourceBucketName string) error {
 	defer h.loggingMu.Unlock()
 
 	for key, batch := range h.pendingLogBatches {
-		if now.Sub(batch.FirstEventAt) < serverAccessLogRollInterval {
+		interval := batch.RollInterval
+		if interval <= 0 {
+			interval = serverAccessLogRollInterval
+		}
+		if now.Sub(batch.FirstEventAt) < interval {
 			continue
 		}
 		matchesSource := false
@@ -548,31 +729,39 @@ func (h *Handler) flushServerAccessLogBatch(
 			continue
 		}
 		seenSource[entry.SourceBucket] = struct{}{}
-		allowed, _ := h.bucketLoggingTargetAllowed(
+		sourceAccount := entry.SourceAccount
+		if sourceAccount == "" {
+			if sourceBucket, ok := h.backend.GetBucket(entry.SourceBucket); ok {
+				sourceAccount = sourceAccountIDForLogging(sourceBucket.OwnerAccessKey)
+			}
+		}
+		allowed, denyCode := h.bucketLoggingTargetPolicyAllowed(
 			entry.SourceBucket,
+			sourceAccount,
 			batch.TargetBucket,
 			batch.TargetPrefix,
 		)
 		if !allowed {
-			return "", fmt.Errorf("access denied")
+			if denyCode == "NoSuchKey" || denyCode == "NoSuchBucket" {
+				return "", nil
+			}
+			return "", errLogFlushAccessDenied
 		}
 	}
 
 	sourceBucketName := batch.Entries[0].SourceBucket
-	sourceBucket, ok := h.backend.GetBucket(sourceBucketName)
-	if !ok {
-		return "", backend.ErrBucketNotFound
-	}
-	sourceAccount := ""
-	if owner := backend.OwnerForAccessKey(sourceBucket.OwnerAccessKey); owner != nil {
-		sourceAccount = owner.ID
+	sourceAccount := batch.Entries[0].SourceAccount
+	if sourceAccount == "" {
+		if sourceBucket, ok := h.backend.GetBucket(sourceBucketName); ok {
+			sourceAccount = sourceAccountIDForLogging(sourceBucket.OwnerAccessKey)
+		}
 	}
 
 	suffix := fmt.Sprintf(
-		"%s-%s-%d",
+		"%s-%019d-%s",
 		now.Format("2006-01-02-15-04-05"),
-		generateRequestId(),
 		now.UnixNano(),
+		generateRequestId(),
 	)
 	logKey := batch.TargetPrefix + suffix
 	if batch.ObjectKeyFormat != nil && batch.ObjectKeyFormat.PartitionedPrefix != nil {
@@ -603,6 +792,9 @@ func (h *Handler) flushServerAccessLogBatch(
 		},
 	)
 	if err != nil {
+		if errors.Is(err, backend.ErrBucketNotFound) {
+			return "", nil
+		}
 		return "", err
 	}
 	return logKey, nil
@@ -643,12 +835,14 @@ func (h *Handler) forceFlushServerAccessLogs(sourceBucketName string) (string, e
 func mapRequestToLoggingOperation(r *http.Request, key string) string {
 	if key == "" {
 		switch {
-		case r.Method == http.MethodPut && r.URL.Query().Has("logging"):
+		case r.Method == http.MethodPut && queryHasInsensitive(r, "logging"):
 			return "REST.PUT.BUCKET_LOGGING"
-		case r.Method == http.MethodGet && r.URL.Query().Has("logging"):
+		case r.Method == http.MethodGet && queryHasInsensitive(r, "logging"):
 			return "REST.GET.BUCKET_LOGGING"
-		case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
+		case r.Method == http.MethodPost && queryHasInsensitive(r, "delete"):
 			return "REST.POST.DELETE_MULTI_OBJECT"
+		case r.Method == http.MethodDelete:
+			return "REST.DELETE.BUCKET"
 		case r.Method == http.MethodPut:
 			return "REST.PUT.BUCKET"
 		case r.Method == http.MethodGet:
@@ -658,14 +852,26 @@ func mapRequestToLoggingOperation(r *http.Request, key string) string {
 		}
 	}
 	switch {
-	case r.Method == http.MethodPut && r.URL.Query().Has("uploadId"):
+	case r.Method == http.MethodPut && queryHasInsensitive(r, "uploadId"):
 		return "REST.PUT.PART"
-	case r.Method == http.MethodPost && r.URL.Query().Has("uploadId"):
+	case r.Method == http.MethodPost && queryHasInsensitive(r, "uploadId"):
 		return "REST.POST.UPLOAD"
-	case r.Method == http.MethodPost && r.URL.Query().Has("uploads"):
+	case r.Method == http.MethodPost && queryHasInsensitive(r, "uploads"):
 		return "REST.POST.UPLOADS"
-	case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
+	case r.Method == http.MethodPost && queryHasInsensitive(r, "restore"):
+		return "REST.POST.OBJECT_RESTORE"
+	case r.Method == http.MethodPost && queryHasInsensitive(r, "delete"):
 		return "REST.POST.DELETE_MULTI_OBJECT"
+	case r.Method == http.MethodPut && queryHasInsensitive(r, "acl"):
+		return "REST.PUT.ACL"
+	case r.Method == http.MethodPut && queryHasInsensitive(r, "tagging"):
+		return "REST.PUT.OBJECT_TAGGING"
+	case r.Method == http.MethodDelete && queryHasInsensitive(r, "tagging"):
+		return "REST.DELETE.OBJECT_TAGGING"
+	case r.Method == http.MethodPut && queryHasInsensitive(r, "legal-hold"):
+		return "REST.PUT.LEGAL_HOLD"
+	case r.Method == http.MethodPut && queryHasInsensitive(r, "retention"):
+		return "REST.PUT.RETENTION"
 	case r.Method == http.MethodPut && r.Header.Get("x-amz-copy-source") != "":
 		return "REST.PUT.OBJECT_COPY"
 	case r.Method == http.MethodPut:
@@ -682,7 +888,8 @@ func mapRequestToLoggingOperation(r *http.Request, key string) string {
 }
 
 func loggingAuthType(r *http.Request) string {
-	if isPresignedURL(r) {
+	if isPresignedURL(r) || queryHasInsensitive(r, "X-Amz-Credential") ||
+		(queryHasInsensitive(r, "AWSAccessKeyId") && queryHasInsensitive(r, "Signature")) {
 		return "QueryString"
 	}
 	if r.Header.Get("Authorization") != "" {

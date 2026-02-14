@@ -905,9 +905,17 @@ func (b *Backend) GetBucketLogging(bucketName string) (*BucketLoggingStatus, err
 		return &BucketLoggingStatus{Xmlns: S3Xmlns}, nil
 	}
 	resp := *bucket.LoggingConfiguration
-	if resp.LoggingEnabled != nil && resp.LoggingEnabled.TargetObjectKeyFormat == nil {
-		resp.LoggingEnabled.TargetObjectKeyFormat = &TargetObjectKeyFormat{
-			SimplePrefix: &SimplePrefix{},
+	if resp.LoggingEnabled != nil {
+		if resp.LoggingEnabled.TargetObjectKeyFormat == nil {
+			resp.LoggingEnabled.TargetObjectKeyFormat = &TargetObjectKeyFormat{
+				SimplePrefix: &SimplePrefix{},
+			}
+		}
+		if resp.LoggingEnabled.LoggingType == "" {
+			resp.LoggingEnabled.LoggingType = BucketLoggingTypeStandard
+		}
+		if resp.LoggingEnabled.ObjectRollTime <= 0 {
+			resp.LoggingEnabled.ObjectRollTime = DefaultObjectRollTime
 		}
 	}
 	resp.Xmlns = S3Xmlns
@@ -947,8 +955,12 @@ func (b *Backend) PutBucketLogging(bucketName string, status *BucketLoggingStatu
 	}
 	next := &BucketLoggingStatus{
 		LoggingEnabled: &LoggingEnabled{
-			TargetBucket: status.LoggingEnabled.TargetBucket,
-			TargetPrefix: status.LoggingEnabled.TargetPrefix,
+			TargetBucket:     status.LoggingEnabled.TargetBucket,
+			TargetPrefix:     status.LoggingEnabled.TargetPrefix,
+			LoggingType:      status.LoggingEnabled.LoggingType,
+			ObjectRollTime:   status.LoggingEnabled.ObjectRollTime,
+			RecordsBatchSize: status.LoggingEnabled.RecordsBatchSize,
+			Filter:           status.LoggingEnabled.Filter,
 			// TargetGrants are accepted in requests but not persisted.
 			TargetObjectKeyFormat: status.LoggingEnabled.TargetObjectKeyFormat,
 		},
@@ -957,6 +969,12 @@ func (b *Backend) PutBucketLogging(bucketName string, status *BucketLoggingStatu
 		next.LoggingEnabled.TargetObjectKeyFormat = &TargetObjectKeyFormat{
 			SimplePrefix: &SimplePrefix{},
 		}
+	}
+	if next.LoggingEnabled.LoggingType == "" {
+		next.LoggingEnabled.LoggingType = BucketLoggingTypeStandard
+	}
+	if next.LoggingEnabled.ObjectRollTime <= 0 {
+		next.LoggingEnabled.ObjectRollTime = DefaultObjectRollTime
 	}
 	changed := !bucketLoggingConfigEqual(bucket.LoggingConfiguration, next)
 	bucket.LoggingConfiguration = next
@@ -994,7 +1012,51 @@ func bucketLoggingConfigEqual(a, b *BucketLoggingStatus) bool {
 	if ae.TargetBucket != be.TargetBucket || ae.TargetPrefix != be.TargetPrefix {
 		return false
 	}
+	aType := ae.LoggingType
+	bType := be.LoggingType
+	if aType == "" {
+		aType = BucketLoggingTypeStandard
+	}
+	if bType == "" {
+		bType = BucketLoggingTypeStandard
+	}
+	if aType != bType {
+		return false
+	}
+	aRoll := ae.ObjectRollTime
+	bRoll := be.ObjectRollTime
+	if aRoll <= 0 {
+		aRoll = DefaultObjectRollTime
+	}
+	if bRoll <= 0 {
+		bRoll = DefaultObjectRollTime
+	}
+	if aRoll != bRoll || ae.RecordsBatchSize != be.RecordsBatchSize {
+		return false
+	}
+	if !bucketLoggingFilterEqual(ae.Filter, be.Filter) {
+		return false
+	}
 	return bucketLogKeyFormatEqual(ae.TargetObjectKeyFormat, be.TargetObjectKeyFormat)
+}
+
+func bucketLoggingFilterEqual(a, b *LoggingFilter) bool {
+	if a == nil || a.Key == nil {
+		return b == nil || b.Key == nil || len(b.Key.FilterRules) == 0
+	}
+	if b == nil || b.Key == nil {
+		return len(a.Key.FilterRules) == 0
+	}
+	if len(a.Key.FilterRules) != len(b.Key.FilterRules) {
+		return false
+	}
+	for i := range a.Key.FilterRules {
+		if a.Key.FilterRules[i].Name != b.Key.FilterRules[i].Name ||
+			a.Key.FilterRules[i].Value != b.Key.FilterRules[i].Value {
+			return false
+		}
+	}
+	return true
 }
 
 func bucketLogKeyFormatEqual(a, b *TargetObjectKeyFormat) bool {

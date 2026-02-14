@@ -1355,9 +1355,34 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			)
 			return
 		}
-		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
+		// Archived objects require restore before GET.
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
-			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
+			if backend.CloudAllowReadThrough() {
+				restoreDays := backend.CloudReadThroughRestoreDays()
+				if restoreDays < 2 {
+					restoreDays = 2
+				}
+				_, _ = h.backend.RestoreObject(
+					bucketName,
+					key,
+					r.URL.Query().Get("versionId"),
+					restoreDays,
+				)
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidObjectState",
+					"The operation is not valid for the object's storage class",
+				)
+				return
+			}
+			backend.WriteError(
+				w,
+				http.StatusForbidden,
+				"InvalidObjectState",
+				"The operation is not valid for the object's storage class",
+			)
+			return
 		}
 
 		// Check PartNumber validity before SSE-C access (invalid part takes priority)
@@ -1633,10 +1658,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		// Auto-restore un-restored GLACIER/DEEP_ARCHIVE objects (read-through support)
-		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
-			_, _ = h.backend.RestoreObject(bucketName, key, r.URL.Query().Get("versionId"), 0)
-		}
+		// HEAD does not trigger read-through restore; it reflects current archive state.
 
 		// Validate SSE-C access
 		if validateSSECAccess(w, r, obj) {

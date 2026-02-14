@@ -37,6 +37,7 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 	if owner == nil {
 		t.Fatal("owner for minis3-access-key must exist")
+		return
 	}
 	mustPutBucketPolicy(
 		t,
@@ -530,6 +531,7 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 	if owner == nil {
 		t.Fatal("owner must not be nil")
+		return
 	}
 
 	t.Run("source or target missing", func(t *testing.T) {
@@ -670,6 +672,7 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 	if owner == nil {
 		t.Fatal("owner must not be nil")
+		return
 	}
 	mustPutBucketPolicy(
 		t,
@@ -820,7 +823,7 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 			t.Fatalf("flush empty batch failed: %v", err)
 		}
 
-		// Source bucket missing after skipping empty-source ACL checks.
+		// Empty-source entries are ignored.
 		_, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
 			TargetBucket: "dst-access-log",
 			TargetPrefix: "logs/",
@@ -829,8 +832,8 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 				Line:         "line",
 			}},
 		}, time.Now().UTC())
-		if err == nil {
-			t.Fatal("expected error when source bucket is missing")
+		if err != nil {
+			t.Fatalf("unexpected error for empty-source entry: %v", err)
 		}
 
 		// Access denied when target policy does not allow logging service writes.
