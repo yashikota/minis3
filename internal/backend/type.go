@@ -216,8 +216,31 @@ type BucketLoggingStatus struct {
 type LoggingEnabled struct {
 	TargetBucket          string                 `xml:"TargetBucket"`
 	TargetPrefix          string                 `xml:"TargetPrefix"`
+	LoggingType           string                 `xml:"LoggingType,omitempty"`
+	ObjectRollTime        int                    `xml:"ObjectRollTime,omitempty"`
+	RecordsBatchSize      int                    `xml:"RecordsBatchSize,omitempty"`
+	Filter                *LoggingFilter         `xml:"Filter,omitempty"`
 	TargetGrants          *TargetGrants          `xml:"TargetGrants,omitempty"`
 	TargetObjectKeyFormat *TargetObjectKeyFormat `xml:"TargetObjectKeyFormat,omitempty"`
+}
+
+const (
+	BucketLoggingTypeStandard = "Standard"
+	BucketLoggingTypeJournal  = "Journal"
+	DefaultObjectRollTime     = 5
+)
+
+type LoggingFilter struct {
+	Key *LoggingKeyFilter `xml:"Key,omitempty"`
+}
+
+type LoggingKeyFilter struct {
+	FilterRules []FilterRule `xml:"FilterRule,omitempty"`
+}
+
+type FilterRule struct {
+	Name  string `xml:"Name"`
+	Value string `xml:"Value"`
 }
 
 // TargetGrants groups optional grants under TargetGrants.
@@ -830,7 +853,14 @@ type PolicyStatus struct {
 type PostBucketLoggingResult struct {
 	XMLName              xml.Name `xml:"PostBucketLoggingResult"`
 	Xmlns                string   `xml:"xmlns,attr,omitempty"`
-	FlushedLoggingObject string   `xml:"FlushedLoggingObject,omitempty"`
+	FlushedLoggingObject string   `xml:"FlushedLoggingObject"`
+}
+
+// PutBucketLoggingResult is the XML response for PUT ?logging extension output.
+type PutBucketLoggingResult struct {
+	XMLName              xml.Name `xml:"PutBucketLoggingOutput"`
+	Xmlns                string   `xml:"xmlns,attr,omitempty"`
+	FlushedLoggingObject string   `xml:"FlushedLoggingObject"`
 }
 
 // IsArchivedStorageClass returns true if the storage class is an archived tier.
