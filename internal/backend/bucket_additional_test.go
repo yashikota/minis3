@@ -914,8 +914,13 @@ func TestPutBucketOwnershipControlsRejectsIncompatibleACL(t *testing.T) {
 
 	owner := OwnerForAccessKey("minis3-access-key")
 	alt := OwnerForAccessKey("minis3-alt-access-key")
-	if owner == nil || alt == nil {
-		t.Fatal("expected known owners for access keys")
+	if owner == nil {
+		t.Fatal("expected known owner for access key")
+		return
+	}
+	if alt == nil {
+		t.Fatal("expected known alt owner for access key")
+		return
 	}
 
 	incompatibleACL := &AccessControlPolicy{
@@ -966,8 +971,13 @@ func TestBucketACLCompatibleWithOwnerEnforced(t *testing.T) {
 
 	owner := OwnerForAccessKey("minis3-access-key")
 	alt := OwnerForAccessKey("minis3-alt-access-key")
-	if owner == nil || alt == nil {
-		t.Fatal("expected known owners for access keys")
+	if owner == nil {
+		t.Fatal("expected known owner for access key")
+		return
+	}
+	if alt == nil {
+		t.Fatal("expected known alt owner for access key")
+		return
 	}
 
 	bucket := &Bucket{
