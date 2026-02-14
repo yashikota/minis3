@@ -123,8 +123,9 @@ type Object struct {
 	// Website redirect
 	WebsiteRedirectLocation string // x-amz-website-redirect-location
 	// Restore (GLACIER) fields
-	RestoreOngoing    bool       // true while restore is in progress
-	RestoreExpiryDate *time.Time // when the restored copy expires
+	RestoreOngoing      bool       // true while restore is in progress
+	RestoreExpiryDate   *time.Time // when the restored copy expires
+	CloudTransitionedAt *time.Time
 	// Multipart part info (populated after CompleteMultipartUpload)
 	Parts []ObjectPart
 }

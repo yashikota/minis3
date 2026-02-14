@@ -468,3 +468,165 @@ func TestApplyLifecycleTransitionsNoncurrentVersionsStorageClass(t *testing.T) {
 		)
 	}
 }
+
+func TestApplyLifecycleCurrentTransitionKeepsLatestDueAcrossRules(t *testing.T) {
+	t.Setenv("MINIS3_CLOUD_STORAGE_CLASS", "GLACIER")
+	t.Setenv("MINIS3_CLOUD_RETAIN_HEAD_OBJECT", "true")
+	t.Setenv("MINIS3_CLOUD_TARGET_BUCKET", "lifecycle-cloud-target")
+
+	b := New()
+	if err := b.CreateBucket("lifecycle-multi-rules"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	if _, err := b.PutObject(
+		"lifecycle-multi-rules",
+		"expire1/foo",
+		[]byte("data"),
+		PutObjectOptions{},
+	); err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				ID:     "to-ia",
+				Status: LifecycleStatusEnabled,
+				Prefix: "expire1/",
+				Transition: []LifecycleTransition{
+					{Days: 1, StorageClass: "STANDARD_IA"},
+				},
+			},
+			{
+				ID:     "to-glacier",
+				Status: LifecycleStatusEnabled,
+				Prefix: "expire1/",
+				Transition: []LifecycleTransition{
+					{Days: 5, StorageClass: "GLACIER"},
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("lifecycle-multi-rules", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+	}
+
+	obj, err := b.GetObject("lifecycle-multi-rules", "expire1/foo")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	base := obj.LastModified
+
+	b.ApplyLifecycle(base.Add(6*time.Second), time.Second)
+	obj, err = b.GetObject("lifecycle-multi-rules", "expire1/foo")
+	if err != nil {
+		t.Fatalf("GetObject after cloud transition failed: %v", err)
+	}
+	if obj.StorageClass != "GLACIER" {
+		t.Fatalf("expected GLACIER, got %q", obj.StorageClass)
+	}
+	if obj.CloudTransitionedAt == nil {
+		t.Fatal("expected CloudTransitionedAt to be set")
+	}
+	firstTransitionAt := *obj.CloudTransitionedAt
+
+	b.ApplyLifecycle(base.Add(7*time.Second), time.Second)
+	obj, err = b.GetObject("lifecycle-multi-rules", "expire1/foo")
+	if err != nil {
+		t.Fatalf("GetObject after second apply failed: %v", err)
+	}
+	if obj.StorageClass != "GLACIER" {
+		t.Fatalf("expected GLACIER after second apply, got %q", obj.StorageClass)
+	}
+	if obj.CloudTransitionedAt == nil {
+		t.Fatal("expected CloudTransitionedAt to stay set")
+	}
+	if !obj.CloudTransitionedAt.Equal(firstTransitionAt) {
+		t.Fatalf(
+			"expected CloudTransitionedAt unchanged, before=%v after=%v",
+			firstTransitionAt,
+			*obj.CloudTransitionedAt,
+		)
+	}
+}
+
+func TestApplyLifecycleDoesNotRetransitionTemporarilyRestoredObject(t *testing.T) {
+	t.Setenv("MINIS3_CLOUD_STORAGE_CLASS", "GLACIER")
+	t.Setenv("MINIS3_CLOUD_RETAIN_HEAD_OBJECT", "true")
+	t.Setenv("MINIS3_CLOUD_TARGET_BUCKET", "lifecycle-cloud-target-restore")
+
+	b := New()
+	if err := b.CreateBucket("lifecycle-restore"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	if _, err := b.PutObject(
+		"lifecycle-restore",
+		"obj",
+		[]byte("restorable"),
+		PutObjectOptions{},
+	); err != nil {
+		t.Fatalf("PutObject failed: %v", err)
+	}
+
+	cfg := &LifecycleConfiguration{
+		Rules: []LifecycleRule{
+			{
+				ID:     "to-glacier",
+				Status: LifecycleStatusEnabled,
+				Transition: []LifecycleTransition{
+					{Days: 1, StorageClass: "GLACIER"},
+				},
+			},
+		},
+	}
+	if err := b.PutBucketLifecycleConfiguration("lifecycle-restore", cfg); err != nil {
+		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
+	}
+
+	obj, err := b.GetObject("lifecycle-restore", "obj")
+	if err != nil {
+		t.Fatalf("GetObject failed: %v", err)
+	}
+	base := obj.LastModified
+
+	b.ApplyLifecycle(base.Add(2*time.Second), time.Second)
+
+	result, err := b.RestoreObject("lifecycle-restore", "obj", "", 2)
+	if err != nil {
+		t.Fatalf("RestoreObject failed: %v", err)
+	}
+	if result.StatusCode != 202 {
+		t.Fatalf("expected restore status 202, got %d", result.StatusCode)
+	}
+
+	obj, err = b.GetObject("lifecycle-restore", "obj")
+	if err != nil {
+		t.Fatalf("GetObject after restore failed: %v", err)
+	}
+	if obj.Size == 0 {
+		t.Fatal("expected restored object size > 0")
+	}
+	if obj.RestoreExpiryDate == nil {
+		t.Fatal("expected RestoreExpiryDate to be set")
+	}
+	expiry := *obj.RestoreExpiryDate
+
+	b.ApplyLifecycle(base.Add(3*time.Second), time.Second)
+	obj, err = b.GetObject("lifecycle-restore", "obj")
+	if err != nil {
+		t.Fatalf("GetObject after lifecycle reapply failed: %v", err)
+	}
+	if obj.Size == 0 {
+		t.Fatal("expected restored data to remain available")
+	}
+	if obj.RestoreExpiryDate == nil {
+		t.Fatal("expected RestoreExpiryDate to remain set")
+	}
+	if !obj.RestoreExpiryDate.Equal(expiry) {
+		t.Fatalf(
+			"expected RestoreExpiryDate unchanged, before=%v after=%v",
+			expiry,
+			*obj.RestoreExpiryDate,
+		)
+	}
+}
