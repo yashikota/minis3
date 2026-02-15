@@ -862,9 +862,6 @@ func bucketACLCompatibleWithOwnerEnforced(bucket *Bucket) bool {
 		return true
 	}
 	owner := OwnerForAccessKey(bucket.OwnerAccessKey)
-	if owner == nil || owner.ID == "" {
-		owner = DefaultOwner()
-	}
 	for _, grant := range acl.AccessControlList.Grants {
 		if grant.Grantee == nil {
 			continue

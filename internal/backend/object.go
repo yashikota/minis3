@@ -281,14 +281,8 @@ func (b *Backend) PutObject(
 	if owner == nil {
 		owner = OwnerForAccessKey(bucket.OwnerAccessKey)
 	}
-	if owner == nil {
-		owner = DefaultOwner()
-	}
 	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
 		owner = OwnerForAccessKey(bucket.OwnerAccessKey)
-		if owner == nil {
-			owner = DefaultOwner()
-		}
 	}
 
 	obj := &Object{

@@ -521,9 +521,6 @@ func (h *Handler) emitServerAccessLog(
 		requester = "-"
 	}
 	op := mapRequestToLoggingOperation(r, key)
-	if op == "" {
-		return
-	}
 	if loggingType == backend.BucketLoggingTypeJournal && !shouldLogJournalOperation(op) {
 		return
 	}

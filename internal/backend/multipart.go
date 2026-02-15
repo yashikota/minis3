@@ -63,9 +63,6 @@ func (b *Backend) CreateMultipartUpload(
 	}
 	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
 		owner = OwnerForAccessKey(bucket.OwnerAccessKey)
-		if owner == nil {
-			owner = DefaultOwner()
-		}
 	}
 	upload := &MultipartUpload{
 		UploadId:             uploadId,
@@ -295,9 +292,6 @@ func (b *Backend) CompleteMultipartUpload(
 	}
 	if strings.EqualFold(bucket.ObjectOwnership, ObjectOwnershipBucketOwnerEnforced) {
 		obj.Owner = OwnerForAccessKey(bucket.OwnerAccessKey)
-		if obj.Owner == nil {
-			obj.Owner = DefaultOwner()
-		}
 		obj.ACL = NewDefaultACLForOwner(obj.Owner)
 	}
 	obj.ChecksumAlgorithm = upload.ChecksumAlgorithm
