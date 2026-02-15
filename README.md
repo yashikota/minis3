@@ -113,6 +113,14 @@ func main() {
 | Object Lock operations | ✅ Full support | 6 |
 | Multipart upload operations | ✅ Full support | 7 |
 
+### サポート状況（日本語）
+
+- バケット操作: **32 API**（実装済み）
+- オブジェクト操作: **15 API**（実装済み）
+- Object Lock 操作: **6 API**（実装済み）
+- マルチパートアップロード操作: **7 API**（実装済み）
+- 詳細なAPI一覧は、下の **Operation List (by category)** を参照してください。
+
 ### Operation List (by category)
 
 <details>
@@ -179,6 +187,16 @@ By default, `task s3-test` excludes tests marked with `fails_on_aws` and `fails_
 This keeps the default suite focused on AWS-compatible behavior and avoids known non-AWS/non-RGW expectation tests in daily runs.
 
 To run the full suite (including those markers), run from `integration/s3-test`:
+
+```bash
+docker compose run --rm -e PYTEST_ADDOPTS="" s3tests
+```
+
+### `task s3-test` マーカーポリシー（日本語）
+
+- 既定の `task s3-test` は、`integration/s3-test/compose.yaml` の `PYTEST_ADDOPTS` により `fails_on_aws` と `fails_on_rgw` マーカー付きテストを除外します。
+- 日常実行では AWS 互換の確認に集中するため、この設定をデフォルトとしています。
+- マーカー除外なしで全件実行する場合は、`integration/s3-test` ディレクトリで次を実行してください。
 
 ```bash
 docker compose run --rm -e PYTEST_ADDOPTS="" s3tests
