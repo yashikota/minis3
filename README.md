@@ -100,91 +100,54 @@ func main() {
 
 ## 📋 Supported Operations
 
-**Legend:** ✅ = Full support | ⚠️ = Partial support (basic features only) | ⌛ = Not implemented
-
 > [!Note]
 > Minis3 is a single-region, single-owner in-memory mock server. Features like `ExpectedBucketOwner`, `BucketRegion` filter, and multi-region support are intentionally not implemented as they are not meaningful in a mock environment.
 > Minis3 validates the `x-amz-mfa` header format but does not perform actual TOTP authentication (no secret keys). Any correctly formatted MFA header is accepted for testing purposes.
 
-### 🪣 Bucket Operations
+### Support Summary
 
-| Operation | Status | Unsupported Features |
-| --------- | ------ | -------------------- |
-| ListBuckets | ✅ | |
-| CreateBucket | ✅ | |
-| DeleteBucket | ✅ | |
-| HeadBucket | ✅ | |
-| GetBucketLocation | ✅ | |
-| GetBucketVersioning | ✅ | |
-| PutBucketVersioning | ✅ | |
-| GetBucketTagging | ✅ | |
-| PutBucketTagging | ✅ | |
-| DeleteBucketTagging | ✅ | |
-| GetBucketPolicy | ✅ | |
-| PutBucketPolicy | ✅ | |
-| DeleteBucketPolicy | ✅ | |
-| GetBucketAcl | ✅ | |
-| PutBucketAcl | ✅ | |
-| GetObjectLockConfiguration | ✅ | |
-| PutObjectLockConfiguration | ✅ | |
-| GetBucketLifecycleConfiguration | ✅ | |
-| PutBucketLifecycleConfiguration | ✅ | |
-| DeleteBucketLifecycle | ✅ | |
-| GetBucketEncryption | ✅ | |
-| PutBucketEncryption | ✅ | |
-| DeleteBucketEncryption | ✅ | |
-| GetBucketCors | ✅ | |
-| PutBucketCors | ✅ | |
-| DeleteBucketCors | ✅ | |
-| GetBucketWebsite | ✅ | |
-| PutBucketWebsite | ✅ | |
-| DeleteBucketWebsite | ✅ | |
-| GetPublicAccessBlock | ✅ | |
-| PutPublicAccessBlock | ✅ | |
-| DeletePublicAccessBlock | ✅ | |
+| Area | Status | Implemented APIs |
+| ---- | ------ | ---------------- |
+| Bucket operations | ✅ Full support | 32 |
+| Object operations | ✅ Full support | 15 |
+| Object Lock operations | ✅ Full support | 6 |
+| Multipart upload operations | ✅ Full support | 7 |
 
-### 📦 Object Operations
+### Operation List (by category)
 
-| Operation | Status |
-| --------- | ------ |
-| PutObject | ✅ |
-| GetObject | ✅ |
-| DeleteObject | ✅ |
-| DeleteObjects | ✅ |
-| CopyObject | ✅ |
-| HeadObject | ✅ |
-| ListObjects | ✅ |
-| ListObjectsV2 | ✅ |
-| ListObjectVersions | ✅ |
-| GetObjectAcl | ✅ |
-| PutObjectAcl | ✅ |
-| GetObjectAttributes | ✅ |
-| GetObjectTagging | ✅ |
-| PutObjectTagging | ✅ |
-| DeleteObjectTagging | ✅ |
+<details>
+<summary>🪣 Bucket operations (32)</summary>
 
-### 🔒 Object Lock Operations
+`ListBuckets`, `CreateBucket`, `DeleteBucket`, `HeadBucket`, `GetBucketLocation`, `GetBucketVersioning`, `PutBucketVersioning`, `GetBucketTagging`, `PutBucketTagging`, `DeleteBucketTagging`, `GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`, `GetBucketAcl`, `PutBucketAcl`, `GetObjectLockConfiguration`, `PutObjectLockConfiguration`, `GetBucketLifecycleConfiguration`, `PutBucketLifecycleConfiguration`, `DeleteBucketLifecycle`, `GetBucketEncryption`, `PutBucketEncryption`, `DeleteBucketEncryption`, `GetBucketCors`, `PutBucketCors`, `DeleteBucketCors`, `GetBucketWebsite`, `PutBucketWebsite`, `DeleteBucketWebsite`, `GetPublicAccessBlock`, `PutPublicAccessBlock`, `DeletePublicAccessBlock`
 
-| Operation | Status | Unsupported Features |
-| --------- | ------ | -------------------- |
-| GetObjectLockConfiguration | ✅ | |
-| PutObjectLockConfiguration | ✅ | |
-| GetObjectRetention | ✅ | |
-| PutObjectRetention | ✅ | |
-| GetObjectLegalHold | ✅ | |
-| PutObjectLegalHold | ✅ | |
+</details>
 
-### 📤 Multipart Upload Operations
+<details>
+<summary>📦 Object operations (15)</summary>
 
-| Operation | Status | Unsupported Features |
-| --------- | ------ | -------------------- |
-| CreateMultipartUpload | ✅ | |
-| UploadPart | ✅ | |
-| CompleteMultipartUpload | ✅ | |
-| AbortMultipartUpload | ✅ | |
-| ListMultipartUploads | ✅ | |
-| ListParts | ✅ | |
-| UploadPartCopy | ✅ | CopySourceSSECustomerAlgorithm, CopySourceSSECustomerKey, CopySourceSSECustomerKeyMD5, SSECustomerAlgorithm, SSECustomerKey, SSECustomerKeyMD5 |
+`PutObject`, `GetObject`, `DeleteObject`, `DeleteObjects`, `CopyObject`, `HeadObject`, `ListObjects`, `ListObjectsV2`, `ListObjectVersions`, `GetObjectAcl`, `PutObjectAcl`, `GetObjectAttributes`, `GetObjectTagging`, `PutObjectTagging`, `DeleteObjectTagging`
+
+</details>
+
+<details>
+<summary>🔒 Object Lock operations (6)</summary>
+
+`GetObjectLockConfiguration`, `PutObjectLockConfiguration`, `GetObjectRetention`, `PutObjectRetention`, `GetObjectLegalHold`, `PutObjectLegalHold`
+
+</details>
+
+<details>
+<summary>📤 Multipart upload operations (7)</summary>
+
+`CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `AbortMultipartUpload`, `ListMultipartUploads`, `ListParts`, `UploadPartCopy`
+
+</details>
+
+### API-Specific Limitations
+
+| Operation | Unsupported optional fields |
+| --------- | --------------------------- |
+| `UploadPartCopy` | `CopySourceSSECustomerAlgorithm`, `CopySourceSSECustomerKey`, `CopySourceSSECustomerKeyMD5`, `SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5` |
 
 ### Additional Features
 
@@ -199,6 +162,27 @@ func main() {
 - **Request IDs:** `x-amz-request-id` and `x-amz-id-2` headers on every response
 - **Metadata/Tagging Directives:** `x-amz-metadata-directive` and `x-amz-tagging-directive` for CopyObject
 - **Content-Type Default:** Defaults to `application/octet-stream` when not specified
+
+## 🧪 Development & Testing
+
+- `task lint`: Run lint and formatting checks.
+- `task unit-test`: Run unit tests with race detection and shuffled order.
+- `task sdk-test`: Run integration tests in `integration/sdk`.
+- `task s3-test`: Run Ceph `s3-tests` in Docker.
+- `task s3-test-summary`: Print pass/fail summary from `integration/s3-test/s3-test.log`.
+- `task test`: Run `unit-test`, `sdk-test`, and `s3-test`.
+
+### `task s3-test` marker policy
+
+By default, `task s3-test` excludes tests marked with `fails_on_aws` and `fails_on_rgw` via `PYTEST_ADDOPTS` in `integration/s3-test/compose.yaml`.
+
+This keeps the default suite focused on AWS-compatible behavior and avoids known non-AWS/non-RGW expectation tests in daily runs.
+
+To run the full suite (including those markers), run from `integration/s3-test`:
+
+```bash
+docker compose run --rm -e PYTEST_ADDOPTS="" s3tests
+```
 
 ## Credits
 
