@@ -113,14 +113,6 @@ func main() {
 | Object Lock operations | ✅ Full support | 6 |
 | Multipart upload operations | ✅ Full support | 7 |
 
-### サポート状況（日本語）
-
-- バケット操作: **32 API**（実装済み）
-- オブジェクト操作: **15 API**（実装済み）
-- Object Lock 操作: **6 API**（実装済み）
-- マルチパートアップロード操作: **7 API**（実装済み）
-- 詳細なAPI一覧は、下の **Operation List (by category)** を参照してください。
-
 ### Operation List (by category)
 
 <details>
