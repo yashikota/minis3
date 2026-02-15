@@ -177,7 +177,6 @@ func main() {
 - `task unit-test`: Run unit tests with race detection and shuffled order.
 - `task sdk-test`: Run integration tests in `integration/sdk`.
 - `task s3-test`: Run Ceph `s3-tests` in Docker.
-- `task s3-test-summary`: Print pass/fail summary from `integration/s3-test/s3-test.log`.
 - `task test`: Run `unit-test`, `sdk-test`, and `s3-test`.
 
 ### `task s3-test` marker policy

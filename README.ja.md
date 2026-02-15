@@ -174,18 +174,15 @@ func main() {
 - `task unit-test`: ユニットテスト（race 検出・シャッフル実行）
 - `task sdk-test`: `integration/sdk` の統合テスト
 - `task s3-test`: Docker で Ceph `s3-tests` を実行
-- `task s3-test-summary`: `integration/s3-test/s3-test.log` から結果サマリーを表示
 - `task test`: `unit-test`, `sdk-test`, `s3-test` を順に実行
 
 ### `task s3-test` のマーカーポリシー
 
-既定の `task s3-test` は `integration/s3-test/compose.yaml` の `PYTEST_ADDOPTS` により、`fails_on_aws` と `fails_on_rgw` のマーカー付きテストを除外します。
+既定の `task s3-test` は `integration/s3-test/compose.yaml` の `PYTEST_ADDOPTS` により、`fails_on_aws` と `fails_on_rgw` のマーカー付きテストを除外します。  
+日常実行では AWS 互換性の確認を優先し、非 AWS / 非 RGW 前提のケースを切り離すためです。  
+マーカー除外なしで全件実行する場合は `integration/s3-test` で次を実行してください。  
 
-日常実行では AWS 互換性の確認を優先し、非 AWS / 非 RGW 前提のケースを切り離すためです。
-
-マーカー除外なしで全件実行する場合は `integration/s3-test` で次を実行してください。
-
-```bash
+```sh
 docker compose run --rm -e PYTEST_ADDOPTS="" s3tests
 ```
 
