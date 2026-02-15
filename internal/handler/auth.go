@@ -34,12 +34,14 @@ func DefaultCredentials() map[string]string {
 	}
 }
 
-// credentialLookupFn resolves an access key to its secret key.
-// Overridden at handler initialization to also check dynamic IAM credentials.
-var credentialLookupFn = func(accessKey string) (string, bool) {
+func defaultCredentialLookup(accessKey string) (string, bool) {
 	secret, ok := DefaultCredentials()[accessKey]
 	return secret, ok
 }
+
+// credentialLookupFn resolves an access key to its secret key.
+// Overridden at handler initialization to also check dynamic IAM credentials.
+var credentialLookupFn = defaultCredentialLookup
 
 // isPresignedURL checks if the request is a presigned URL request.
 func isPresignedURL(r *http.Request) bool {

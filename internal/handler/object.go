@@ -51,6 +51,13 @@ var (
 	) (*backend.AccessControlPolicy, error) {
 		return h.backend.GetObjectACL(bucketName, key, versionID)
 	}
+	restoreObjectFn = func(
+		h *Handler,
+		bucketName, key, versionID string,
+		days int,
+	) (*backend.RestoreObjectResult, error) {
+		return h.backend.RestoreObject(bucketName, key, versionID, days)
+	}
 )
 
 // Inverted NVME polynomial value used by Go's crc64 implementation.
@@ -2369,14 +2376,8 @@ func (h *Handler) handlePutObjectACL(
 	skipACLValidation := false
 	if acl.Owner == nil && len(acl.AccessControlList.Grants) == 0 {
 		owner := requesterOwner(r)
-		if owner == nil {
-			owner = h.bucketOwner(bucketName)
-		}
-		defaultACL := backend.NewDefaultACLForOwner(owner)
-		if defaultACL != nil {
-			acl = *defaultACL
-			skipACLValidation = true
-		}
+		acl = *backend.NewDefaultACLForOwner(owner)
+		skipACLValidation = true
 	} else if acl.Owner == nil || acl.Owner.ID == "" {
 		acl.Owner = requesterOwner(r)
 	}
@@ -2893,7 +2894,7 @@ func (h *Handler) handleRestoreObject(
 		}
 	}
 
-	result, err := h.backend.RestoreObject(bucketName, key, versionId, restoreReq.Days)
+	result, err := restoreObjectFn(h, bucketName, key, versionId, restoreReq.Days)
 	if err != nil {
 		switch {
 		case errors.Is(err, backend.ErrBucketNotFound):

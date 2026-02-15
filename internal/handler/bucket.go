@@ -2692,7 +2692,7 @@ func (h *Handler) handlePostBucketLogging(
 		Xmlns:                backend.S3Xmlns,
 		FlushedLoggingObject: flushedKey,
 	}
-	output, err := xml.Marshal(result)
+	output, err := xmlMarshalFn(result)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -3024,11 +3024,7 @@ func sourceAccountIDForLogging(accessKey string) string {
 	case "altroot-access-key":
 		return "210987654321"
 	}
-	owner := backend.OwnerForAccessKey(accessKey)
-	if owner == nil {
-		return ""
-	}
-	return owner.ID
+	return backend.OwnerForAccessKey(accessKey).ID
 }
 
 // handleGetBucketLifecycleConfiguration handles GetBucketLifecycleConfiguration requests.
