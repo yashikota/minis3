@@ -145,6 +145,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          fetch-depth: 0
 
       - name: Build badge payload
         run: |
@@ -182,4 +184,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/badges/s3-tests.json
           git commit -m "chore: update s3-test badge data"
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git fetch origin "${GITHUB_REF_NAME}"
+          if ! git rebase "origin/${GITHUB_REF_NAME}"; then
+            echo "::warning::Failed to rebase badge update onto latest ${GITHUB_REF_NAME}; skipping push."
+            git rebase --abort || true
+            exit 0
+          fi
+          if ! git push origin HEAD:${GITHUB_REF_NAME}; then
+            echo "::warning::Failed to push badge update (likely concurrent push); skipping."
+            exit 0
+          fi
