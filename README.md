@@ -191,16 +191,6 @@ To run the full suite (including those markers), run from `integration/s3-test`:
 docker compose run --rm -e PYTEST_ADDOPTS="" s3tests
 ```
 
-### `task s3-test` マーカーポリシー（日本語）
-
-- 既定の `task s3-test` は、`integration/s3-test/compose.yaml` の `PYTEST_ADDOPTS` により `fails_on_aws` と `fails_on_rgw` マーカー付きテストを除外します。
-- 日常実行では AWS 互換の確認に集中するため、この設定をデフォルトとしています。
-- マーカー除外なしで全件実行する場合は、`integration/s3-test` ディレクトリで次を実行してください。
-
-```bash
-docker compose run --rm -e PYTEST_ADDOPTS="" s3tests
-```
-
 ## Credits
 
 [Miniredis](https://github.com/alicebob/miniredis) is a Redis test server, used in Go unittests. Minis3 is inspired by Miniredis.  
