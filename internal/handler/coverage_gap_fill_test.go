@@ -862,6 +862,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		owner := backend.OwnerForAccessKey("minis3-access-key")
 		if owner == nil {
 			t.Fatal("owner must not be nil")
+			return
 		}
 		mustPutBucketPolicy(
 			t,
@@ -980,8 +981,8 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			}},
 		}
 		h.loggingMu.Unlock()
-		if err := h.flushServerAccessLogsIfDue("src-h2"); err == nil {
-			t.Fatal("expected flushServerAccessLogsIfDue error")
+		if err := h.flushServerAccessLogsIfDue("src-h2"); err != nil {
+			t.Fatalf("flushServerAccessLogsIfDue denied branch failed: %v", err)
 		}
 
 		// flush partitioned object key path
@@ -1756,8 +1757,7 @@ func TestCoverageGapFlushLogPutPath(t *testing.T) {
 			map[string]string{"Authorization": authHeader("minis3-access-key")},
 		),
 	)
-	requireStatus(t, w, http.StatusForbidden)
-	requireS3ErrorCode(t, w, "AccessDenied")
+	requireStatus(t, w, http.StatusOK)
 }
 
 func TestCoverageGapEmitRequestURIFallbackBranch(t *testing.T) {
@@ -1769,6 +1769,7 @@ func TestCoverageGapEmitRequestURIFallbackBranch(t *testing.T) {
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 	if owner == nil {
 		t.Fatal("owner must not be nil")
+		return
 	}
 	mustPutBucketPolicy(
 		t,

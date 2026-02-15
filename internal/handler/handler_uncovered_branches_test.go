@@ -283,6 +283,7 @@ func TestACLAndGrantHelperEdgeBranches(t *testing.T) {
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 	if owner == nil {
 		t.Fatal("owner must not be nil")
+		return
 	}
 
 	reqWithEmptyPart := newRequest(

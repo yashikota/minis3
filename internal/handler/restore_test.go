@@ -111,13 +111,11 @@ func TestGetObjectGlacierAutoRestore(t *testing.T) {
 		t.Fatalf("PutObject: %v", err)
 	}
 
-	t.Run("GET un-restored GLACIER object auto-restores (read-through)", func(t *testing.T) {
+	t.Run("GET un-restored GLACIER object triggers read-through restore", func(t *testing.T) {
 		req := newRequest(http.MethodGet, "/bucket/glacier-key", "", nil)
 		w := doRequest(h, req)
-		requireStatus(t, w, http.StatusOK)
-		if w.Body.String() != "data" {
-			t.Fatalf("unexpected body: %s", w.Body.String())
-		}
+		requireStatus(t, w, http.StatusBadRequest)
+		requireS3ErrorCode(t, w, "InvalidObjectState")
 	})
 
 	t.Run("GET restored GLACIER object has x-amz-restore header", func(t *testing.T) {

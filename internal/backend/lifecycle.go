@@ -2,6 +2,8 @@ package backend
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,12 +19,30 @@ func (b *Backend) ApplyLifecycle(now time.Time, dayDuration time.Duration) {
 	defer b.mu.Unlock()
 
 	for _, bucket := range b.buckets {
+		b.expireRestoredArchivedObjects(bucket, now)
 		if bucket.LifecycleConfiguration == nil {
 			continue
 		}
 		b.applyBucketLifecycle(bucket, now, dayDuration)
 	}
 	b.applyMultipartLifecycle(now, dayDuration)
+}
+
+func (b *Backend) expireRestoredArchivedObjects(bucket *Bucket, now time.Time) {
+	if bucket == nil {
+		return
+	}
+	for _, versions := range bucket.Objects {
+		if versions == nil {
+			continue
+		}
+		for _, obj := range versions.Versions {
+			if obj == nil {
+				continue
+			}
+			_ = b.restoreExpiredArchivedObjectIfNeeded(obj, now)
+		}
+	}
 }
 
 func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuration time.Duration) {
@@ -45,14 +65,16 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 		}
 
 		updated := bucket.Objects[key]
-		applyCurrentTransitionRules(
+		b.applyCurrentTransitionRules(
+			bucket,
 			key,
 			updated.Versions,
 			bucket.LifecycleConfiguration.Rules,
 			now,
 			dayDuration,
 		)
-		applyNoncurrentTransitionRules(
+		b.applyNoncurrentTransitionRules(
+			bucket,
 			key,
 			updated.Versions,
 			bucket.LifecycleConfiguration.Rules,
@@ -84,7 +106,8 @@ func (b *Backend) applyBucketLifecycle(bucket *Bucket, now time.Time, dayDuratio
 	}
 }
 
-func applyCurrentTransitionRules(
+func (b *Backend) applyCurrentTransitionRules(
+	bucket *Bucket,
 	key string,
 	versions []*Object,
 	rules []LifecycleRule,
@@ -96,6 +119,9 @@ func applyCurrentTransitionRules(
 	}
 
 	current := versions[0]
+	bestClass := ""
+	bestDueAt := time.Time{}
+	found := false
 	for _, rule := range rules {
 		if !isLifecycleRuleEnabled(rule) || len(rule.Transition) == 0 {
 			continue
@@ -103,15 +129,23 @@ func applyCurrentTransitionRules(
 		if !lifecycleRuleMatchesObject(rule, key, current) {
 			continue
 		}
-		targetStorageClass, ok := dueLifecycleTransitionStorageClass(
+		targetStorageClass, dueAt, ok := dueLifecycleTransitionStorageClass(
 			rule.Transition,
 			current.LastModified,
 			now,
 			dayDuration,
 		)
-		if ok {
-			current.StorageClass = targetStorageClass
+		if !ok {
+			continue
 		}
+		if !found || !dueAt.Before(bestDueAt) {
+			bestClass = targetStorageClass
+			bestDueAt = dueAt
+			found = true
+		}
+	}
+	if found {
+		b.applyLifecycleStorageClassTransition(bucket, key, current, bestClass, now)
 	}
 }
 
@@ -119,7 +153,7 @@ func dueLifecycleTransitionStorageClass(
 	transitions []LifecycleTransition,
 	lastModified, now time.Time,
 	dayDuration time.Duration,
-) (string, bool) {
+) (string, time.Time, bool) {
 	bestClass := ""
 	bestDueAt := time.Time{}
 	found := false
@@ -140,7 +174,7 @@ func dueLifecycleTransitionStorageClass(
 		}
 	}
 
-	return bestClass, found
+	return bestClass, bestDueAt, found
 }
 
 func lifecycleTransitionDueAt(
@@ -162,7 +196,8 @@ func lifecycleTransitionDueAt(
 	return transitionDate, true
 }
 
-func applyNoncurrentTransitionRules(
+func (b *Backend) applyNoncurrentTransitionRules(
+	bucket *Bucket,
 	key string,
 	versions []*Object,
 	rules []LifecycleRule,
@@ -172,6 +207,12 @@ func applyNoncurrentTransitionRules(
 	if len(versions) == 0 {
 		return
 	}
+
+	type transitionCandidate struct {
+		storageClass string
+		dueAt        time.Time
+	}
+	candidates := make(map[*Object]transitionCandidate)
 
 	for _, rule := range rules {
 		if !isLifecycleRuleEnabled(rule) || len(rule.NoncurrentVersionTransition) == 0 {
@@ -188,18 +229,146 @@ func applyNoncurrentTransitionRules(
 			}
 			seenMatchingNoncurrent++
 
-			targetStorageClass, ok := dueNoncurrentTransitionStorageClass(
+			targetStorageClass, dueAt, ok := dueNoncurrentTransitionStorageClass(
 				rule.NoncurrentVersionTransition,
 				obj.LastModified,
 				now,
 				dayDuration,
 				seenMatchingNoncurrent,
 			)
-			if ok {
-				obj.StorageClass = targetStorageClass
+			if !ok {
+				continue
+			}
+			current, exists := candidates[obj]
+			if !exists || !dueAt.Before(current.dueAt) {
+				candidates[obj] = transitionCandidate{
+					storageClass: targetStorageClass,
+					dueAt:        dueAt,
+				}
 			}
 		}
 	}
+
+	for obj, candidate := range candidates {
+		b.applyLifecycleStorageClassTransition(
+			bucket,
+			key,
+			obj,
+			candidate.storageClass,
+			now,
+		)
+	}
+}
+
+func cloudStorageClass() string {
+	value := strings.TrimSpace(os.Getenv("MINIS3_CLOUD_STORAGE_CLASS"))
+	if value == "" {
+		return "GLACIER"
+	}
+	return value
+}
+
+func cloudTargetBucketName(storageClass string) string {
+	value := strings.TrimSpace(os.Getenv("MINIS3_CLOUD_TARGET_BUCKET"))
+	if value != "" {
+		return value
+	}
+	return fmt.Sprintf("rgwx-default-%s-cloud-bucket", strings.ToLower(storageClass))
+}
+
+func cloudTargetStorageClass() string {
+	value := strings.TrimSpace(os.Getenv("MINIS3_CLOUD_TARGET_STORAGE_CLASS"))
+	if value == "" {
+		return "STANDARD"
+	}
+	return value
+}
+
+func cloudRetainHeadObject() bool {
+	value := strings.TrimSpace(os.Getenv("MINIS3_CLOUD_RETAIN_HEAD_OBJECT"))
+	if value == "" {
+		return true
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return true
+	}
+	return parsed
+}
+
+func cloudObjectKey(sourceBucket, sourceKey, versionID string) string {
+	key := sourceBucket + "/" + sourceKey
+	if versionID != "" && versionID != NullVersionId {
+		key += "-" + versionID
+	}
+	return key
+}
+
+func (b *Backend) applyLifecycleStorageClassTransition(
+	sourceBucket *Bucket,
+	sourceKey string,
+	obj *Object,
+	targetStorageClass string,
+	now time.Time,
+) {
+	if obj == nil {
+		return
+	}
+	if strings.EqualFold(obj.StorageClass, targetStorageClass) {
+		return
+	}
+	obj.StorageClass = targetStorageClass
+	obj.CloudTransitionedAt = nil
+	if !strings.EqualFold(targetStorageClass, cloudStorageClass()) {
+		return
+	}
+	transitionedAt := now
+	obj.CloudTransitionedAt = &transitionedAt
+
+	targetBucketName := cloudTargetBucketName(targetStorageClass)
+	targetBucket, exists := b.buckets[targetBucketName]
+	if !exists {
+		targetBucket = &Bucket{
+			Name:           targetBucketName,
+			CreationDate:   now,
+			OwnerAccessKey: sourceBucket.OwnerAccessKey,
+			Objects:        make(map[string]*ObjectVersions),
+		}
+		b.buckets[targetBucketName] = targetBucket
+	}
+
+	cloudKey := cloudObjectKey(sourceBucket.Name, sourceKey, obj.VersionId)
+	copied := *obj
+	copied.Key = cloudKey
+	copied.StorageClass = cloudTargetStorageClass()
+	copied.IsLatest = true
+	copied.VersionId = NullVersionId
+	copied.LastModified = now
+	copied.Data = append([]byte(nil), obj.Data...)
+	copied.Size = int64(len(copied.Data))
+
+	targetBucket.Objects[cloudKey] = &ObjectVersions{Versions: []*Object{&copied}}
+
+	if cloudRetainHeadObject() {
+		obj.Data = nil
+		obj.Size = 0
+		obj.RestoreOngoing = false
+		obj.RestoreExpiryDate = nil
+	}
+}
+
+func (b *Backend) restoreExpiredArchivedObjectIfNeeded(obj *Object, now time.Time) bool {
+	if obj == nil || !IsArchivedStorageClass(obj.StorageClass) || obj.RestoreExpiryDate == nil {
+		return false
+	}
+	if obj.RestoreExpiryDate.After(now) {
+		return false
+	}
+	obj.Data = nil
+	obj.Size = 0
+	obj.RestoreOngoing = false
+	obj.RestoreExpiryDate = nil
+	return true
 }
 
 func dueNoncurrentTransitionStorageClass(
@@ -207,7 +376,7 @@ func dueNoncurrentTransitionStorageClass(
 	lastModified, now time.Time,
 	dayDuration time.Duration,
 	seenMatchingNoncurrent int,
-) (string, bool) {
+) (string, time.Time, bool) {
 	bestClass := ""
 	bestDueAt := time.Time{}
 	found := false
@@ -232,7 +401,7 @@ func dueNoncurrentTransitionStorageClass(
 		}
 	}
 
-	return bestClass, found
+	return bestClass, bestDueAt, found
 }
 
 func (b *Backend) shouldExpireCurrentVersion(
@@ -257,7 +426,12 @@ func (b *Backend) shouldExpireCurrentVersion(
 		if !lifecycleRuleMatchesObject(rule, key, current) {
 			continue
 		}
-		if lifecycleExpirationDue(rule.Expiration, current.LastModified, now, dayDuration) {
+		expiryBaseTime := current.LastModified
+		if current.CloudTransitionedAt != nil &&
+			strings.EqualFold(current.StorageClass, cloudStorageClass()) {
+			expiryBaseTime = *current.CloudTransitionedAt
+		}
+		if lifecycleExpirationDue(rule.Expiration, expiryBaseTime, now, dayDuration) {
 			return true
 		}
 	}
