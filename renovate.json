@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "github>aquaproj/aqua-renovate-config#2.9.0",
+    "github>aquaproj/aqua-renovate-config#2.10.0",
     "group:allNonMajor", // minorとpatchアップデートを1つのPRにまとめる
     "config:best-practices",
     ":disableRateLimiting", // 1時間単位のPR数と同時に存在可能なPR数を無制限にする
