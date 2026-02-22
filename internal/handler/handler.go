@@ -106,6 +106,14 @@ var (
 	) (*backend.Object, error) {
 		return h.backend.GetObjectVersion(bucketName, key, versionID)
 	}
+	putObjectForLoggingFn = func(
+		h *Handler,
+		bucketName, key string,
+		data []byte,
+		opts backend.PutObjectOptions,
+	) (*backend.Object, error) {
+		return h.backend.PutObject(bucketName, key, data, opts)
+	}
 )
 
 // New creates a new Handler with the given backend.
@@ -798,7 +806,8 @@ func (h *Handler) flushServerAccessLogBatch(
 		body.WriteString(entry.Line)
 		body.WriteByte('\n')
 	}
-	_, err := h.backend.PutObject(
+	_, err := putObjectForLoggingFn(
+		h,
 		batch.TargetBucket,
 		logKey,
 		[]byte(body.String()),

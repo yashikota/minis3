@@ -436,6 +436,25 @@ func TestRunReturnsStartError(t *testing.T) {
 	}
 }
 
+func TestRunAddrReturnsStartError(t *testing.T) {
+	origListenFn := listenFn
+	listenFn = func(_, _ string) (net.Listener, error) {
+		return nil, errors.New("run-addr-boom")
+	}
+	defer func() { listenFn = origListenFn }()
+
+	s, err := RunAddr("127.0.0.1:9191")
+	if err == nil {
+		t.Fatal("expected RunAddr() to fail")
+	}
+	if s != nil {
+		t.Fatalf("RunAddr() server = %#v, want nil", s)
+	}
+	if !strings.Contains(err.Error(), "failed to listen: run-addr-boom") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestMinis3StartServeErrorCallsFatal(t *testing.T) {
 	origListenFn := listenFn
 	origFatalFn := fatalFn

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -852,6 +853,47 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		}, time.Now().UTC())
 		if err == nil {
 			t.Fatal("expected access-denied error for disallowed target policy")
+		}
+
+		mustCreateBucket(t, b, "src-put-fail")
+		b.SetBucketOwner("src-put-fail", "minis3-access-key")
+		mustCreateBucket(t, b, "dst-put-fail")
+		b.SetBucketOwner("dst-put-fail", "minis3-access-key")
+		owner := backend.OwnerForAccessKey("minis3-access-key")
+		if owner == nil {
+			t.Fatal("owner for minis3-access-key must exist")
+		}
+		mustPutBucketPolicy(
+			t,
+			b,
+			"dst-put-fail",
+			allowLoggingPolicy("src-put-fail", "dst-put-fail", "logs/", owner.ID),
+		)
+
+		wantErr := errors.New("put object failed")
+		origPutObjectForLogging := putObjectForLoggingFn
+		putObjectForLoggingFn = func(
+			_ *Handler,
+			_, _ string,
+			_ []byte,
+			_ backend.PutObjectOptions,
+		) (*backend.Object, error) {
+			return nil, wantErr
+		}
+		t.Cleanup(func() {
+			putObjectForLoggingFn = origPutObjectForLogging
+		})
+
+		_, err = h.flushServerAccessLogBatch(&serverAccessLogBatch{
+			TargetBucket: "dst-put-fail",
+			TargetPrefix: "logs/",
+			Entries: []serverAccessLogEntry{{
+				SourceBucket: "src-put-fail",
+				Line:         "line",
+			}},
+		}, time.Now().UTC())
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("expected put failure error, got %v", err)
 		}
 	})
 
