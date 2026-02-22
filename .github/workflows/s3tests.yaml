@@ -81,6 +81,34 @@ jobs:
             echo "has_results=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Write Job Summary
+        run: |
+          echo "## S3 Tests Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Workflow: \`${{ github.workflow }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Run ID: \`${{ github.run_id }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ steps.summary.outputs.has_results }}" != "true" ]; then
+            echo ":warning: No parsable s3-test results were found in \`integration/s3-test/s3-test.log\`." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          passed='${{ steps.summary.outputs.passed }}'
+          failed='${{ steps.summary.outputs.failed }}'
+          skipped='${{ steps.summary.outputs.skipped }}'
+          errors='${{ steps.summary.outputs.errors }}'
+          pass_rate='${{ steps.summary.outputs.pass_rate }}'
+
+          echo "| Metric | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|------:|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Passed | ${passed} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Failed | ${failed} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Skipped | ${skipped} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Errors | ${errors} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Pass Rate** | **${pass_rate}%** |" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Comment on PR
         if: github.event_name == 'pull_request' && steps.summary.outputs.has_results == 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
