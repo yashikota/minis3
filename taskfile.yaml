@@ -13,7 +13,7 @@ tasks:
       - golangci-lint fmt
 
   test:
-    desc: "Test"
+    desc: "All Tests"
     cmds:
       - task: unit-test
       - task: sdk-test
@@ -41,6 +41,65 @@ tasks:
     desc: "Fetch s3-tests submodule (required for s3-test)"
     cmds:
       - git submodule update --init --recursive
+
+  s3-test-submodule-update:
+    desc: "Check and optionally update s3-tests submodule to latest remote"
+    silent: true
+    cmds:
+      - |
+        submodule_dir="integration/s3-test/s3-tests"
+        git submodule update --init --recursive
+
+        if ! git -C "$submodule_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+          echo "Error: s3-tests submodule not found at $submodule_dir"
+          exit 1
+        fi
+
+        git -C "$submodule_dir" fetch --quiet
+        default_branch=$(git -C "$submodule_dir" symbolic-ref -q --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
+        if [ -z "$default_branch" ]; then
+          if git -C "$submodule_dir" show-ref --verify --quiet refs/remotes/origin/main; then
+            default_branch="main"
+          elif git -C "$submodule_dir" show-ref --verify --quiet refs/remotes/origin/master; then
+            default_branch="master"
+          fi
+        fi
+        if [ -z "$default_branch" ]; then
+          echo "Error: Could not determine remote default branch."
+          exit 1
+        fi
+
+        remote_ref="origin/$default_branch"
+        local_rev=$(git -C "$submodule_dir" rev-parse HEAD)
+        remote_rev=$(git -C "$submodule_dir" rev-parse "$remote_ref")
+
+        echo "=== s3-tests submodule check ==="
+        if [ "$local_rev" = "$remote_rev" ]; then
+          echo "s3-tests submodule is up to date ($local_rev)."
+          exit 0
+        fi
+
+        counts=$(git -C "$submodule_dir" rev-list --left-right --count HEAD..."$remote_ref")
+        behind=$(echo "$counts" | awk '{print $2}')
+        ahead=$(echo "$counts" | awk '{print $1}')
+
+        echo "s3-tests submodule has updates."
+        echo "Local:  $local_rev"
+        echo "Remote: $remote_rev ($remote_ref)"
+        echo "Ahead:  $ahead"
+        echo "Behind: $behind"
+
+        printf "Update submodule now? [y/N]: "
+        read -r answer
+        case "$answer" in
+          y|Y|yes|YES)
+            git submodule update --init --recursive --remote "$submodule_dir"
+            echo "s3-tests submodule updated."
+            ;;
+          *)
+            echo "Canceled."
+            ;;
+        esac
 
   s3-test-summary:
     desc: "Show s3-test results summary"
