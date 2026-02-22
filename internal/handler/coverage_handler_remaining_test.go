@@ -720,6 +720,35 @@ func TestCheckAccessWithContextRestrictPublicBucketsBranch(t *testing.T) {
 	}
 }
 
+func TestBucketPolicyOwnerDenyExemptionBranches(t *testing.T) {
+	h, b := newTestHandler(t)
+	mustCreateBucket(t, b, "deny-owner-exempt")
+	b.SetBucketOwner("deny-owner-exempt", "minis3-access-key")
+
+	denyPolicy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*","Action":["s3:GetBucketPolicy","s3:PutBucketPolicy","s3:DeleteBucketPolicy"],"Resource":"arn:aws:s3:::deny-owner-exempt"}]}`
+	if err := b.PutBucketPolicy("deny-owner-exempt", denyPolicy, false); err != nil {
+		t.Fatalf("PutBucketPolicy failed: %v", err)
+	}
+
+	ownerReq := httptest.NewRequest(http.MethodGet, "http://example.test/deny-owner-exempt?policy", nil)
+	ownerReq.Header.Set("Authorization", authHeader("minis3-access-key"))
+
+	if !h.checkAccess(ownerReq, "deny-owner-exempt", "s3:GetBucketPolicy", "") {
+		t.Fatal("checkAccess should allow bucket owner for policy management deny exemption")
+	}
+	if !h.checkAccessWithContext(
+		ownerReq,
+		"deny-owner-exempt",
+		"s3:GetBucketPolicy",
+		"",
+		backend.PolicyEvalContext{},
+	) {
+		t.Fatal(
+			"checkAccessWithContext should allow bucket owner for policy management deny exemption",
+		)
+	}
+}
+
 func TestACLFromGrantHeadersOwnerNilBranch(t *testing.T) {
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 	if owner == nil {

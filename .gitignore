@@ -4,3 +4,4 @@ s3-test
 !s3-test/
 *.exe
 *.log
+coverage.out
