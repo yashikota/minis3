@@ -7,39 +7,11 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 
 ## Usage
 
+### Use as a Go package
+
 ```bash
 go get github.com/yashikota/minis3
 ```
-
-### Run as a standalone S3-compatible server
-
-Install the binary:  
-
-```bash
-go install github.com/yashikota/minis3/cmd/minis3@latest
-```
-
-Or download from [Releases](https://github.com/yashikota/minis3/releases/latest).  
-
-Start the server (default port is `9191`):  
-
-```bash
-minis3
-```
-
-Use a custom port:  
-
-```bash
-minis3 --port 9000
-```
-
-Health check:  
-
-```bash
-curl -i http://127.0.0.1:9191/health
-```
-
-### Use as a Go package
 
 ```go
 package main
@@ -126,6 +98,34 @@ func main() {
 	fmt.Printf("Got object content body: %s\n", string(bodyBytes))
 	fmt.Printf("Got object content type: %s\n", *resp.ContentType)
 }
+```
+
+### Run as a standalone S3-compatible server
+
+Install the binary:  
+
+```bash
+go install github.com/yashikota/minis3/cmd/minis3@latest
+```
+
+Or download from [Releases](https://github.com/yashikota/minis3/releases/latest).  
+
+Start the server (default port is `9191`):  
+
+```bash
+minis3
+```
+
+Use a custom port:  
+
+```bash
+minis3 --port 9000
+```
+
+Health check:  
+
+```bash
+curl -i http://127.0.0.1:9191/health
 ```
 
 ## 📋 Supported Operations

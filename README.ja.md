@@ -8,39 +8,11 @@ Minis3 は、S3 を使うコードを素早くテストするためのインメ�
 
 ## 使い方
 
+### Go パッケージとして使う
+
 ```bash
 go get github.com/yashikota/minis3
 ```
-
-### スタンドアロンの S3 互換サーバーとして使う
-
-バイナリをインストール  
-
-```bash
-go install github.com/yashikota/minis3/cmd/minis3@latest
-```
-
-もしくは [Releases](https://github.com/yashikota/minis3/releases/latest) からダウンロード  
-
-サーバー起動（デフォルトポートは `9191`）  
-
-```bash
-minis3
-```
-
-ポートを指定する場合  
-
-```bash
-minis3 --port 9000
-```
-
-ヘルスチェック  
-
-```bash
-curl -i http://127.0.0.1:9191/health
-```
-
-### Go パッケージとして使う
 
 ```go
 package main
@@ -127,6 +99,34 @@ func main() {
 	fmt.Printf("Got object content body: %s\n", string(bodyBytes))
 	fmt.Printf("Got object content type: %s\n", *resp.ContentType)
 }
+```
+
+### スタンドアロンの S3 互換サーバーとして使う
+
+バイナリをインストール  
+
+```bash
+go install github.com/yashikota/minis3/cmd/minis3@latest
+```
+
+もしくは [Releases](https://github.com/yashikota/minis3/releases/latest) からダウンロード  
+
+サーバー起動（デフォルトポートは `9191`）  
+
+```bash
+minis3
+```
+
+ポートを指定する場合  
+
+```bash
+minis3 --port 9000
+```
+
+ヘルスチェック  
+
+```bash
+curl -i http://127.0.0.1:9191/health
 ```
 
 ## 📋 サポート済み操作
