@@ -6,6 +6,8 @@
 Minis3 は、S3 を使うコードを素早くテストするためのインメモリ S3 サーバーです。  
 実際の TCP インターフェースで動作するため、`net/http/httptest` の S3 版のように利用できます。
 
+<img width="962" height="873" alt="minis3" src="https://github.com/user-attachments/assets/cc204216-f665-4f08-b6e4-bc56cfb0bd3b" />
+
 ## 使い方
 
 ### Go パッケージとして使う
