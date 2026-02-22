@@ -345,6 +345,31 @@ func TestMinis3RunAndAccessors(t *testing.T) {
 	_ = resp.Body.Close()
 }
 
+func TestMinis3RunAddrAndStartAddr(t *testing.T) {
+	s, err := RunAddr("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("RunAddr failed: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	addr := s.Addr()
+	if addr == "" {
+		t.Fatal("expected non-empty addr")
+	}
+	if !strings.HasPrefix(addr, "127.0.0.1:") {
+		t.Fatalf("Addr()=%q, want 127.0.0.1:*", addr)
+	}
+
+	resp, err := http.Get("http://" + s.Host() + "/")
+	if err != nil {
+		t.Fatalf("GET / failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	_ = resp.Body.Close()
+}
+
 func TestMinis3CloseAndAddrBeforeStart(t *testing.T) {
 	s := New()
 	if got := s.Addr(); got != "" {
@@ -371,6 +396,23 @@ func TestMinis3StartListenError(t *testing.T) {
 		t.Fatal("expected Start() to fail")
 	}
 	if !strings.Contains(err.Error(), "failed to listen: boom") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMinis3StartAddrListenError(t *testing.T) {
+	origListenFn := listenFn
+	listenFn = func(_, _ string) (net.Listener, error) {
+		return nil, errors.New("boom-addr")
+	}
+	defer func() { listenFn = origListenFn }()
+
+	s := New()
+	err := s.StartAddr("127.0.0.1:9191")
+	if err == nil {
+		t.Fatal("expected StartAddr() to fail")
+	}
+	if !strings.Contains(err.Error(), "failed to listen: boom-addr") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

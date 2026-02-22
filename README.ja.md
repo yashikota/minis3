@@ -12,6 +12,36 @@ Minis3 は、S3 を使うコードを素早くテストするためのインメ�
 go get github.com/yashikota/minis3
 ```
 
+### スタンドアロンの S3 互換サーバーとして使う
+
+バイナリをインストール  
+
+```bash
+go install github.com/yashikota/minis3/cmd/minis3@latest
+```
+
+もしくは [Releases](https://github.com/yashikota/minis3/releases/latest) からダウンロード  
+
+サーバー起動（デフォルトポートは `9191`）  
+
+```bash
+minis3
+```
+
+ポートを指定する場合  
+
+```bash
+minis3 --port 9000
+```
+
+ヘルスチェック  
+
+```bash
+curl -i http://127.0.0.1:9191/health
+```
+
+### Go パッケージとして使う
+
 ```go
 package main
 
@@ -42,8 +72,8 @@ func main() {
 		config.WithCredentialsProvider(
 			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
 				return aws.Credentials{
-					AccessKeyID:     "minis3",
-					SecretAccessKey: "minis3",
+					AccessKeyID:     "test",
+					SecretAccessKey: "test",
 					SessionToken:    "",
 				}, nil
 			}),

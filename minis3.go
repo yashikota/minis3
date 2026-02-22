@@ -44,10 +44,26 @@ func Run() (*Minis3, error) {
 
 // Start starts the Minis3 server on a random port.
 func (m *Minis3) Start() error {
+	return m.StartAddr("127.0.0.1:0")
+}
+
+// RunAddr starts the Minis3 server on the provided address.
+// It returns the server instance or an error if it failed to start.
+// Caller is responsible for calling Close().
+func RunAddr(addr string) (*Minis3, error) {
+	s := New()
+	if err := s.StartAddr(addr); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// StartAddr starts the Minis3 server on the provided address.
+func (m *Minis3) StartAddr(addr string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	l, err := listenFn("tcp", "127.0.0.1:0")
+	l, err := listenFn("tcp", addr)
 	if err != nil {
 		return errors.New("failed to listen: " + err.Error())
 	}

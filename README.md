@@ -11,6 +11,36 @@ Sometimes you want to test code which uses S3, without making it a full-blown in
 go get github.com/yashikota/minis3
 ```
 
+### Run as a standalone S3-compatible server
+
+Install the binary:  
+
+```bash
+go install github.com/yashikota/minis3/cmd/minis3@latest
+```
+
+Or download from [Releases](https://github.com/yashikota/minis3/releases/latest).  
+
+Start the server (default port is `9191`):  
+
+```bash
+minis3
+```
+
+Use a custom port:  
+
+```bash
+minis3 --port 9000
+```
+
+Health check:  
+
+```bash
+curl -i http://127.0.0.1:9191/health
+```
+
+### Use as a Go package
+
 ```go
 package main
 
@@ -41,8 +71,8 @@ func main() {
 		config.WithCredentialsProvider(
 			aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
 				return aws.Credentials{
-					AccessKeyID:     "minis3",
-					SecretAccessKey: "minis3",
+					AccessKeyID:     "test",
+					SecretAccessKey: "test",
 					SessionToken:    "",
 				}, nil
 			}),

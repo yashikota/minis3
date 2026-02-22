@@ -190,6 +190,25 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Health endpoint (no S3 auth required)
+	if r.URL.Path == "/health" {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			backend.WriteError(
+				w,
+				http.StatusMethodNotAllowed,
+				"MethodNotAllowed",
+				"The specified method is not allowed against this resource.",
+			)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte("ok\n"))
+		}
+		return
+	}
+
 	// Verify presigned URL if applicable
 	if isPresignedURL(r) {
 		if err := verifyPresignedURLFn(r); err != nil {
