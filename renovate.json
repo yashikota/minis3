@@ -18,7 +18,9 @@
     },
     {
       "matchPackageNames": ["aquaproj/aqua-registry"],
-      "extends": ["schedule:earlyMondays"]
+      "extends": ["schedule:earlyMondays"],
+      "labels": ["aqua-registry"],
+      "automerge": true
     }
   ]
 }
