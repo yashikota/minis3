@@ -9,18 +9,17 @@
   "configMigration": true,
   "minimumReleaseAge": "7 days",
   "dependencyDashboard": false,
+  "automerge": true,
   "packageRules": [
     {
       "matchDatasources": ["docker"],
       "labels": ["docker-update"],
-      "matchUpdateTypes": ["pin", "digest"],
-      "automerge": true
+      "matchUpdateTypes": ["pin", "digest"]
     },
     {
       "matchPackageNames": ["aquaproj/aqua-registry"],
       "extends": ["schedule:earlyMondays"],
-      "labels": ["aqua-registry"],
-      "automerge": true
+      "labels": ["aqua-registry"]
     }
   ]
 }
