@@ -12,6 +12,6 @@ registries:
   ref: v4.479.0 # renovate: depName=aquaproj/aqua-registry
 packages:
 - name: suzuki-shunsuke/pinact@v3.9.0
-- name: golangci/golangci-lint@v2.11.2
+- name: golangci/golangci-lint@v2.11.3
 - name: kyoh86/richgo@v0.3.12
 - name: go-task/task@v3.49.1
