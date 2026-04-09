@@ -1,6 +1,9 @@
 name: Check
+
 on:
   push:
+    branches:
+      - main
     paths:
       - "**.go"
       - "go.mod"
@@ -8,6 +11,7 @@ on:
       - ".golangci.yaml"
       - "Taskfile.yaml"
       - ".github/workflows/check.yaml"
+  pull_request:
 
 jobs:
   lint:
