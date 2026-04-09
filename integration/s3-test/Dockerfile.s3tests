@@ -1,4 +1,4 @@
-FROM python:3.14-slim@sha256:486b8092bfb12997e10d4920897213a06563449c951c5506c2a2cfaf591c599f
+FROM python:3.14-slim@sha256:71b358f8bff55413f4a6b95af80acb07ab97b5636cd3b869f35c3680d31d1650
 
 WORKDIR /s3-tests
 COPY s3-tests/requirements.txt .
