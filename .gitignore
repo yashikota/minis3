@@ -5,4 +5,4 @@ s3-test
 *.exe
 *.log
 coverage.out
-fuzzrunner
+/fuzzrunner
