@@ -36,14 +36,10 @@ func FuzzSetObjectLockHeaders(f *testing.F) {
 	f.Add("", "", "")
 	f.Add("GOVERNANCE", "", "ON")
 
-	f.Fuzz(func(t *testing.T, retentionMode, retainUntilDate, legalHold string) {
+	f.Fuzz(func(t *testing.T, retentionMode, _ string, legalHold string) {
 		obj := &backend.Object{
 			RetentionMode:   retentionMode,
 			LegalHoldStatus: legalHold,
-		}
-		if retainUntilDate != "" {
-			// just set as string - the function reads RetainUntilDate as *time.Time
-			// so we skip setting it here for invalid dates
 		}
 		recorder := httptest.NewRecorder()
 		setObjectLockHeaders(recorder, obj)

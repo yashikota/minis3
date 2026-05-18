@@ -220,7 +220,7 @@ func TestObjectACLAndTaggingHandlers(t *testing.T) {
 		var sb strings.Builder
 		sb.WriteString(`<Tagging><TagSet>`)
 		for i := 0; i < 11; i++ {
-			sb.WriteString(fmt.Sprintf(`<Tag><Key>k%d</Key><Value>v</Value></Tag>`, i))
+			fmt.Fprintf(&sb, `<Tag><Key>k%d</Key><Value>v</Value></Tag>`, i)
 		}
 		sb.WriteString(`</TagSet></Tagging>`)
 		w := doRequest(
