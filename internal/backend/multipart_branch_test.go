@@ -9,7 +9,11 @@ import (
 func TestMultipartCreateAndUploadPartBranches(t *testing.T) {
 	b := New()
 
-	if _, err := b.CreateMultipartUpload("missing", "key", CreateMultipartUploadOptions{}); !errors.Is(
+	if _, err := b.CreateMultipartUpload(
+		"missing",
+		"key",
+		CreateMultipartUploadOptions{},
+	); !errors.Is(
 		err,
 		ErrBucketNotFound,
 	) {
@@ -29,25 +33,49 @@ func TestMultipartCreateAndUploadPartBranches(t *testing.T) {
 		t.Fatalf("CreateMultipartUpload failed: %v", err)
 	}
 
-	if _, err := b.UploadPart("multipart-branch-bucket", "key", "missing-upload", 1, []byte("x")); !errors.Is(
+	if _, err := b.UploadPart(
+		"multipart-branch-bucket",
+		"key",
+		"missing-upload",
+		1,
+		[]byte("x"),
+	); !errors.Is(
 		err,
 		ErrNoSuchUpload,
 	) {
 		t.Fatalf("expected ErrNoSuchUpload, got %v", err)
 	}
-	if _, err := b.UploadPart("multipart-branch-bucket", "wrong-key", upload.UploadId, 1, []byte("x")); !errors.Is(
+	if _, err := b.UploadPart(
+		"multipart-branch-bucket",
+		"wrong-key",
+		upload.UploadId,
+		1,
+		[]byte("x"),
+	); !errors.Is(
 		err,
 		ErrNoSuchUpload,
 	) {
 		t.Fatalf("expected ErrNoSuchUpload for key mismatch, got %v", err)
 	}
-	if _, err := b.UploadPart("multipart-branch-bucket", "key", upload.UploadId, 0, []byte("x")); !errors.Is(
+	if _, err := b.UploadPart(
+		"multipart-branch-bucket",
+		"key",
+		upload.UploadId,
+		0,
+		[]byte("x"),
+	); !errors.Is(
 		err,
 		ErrInvalidRequest,
 	) {
 		t.Fatalf("expected ErrInvalidRequest for part number 0, got %v", err)
 	}
-	if _, err := b.UploadPart("multipart-branch-bucket", "key", upload.UploadId, 10001, []byte("x")); !errors.Is(
+	if _, err := b.UploadPart(
+		"multipart-branch-bucket",
+		"key",
+		upload.UploadId,
+		10001,
+		[]byte("x"),
+	); !errors.Is(
 		err,
 		ErrInvalidRequest,
 	) {
@@ -89,13 +117,23 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 		t.Fatalf("UploadPart 2 failed: %v", err)
 	}
 
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", "missing-upload", []CompletePart{}); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"obj",
+		"missing-upload",
+		[]CompletePart{},
+	); !errors.Is(
 		err,
 		ErrNoSuchUpload,
 	) {
 		t.Fatalf("expected ErrNoSuchUpload, got %v", err)
 	}
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "wrong", upload.UploadId, []CompletePart{}); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"wrong",
+		upload.UploadId,
+		[]CompletePart{},
+	); !errors.Is(
 		err,
 		ErrNoSuchUpload,
 	) {
@@ -111,7 +149,12 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 		t.Fatalf("CreateMultipartUpload failed: %v", err)
 	}
 	delete(b.buckets, "complete-branch-bucket")
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj-bucket-gone", uploadBucketGone.UploadId, []CompletePart{{PartNumber: 1}}); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"obj-bucket-gone",
+		uploadBucketGone.UploadId,
+		[]CompletePart{{PartNumber: 1}},
+	); !errors.Is(
 		err,
 		ErrBucketNotFound,
 	) {
@@ -145,31 +188,51 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 		make([]byte, 5*1024*1024),
 	)
 
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", upload.UploadId, nil); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"obj",
+		upload.UploadId,
+		nil,
+	); !errors.Is(
 		err,
 		ErrInvalidPart,
 	) {
 		t.Fatalf("expected ErrInvalidPart for empty parts, got %v", err)
 	}
 
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", upload.UploadId, []CompletePart{
-		{PartNumber: 2, ETag: p2.ETag},
-		{PartNumber: 1, ETag: p1.ETag},
-	}); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"obj",
+		upload.UploadId,
+		[]CompletePart{
+			{PartNumber: 2, ETag: p2.ETag},
+			{PartNumber: 1, ETag: p1.ETag},
+		},
+	); !errors.Is(
 		err,
 		ErrInvalidPartOrder,
 	) {
 		t.Fatalf("expected ErrInvalidPartOrder, got %v", err)
 	}
 
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", upload.UploadId, []CompletePart{{PartNumber: 3, ETag: "\"missing\""}}); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"obj",
+		upload.UploadId,
+		[]CompletePart{{PartNumber: 3, ETag: "\"missing\""}},
+	); !errors.Is(
 		err,
 		ErrInvalidPart,
 	) {
 		t.Fatalf("expected ErrInvalidPart for missing part, got %v", err)
 	}
 
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", upload.UploadId, []CompletePart{{PartNumber: 1, ETag: "\"wrong\""}}); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"obj",
+		upload.UploadId,
+		[]CompletePart{{PartNumber: 1, ETag: "\"wrong\""}},
+	); !errors.Is(
 		err,
 		ErrInvalidPart,
 	) {
@@ -199,10 +262,15 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 		2,
 		[]byte("last"),
 	)
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "small", smallUpload.UploadId, []CompletePart{
-		{PartNumber: 1, ETag: s1.ETag},
-		{PartNumber: 2, ETag: s2.ETag},
-	}); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"small",
+		smallUpload.UploadId,
+		[]CompletePart{
+			{PartNumber: 1, ETag: s1.ETag},
+			{PartNumber: 2, ETag: s2.ETag},
+		},
+	); !errors.Is(
 		err,
 		ErrEntityTooSmall,
 	) {
@@ -226,12 +294,22 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 	)
 	invalid := b.uploads[invalidETagUpload.UploadId]
 	invalid.Parts[1].ETag = "\"not-hex\""
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "invalid-etag", invalidETagUpload.UploadId, []CompletePart{{PartNumber: 1, ETag: "\"not-hex\""}}); err == nil ||
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"invalid-etag",
+		invalidETagUpload.UploadId,
+		[]CompletePart{{PartNumber: 1, ETag: "\"not-hex\""}},
+	); err == nil ||
 		!strings.Contains(err.Error(), "invalid ETag format") {
 		t.Fatalf("expected invalid ETag format error, got %v", err)
 	}
 
-	if _, err := b.CompleteMultipartUpload("complete-branch-bucket", "obj", upload.UploadId, []CompletePart{{PartNumber: 1, ETag: p1.ETag}}); err != nil {
+	if _, err := b.CompleteMultipartUpload(
+		"complete-branch-bucket",
+		"obj",
+		upload.UploadId,
+		[]CompletePart{{PartNumber: 1, ETag: p1.ETag}},
+	); err != nil {
 		t.Fatalf("expected valid completion for single part, got %v", err)
 	}
 }
@@ -296,9 +374,14 @@ func TestCompleteMultipartUploadDefaultsAndLocks(t *testing.T) {
 	}
 
 	if err := b.PutBucketEncryption("complete-defaults", &ServerSideEncryptionConfiguration{
-		Rules: []ServerSideEncryptionRule{{
-			ApplyServerSideEncryptionByDefault: &ServerSideEncryptionByDefault{SSEAlgorithm: SSEAlgorithmAWSKMS, KMSMasterKeyID: "kms-default"},
-		}},
+		Rules: []ServerSideEncryptionRule{
+			{
+				ApplyServerSideEncryptionByDefault: &ServerSideEncryptionByDefault{
+					SSEAlgorithm:   SSEAlgorithmAWSKMS,
+					KMSMasterKeyID: "kms-default",
+				},
+			},
+		},
 	}); err != nil {
 		t.Fatalf("PutBucketEncryption failed: %v", err)
 	}
@@ -335,7 +418,11 @@ func TestCompleteMultipartUploadDefaultsAndLocks(t *testing.T) {
 		)
 	}
 
-	if err := b.SetBucketVersioning("complete-defaults", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"complete-defaults",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	uploadV, _ := b.CreateMultipartUpload(
@@ -370,7 +457,12 @@ func TestCompleteMultipartUploadDefaultsAndLocks(t *testing.T) {
 		1,
 		[]byte("x"),
 	)
-	if _, err := b.CompleteMultipartUpload("complete-defaults", "obj-lock", uploadLock.UploadId, []CompletePart{{PartNumber: 1, ETag: partLock.ETag}}); !errors.Is(
+	if _, err := b.CompleteMultipartUpload(
+		"complete-defaults",
+		"obj-lock",
+		uploadLock.UploadId,
+		[]CompletePart{{PartNumber: 1, ETag: partLock.ETag}},
+	); !errors.Is(
 		err,
 		ErrInvalidRequest,
 	) {
@@ -450,7 +542,12 @@ func TestMultipartListingAndCopyPartBranches(t *testing.T) {
 	}
 
 	// CopyPart branches
-	if _, err := b.PutObject("src-copypart-branches", "src", []byte("0123456789"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"src-copypart-branches",
+		"src",
+		[]byte("0123456789"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 	upload, _ := b.CreateMultipartUpload(
@@ -472,48 +569,122 @@ func TestMultipartListingAndCopyPartBranches(t *testing.T) {
 		t.Fatalf("expected CopyPart success with explicit source version id, got %v", err)
 	}
 
-	if _, err := b.CopyPart("src-copypart-branches", "src", "", "list-multipart-branches", "wrong-dst", upload.UploadId, 1, -1, -1); !errors.Is(
+	if _, err := b.CopyPart(
+		"src-copypart-branches",
+		"src",
+		"",
+		"list-multipart-branches",
+		"wrong-dst",
+		upload.UploadId,
+		1,
+		-1,
+		-1,
+	); !errors.Is(
 		err,
 		ErrNoSuchUpload,
 	) {
 		t.Fatalf("expected ErrNoSuchUpload for dst mismatch, got %v", err)
 	}
-	if _, err := b.CopyPart("src-copypart-branches", "src", "missing-version", "list-multipart-branches", "dst", upload.UploadId, 1, -1, -1); !errors.Is(
+	if _, err := b.CopyPart(
+		"src-copypart-branches",
+		"src",
+		"missing-version",
+		"list-multipart-branches",
+		"dst",
+		upload.UploadId,
+		1,
+		-1,
+		-1,
+	); !errors.Is(
 		err,
 		ErrSourceObjectNotFound,
 	) {
 		t.Fatalf("expected ErrSourceObjectNotFound for missing src version, got %v", err)
 	}
-	if _, err := b.CopyPart("src-copypart-branches", "src", "", "list-multipart-branches", "dst", upload.UploadId, 1, 10, 10); !errors.Is(
+	if _, err := b.CopyPart(
+		"src-copypart-branches",
+		"src",
+		"",
+		"list-multipart-branches",
+		"dst",
+		upload.UploadId,
+		1,
+		10,
+		10,
+	); !errors.Is(
 		err,
 		ErrInvalidRange,
 	) {
 		t.Fatalf("expected ErrInvalidRange for rangeStart>=size, got %v", err)
 	}
-	if _, err := b.CopyPart("src-copypart-branches", "src", "", "list-multipart-branches", "dst", upload.UploadId, 1, 0, 10); !errors.Is(
+	if _, err := b.CopyPart(
+		"src-copypart-branches",
+		"src",
+		"",
+		"list-multipart-branches",
+		"dst",
+		upload.UploadId,
+		1,
+		0,
+		10,
+	); !errors.Is(
 		err,
 		ErrInvalidRange,
 	) {
 		t.Fatalf("expected ErrInvalidRange for rangeEnd>=size, got %v", err)
 	}
-	if _, err := b.CopyPart("src-copypart-branches", "src", "", "list-multipart-branches", "dst", upload.UploadId, 1, 5, 3); !errors.Is(
+	if _, err := b.CopyPart(
+		"src-copypart-branches",
+		"src",
+		"",
+		"list-multipart-branches",
+		"dst",
+		upload.UploadId,
+		1,
+		5,
+		3,
+	); !errors.Is(
 		err,
 		ErrInvalidRange,
 	) {
 		t.Fatalf("expected ErrInvalidRange for start>end, got %v", err)
 	}
-	if _, err := b.CopyPart("src-copypart-branches", "src", "", "list-multipart-branches", "dst", upload.UploadId, 1, 3, -1); err != nil {
+	if _, err := b.CopyPart(
+		"src-copypart-branches",
+		"src",
+		"",
+		"list-multipart-branches",
+		"dst",
+		upload.UploadId,
+		1,
+		3,
+		-1,
+	); err != nil {
 		t.Fatalf("expected open-ended copy part success, got %v", err)
 	}
 
 	// source latest non-delete marker nil branch
-	if err := b.SetBucketVersioning("src-copypart-branches", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"src-copypart-branches",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	if _, err := b.DeleteObject("src-copypart-branches", "only-delete-marker", false); err != nil {
 		t.Fatalf("DeleteObject failed: %v", err)
 	}
-	if _, err := b.CopyPart("src-copypart-branches", "only-delete-marker", "", "list-multipart-branches", "dst", upload.UploadId, 2, -1, -1); !errors.Is(
+	if _, err := b.CopyPart(
+		"src-copypart-branches",
+		"only-delete-marker",
+		"",
+		"list-multipart-branches",
+		"dst",
+		upload.UploadId,
+		2,
+		-1,
+		-1,
+	); !errors.Is(
 		err,
 		ErrSourceObjectNotFound,
 	) {

@@ -6,19 +6,48 @@ import (
 )
 
 func FuzzCalculatePresignedSignatureV4(f *testing.F) {
-	f.Add("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "20130524", "us-east-1", "s3", "host", "GET", "/bucket/key", "X-Amz-Date=20130524T000000Z&X-Amz-Credential=AKID/20130524/us-east-1/s3/aws4_request", "localhost")
-	f.Add("secret", "20230101", "eu-west-1", "s3", "host;x-amz-content-sha256", "PUT", "/bucket/obj", "X-Amz-Date=20230101T120000Z", "s3.eu-west-1.amazonaws.com")
+	f.Add(
+		"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		"20130524",
+		"us-east-1",
+		"s3",
+		"host",
+		"GET",
+		"/bucket/key",
+		"X-Amz-Date=20130524T000000Z&X-Amz-Credential=AKID/20130524/us-east-1/s3/aws4_request",
+		"localhost",
+	)
+	f.Add(
+		"secret",
+		"20230101",
+		"eu-west-1",
+		"s3",
+		"host;x-amz-content-sha256",
+		"PUT",
+		"/bucket/obj",
+		"X-Amz-Date=20230101T120000Z",
+		"s3.eu-west-1.amazonaws.com",
+	)
 	f.Add("", "", "", "", "", "GET", "/", "", "localhost")
 	f.Add("key", "date", "region", "service", "host", "POST", "/bucket", "", "")
 
-	f.Fuzz(func(t *testing.T, secretKey, dateStamp, region, service, signedHeaders, method, path, query, host string) {
-		req, err := http.NewRequest(method, path+"?"+query, nil)
-		if err != nil {
-			return
-		}
-		req.Host = host
-		_ = calculatePresignedSignatureV4(req, secretKey, dateStamp, region, service, signedHeaders)
-	})
+	f.Fuzz(
+		func(t *testing.T, secretKey, dateStamp, region, service, signedHeaders, method, path, query, host string) {
+			req, err := http.NewRequest(method, path+"?"+query, nil)
+			if err != nil {
+				return
+			}
+			req.Host = host
+			_ = calculatePresignedSignatureV4(
+				req,
+				secretKey,
+				dateStamp,
+				region,
+				service,
+				signedHeaders,
+			)
+		},
+	)
 }
 
 func FuzzVerifyAuthorizationHeaderV2(f *testing.F) {

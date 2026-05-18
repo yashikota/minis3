@@ -11,10 +11,20 @@ func TestApplyLifecycleExpiresCurrentObjectByPrefix(t *testing.T) {
 	if err := b.CreateBucket("lifecycle-apply"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if _, err := b.PutObject("lifecycle-apply", "expire1/foo", []byte("foo"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"lifecycle-apply",
+		"expire1/foo",
+		[]byte("foo"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject expire1/foo failed: %v", err)
 	}
-	if _, err := b.PutObject("lifecycle-apply", "keep2/bar", []byte("bar"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"lifecycle-apply",
+		"keep2/bar",
+		[]byte("bar"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject keep2/bar failed: %v", err)
 	}
 
@@ -106,7 +116,11 @@ func TestApplyLifecycleExpiresNoncurrentVersions(t *testing.T) {
 	if err := b.CreateBucket("lifecycle-noncurrent"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if err := b.SetBucketVersioning("lifecycle-noncurrent", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"lifecycle-noncurrent",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 
@@ -160,14 +174,28 @@ func TestApplyLifecycleDeletesExpiredObjectDeleteMarker(t *testing.T) {
 	if err := b.CreateBucket("lifecycle-delete-marker"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if err := b.SetBucketVersioning("lifecycle-delete-marker", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"lifecycle-delete-marker",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 
-	if _, err := b.PutObject("lifecycle-delete-marker", "test1/a", []byte("a"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"lifecycle-delete-marker",
+		"test1/a",
+		[]byte("a"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject test1/a failed: %v", err)
 	}
-	if _, err := b.PutObject("lifecycle-delete-marker", "test2/abc", []byte("b"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"lifecycle-delete-marker",
+		"test2/abc",
+		[]byte("b"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject test2/abc failed: %v", err)
 	}
 	if _, err := b.DeleteObject("lifecycle-delete-marker", "test1/a", false); err != nil {
@@ -218,11 +246,20 @@ func TestApplyLifecycleDeletesOrphanDeleteMarkerAfterExpirationDays(t *testing.T
 	if err := b.CreateBucket("lifecycle-delete-marker-days"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if err := b.SetBucketVersioning("lifecycle-delete-marker-days", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"lifecycle-delete-marker-days",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 
-	if _, err := b.PutObject("lifecycle-delete-marker-days", "test1/a", []byte("a"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"lifecycle-delete-marker-days",
+		"test1/a",
+		[]byte("a"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject test1/a failed: %v", err)
 	}
 	if _, err := b.DeleteObject("lifecycle-delete-marker-days", "test1/a", false); err != nil {
@@ -423,7 +460,10 @@ func TestApplyLifecycleTransitionsNoncurrentVersionsStorageClass(t *testing.T) {
 			},
 		},
 	}
-	if err := b.PutBucketLifecycleConfiguration("lifecycle-noncurrent-transition", cfg); err != nil {
+	if err := b.PutBucketLifecycleConfiguration(
+		"lifecycle-noncurrent-transition",
+		cfg,
+	); err != nil {
 		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
 	}
 

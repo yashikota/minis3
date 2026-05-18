@@ -10,7 +10,12 @@ func FuzzMatchesPrincipal(f *testing.F) {
 	f.Add("AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE", "s3:PutObject", "arn:aws:s3:::bucket")
 	f.Add("", "", "", "")
 	f.Add("anonymous", "", "s3:GetObject", "arn:aws:s3:::public-bucket/*")
-	f.Add("arn:aws:iam::123456789012:root", "AKIAI44QH8DHBEXAMPLE", "s3:DeleteObject", "arn:aws:s3:::bucket/path/to/key")
+	f.Add(
+		"arn:aws:iam::123456789012:root",
+		"AKIAI44QH8DHBEXAMPLE",
+		"s3:DeleteObject",
+		"arn:aws:s3:::bucket/path/to/key",
+	)
 	f.Add("*", "", "s3:ListBucket", "arn:aws:s3:::*")
 	f.Add("AKID123", "AKID456", "s3:GetObject", "arn:aws:s3:::bucket/key")
 	f.Add("arn:aws:iam::*:user/*", "AKID", "s3:*", "arn:aws:s3:::bucket")
@@ -95,7 +100,14 @@ func FuzzMatchesResource(f *testing.F) {
 }
 
 func FuzzEvaluateConditions(f *testing.F) {
-	f.Add("StringEquals", "s3:prefix", "photos/", "AKIAIOSFODNN7EXAMPLE", "s3:ListBucket", "arn:aws:s3:::bucket")
+	f.Add(
+		"StringEquals",
+		"s3:prefix",
+		"photos/",
+		"AKIAIOSFODNN7EXAMPLE",
+		"s3:ListBucket",
+		"arn:aws:s3:::bucket",
+	)
 	f.Add("StringLike", "s3:prefix", "photos/*", "AKID", "s3:GetObject", "arn:aws:s3:::bucket/key")
 	f.Add("IpAddress", "aws:SourceIp", "192.168.1.0/24", "", "", "")
 	f.Add("", "", "", "", "", "")

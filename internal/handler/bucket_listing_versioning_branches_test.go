@@ -92,7 +92,11 @@ func TestBucketVersioningAndListVersionsAdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("get bucket versioning includes MFA delete when enabled", func(t *testing.T) {
-		if err := b.SetBucketVersioning("versioning-branch", backend.VersioningEnabled, backend.MFADeleteEnabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"versioning-branch",
+			backend.VersioningEnabled,
+			backend.MFADeleteEnabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		w := doRequest(
@@ -106,7 +110,11 @@ func TestBucketVersioningAndListVersionsAdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("list object versions common prefixes with url encoding", func(t *testing.T) {
-		if err := b.SetBucketVersioning("versioning-branch", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"versioning-branch",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "versioning-branch", "vdir one/a.txt", "a")

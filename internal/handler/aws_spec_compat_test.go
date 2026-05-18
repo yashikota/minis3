@@ -180,9 +180,12 @@ func TestIgnorePublicACLsReturnsEffectiveBucketACL(t *testing.T) {
 		)
 	}
 
-	if err := b.PutPublicAccessBlock("ignore-public-bucket", &backend.PublicAccessBlockConfiguration{
-		IgnorePublicAcls: true,
-	}); err != nil {
+	if err := b.PutPublicAccessBlock(
+		"ignore-public-bucket",
+		&backend.PublicAccessBlockConfiguration{
+			IgnorePublicAcls: true,
+		},
+	); err != nil {
 		t.Fatalf("PutPublicAccessBlock failed: %v", err)
 	}
 
@@ -245,9 +248,12 @@ func TestIgnorePublicACLsReturnsEffectiveObjectACL(t *testing.T) {
 		)
 	}
 
-	if err := b.PutPublicAccessBlock("ignore-public-object", &backend.PublicAccessBlockConfiguration{
-		IgnorePublicAcls: true,
-	}); err != nil {
+	if err := b.PutPublicAccessBlock(
+		"ignore-public-object",
+		&backend.PublicAccessBlockConfiguration{
+			IgnorePublicAcls: true,
+		},
+	); err != nil {
 		t.Fatalf("PutPublicAccessBlock failed: %v", err)
 	}
 

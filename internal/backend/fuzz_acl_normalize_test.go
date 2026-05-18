@@ -3,7 +3,14 @@ package backend
 import "testing"
 
 func FuzzNormalizeACL(f *testing.F) {
-	f.Add("", "owner-id", "display-name", "Group", "http://acs.amazonaws.com/groups/global/AllUsers", "READ")
+	f.Add(
+		"",
+		"owner-id",
+		"display-name",
+		"Group",
+		"http://acs.amazonaws.com/groups/global/AllUsers",
+		"READ",
+	)
 	f.Add("CanonicalUser", "user-id", "user-name", "CanonicalUser", "user-id-2", "FULL_CONTROL")
 	f.Add("", "", "", "", "", "")
 	f.Add("Group", "", "", "CanonicalUser", "id", "WRITE")

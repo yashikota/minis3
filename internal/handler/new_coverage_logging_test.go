@@ -344,7 +344,11 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 		requireS3ErrorCode(t, wMissingTarget, "NoSuchKey")
 
 		// No policy on target -> AccessDenied from bucketLoggingTargetAllowed.
-		if err := b.PutBucketPolicy("dst-log", `{"Version":"2012-10-17","Statement":[]}`, false); err != nil {
+		if err := b.PutBucketPolicy(
+			"dst-log",
+			`{"Version":"2012-10-17","Statement":[]}`,
+			false,
+		); err != nil {
 			t.Fatalf("PutBucketPolicy reset failed: %v", err)
 		}
 		wDeniedPolicy := doRequest(
@@ -504,15 +508,24 @@ func TestBucketLoggingHelperFunctions(t *testing.T) {
 	if got := qualifiedBucketObjectARN("bucket", "logs/"); got != "arn:aws:s3:::bucket/logs/" {
 		t.Fatalf("qualifiedBucketObjectARN(bucket,logs/) = %q", got)
 	}
-	if got := qualifiedBucketObjectARN("tenant:bucket", "logs/"); got != "arn:aws:s3::tenant:bucket/logs/" {
+	if got := qualifiedBucketObjectARN(
+		"tenant:bucket",
+		"logs/",
+	); got != "arn:aws:s3::tenant:bucket/logs/" {
 		t.Fatalf("qualifiedBucketObjectARN(tenant:bucket,logs/) = %q", got)
 	}
 
 	h, _ := newTestHandler(t)
-	if got := h.resolveLoggingTargetBucketName("tenant-access-key", "target"); got != "tenant:target" {
+	if got := h.resolveLoggingTargetBucketName(
+		"tenant-access-key",
+		"target",
+	); got != "tenant:target" {
 		t.Fatalf("resolveLoggingTargetBucketName tenant = %q, want tenant:target", got)
 	}
-	if got := h.resolveLoggingTargetBucketName("tenant-access-key", "other:target"); got != "other:target" {
+	if got := h.resolveLoggingTargetBucketName(
+		"tenant-access-key",
+		"other:target",
+	); got != "other:target" {
 		t.Fatalf("resolveLoggingTargetBucketName qualified = %q", got)
 	}
 	if got := h.resolveLoggingTargetBucketName("minis3-access-key", ":target"); got != "target" {
@@ -697,10 +710,16 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		if got := tenantFromAccessKey("missing"); got != "" {
 			t.Fatalf("tenantFromAccessKey unknown = %q, want empty", got)
 		}
-		if got := normalizeBucketNameForRequestAccessKey("bucket", "tenant-access-key"); got != "tenant:bucket" {
+		if got := normalizeBucketNameForRequestAccessKey(
+			"bucket",
+			"tenant-access-key",
+		); got != "tenant:bucket" {
 			t.Fatalf("normalizeBucketNameForRequestAccessKey = %q, want tenant:bucket", got)
 		}
-		if got := normalizeBucketNameForRequestAccessKey("tenant:bucket", "tenant-access-key"); got != "tenant:bucket" {
+		if got := normalizeBucketNameForRequestAccessKey(
+			"tenant:bucket",
+			"tenant-access-key",
+		); got != "tenant:bucket" {
 			t.Fatalf("normalize qualified bucket = %q", got)
 		}
 		if got := displayBucketName("tenant:bucket"); got != "bucket" {
@@ -820,7 +839,10 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		if _, err := h.flushServerAccessLogBatch(nil, time.Now().UTC()); err != nil {
 			t.Fatalf("flush nil batch failed: %v", err)
 		}
-		if _, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{}, time.Now().UTC()); err != nil {
+		if _, err := h.flushServerAccessLogBatch(
+			&serverAccessLogBatch{},
+			time.Now().UTC(),
+		); err != nil {
 			t.Fatalf("flush empty batch failed: %v", err)
 		}
 
@@ -926,10 +948,18 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		}
 
 		// ACL-required yes via bucket/object ACL read grant.
-		if err := b.PutBucketACL("acl-required", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutBucketACL(
+			"acl-required",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutBucketACL failed: %v", err)
 		}
-		if err := b.PutObjectACL("acl-required", "k", "", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutObjectACL(
+			"acl-required",
+			"k",
+			"",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutObjectACL failed: %v", err)
 		}
 		reqAnonList := newRequest(http.MethodGet, "http://example.test/acl-required", "", nil)

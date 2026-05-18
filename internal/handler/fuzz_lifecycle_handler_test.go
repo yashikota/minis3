@@ -64,29 +64,31 @@ func FuzzFindLifecycleExpirationForObject(f *testing.F) {
 	f.Add("", "", 0, "key", int64(0), int64(1700000000))
 	f.Add("rule-2", "logs/", 365, "logs/app.log", int64(500), int64(1700000000))
 
-	f.Fuzz(func(t *testing.T, ruleID, prefix string, days int, key string, size, lastModUnix int64) {
-		if days < 0 || size < 0 || lastModUnix < 0 || lastModUnix > 1e12 {
-			return
-		}
-		config := &backend.LifecycleConfiguration{
-			Rules: []backend.LifecycleRule{
-				{
-					ID:     ruleID,
-					Status: backend.LifecycleStatusEnabled,
-					Filter: &backend.LifecycleFilter{Prefix: prefix},
-					Expiration: &backend.LifecycleExpiration{
-						Days: days,
+	f.Fuzz(
+		func(t *testing.T, ruleID, prefix string, days int, key string, size, lastModUnix int64) {
+			if days < 0 || size < 0 || lastModUnix < 0 || lastModUnix > 1e12 {
+				return
+			}
+			config := &backend.LifecycleConfiguration{
+				Rules: []backend.LifecycleRule{
+					{
+						ID:     ruleID,
+						Status: backend.LifecycleStatusEnabled,
+						Filter: &backend.LifecycleFilter{Prefix: prefix},
+						Expiration: &backend.LifecycleExpiration{
+							Days: days,
+						},
 					},
 				},
-			},
-		}
-		obj := &backend.Object{
-			Size:         size,
-			LastModified: time.Unix(lastModUnix, 0),
-			Tags:         map[string]string{},
-		}
-		_, _, _ = findLifecycleExpirationForObject(config, key, obj)
-	})
+			}
+			obj := &backend.Object{
+				Size:         size,
+				LastModified: time.Unix(lastModUnix, 0),
+				Tags:         map[string]string{},
+			}
+			_, _, _ = findLifecycleExpirationForObject(config, key, obj)
+		},
+	)
 }
 
 func FuzzEvaluateDeletePreconditions(f *testing.F) {
@@ -96,29 +98,31 @@ func FuzzEvaluateDeletePreconditions(f *testing.F) {
 	f.Add("", "", "1024", "\"etag\"", int64(1024), int64(1700000000), false)
 	f.Add("", "", "", "\"etag\"", int64(0), int64(1700000000), true)
 
-	f.Fuzz(func(t *testing.T, ifMatch, lastModTime, ifMatchSize, etag string, size, lastModUnix int64, isDeleteMarker bool) {
-		if lastModUnix < 0 || lastModUnix > 1e12 || size < 0 {
-			return
-		}
-		req, err := http.NewRequest(http.MethodDelete, "/bucket/key", nil)
-		if err != nil {
-			return
-		}
-		if ifMatch != "" {
-			req.Header.Set("If-Match", ifMatch)
-		}
-		if lastModTime != "" {
-			req.Header.Set("x-amz-if-match-last-modified-time", lastModTime)
-		}
-		if ifMatchSize != "" {
-			req.Header.Set("x-amz-if-match-size", ifMatchSize)
-		}
-		obj := &backend.Object{
-			ETag:           etag,
-			Size:           size,
-			LastModified:   time.Unix(lastModUnix, 0),
-			IsDeleteMarker: isDeleteMarker,
-		}
-		_, _, _ = evaluateDeletePreconditions(req, obj)
-	})
+	f.Fuzz(
+		func(t *testing.T, ifMatch, lastModTime, ifMatchSize, etag string, size, lastModUnix int64, isDeleteMarker bool) {
+			if lastModUnix < 0 || lastModUnix > 1e12 || size < 0 {
+				return
+			}
+			req, err := http.NewRequest(http.MethodDelete, "/bucket/key", nil)
+			if err != nil {
+				return
+			}
+			if ifMatch != "" {
+				req.Header.Set("If-Match", ifMatch)
+			}
+			if lastModTime != "" {
+				req.Header.Set("x-amz-if-match-last-modified-time", lastModTime)
+			}
+			if ifMatchSize != "" {
+				req.Header.Set("x-amz-if-match-size", ifMatchSize)
+			}
+			obj := &backend.Object{
+				ETag:           etag,
+				Size:           size,
+				LastModified:   time.Unix(lastModUnix, 0),
+				IsDeleteMarker: isDeleteMarker,
+			}
+			_, _, _ = evaluateDeletePreconditions(req, obj)
+		},
+	)
 }

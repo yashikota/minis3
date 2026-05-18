@@ -136,7 +136,11 @@ func TestHandleObjectPutAdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("versioned kms and trailer checksum", func(t *testing.T) {
-		if err := b.SetBucketVersioning("put-branches", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"put-branches",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		w := doRequest(
@@ -160,7 +164,8 @@ func TestHandleObjectPutAdditionalBranches(t *testing.T) {
 		if got := w.Header().Get("x-amz-server-side-encryption"); got != "aws:kms" {
 			t.Fatalf("unexpected sse header: %q", got)
 		}
-		if got := w.Header().Get("x-amz-server-side-encryption-aws-kms-key-id"); got != "kms-key-1" {
+		if got := w.Header().
+			Get("x-amz-server-side-encryption-aws-kms-key-id"); got != "kms-key-1" {
 			t.Fatalf("unexpected kms key id header: %q", got)
 		}
 	})
@@ -315,7 +320,11 @@ func TestHandleObjectSSECAndPartBranches(t *testing.T) {
 func TestHandleObjectDeleteAdditionalBranches(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "delete-branches")
-	if err := b.SetBucketVersioning("delete-branches", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"delete-branches",
+		backend.VersioningEnabled,
+		backend.MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	mustPutObject(t, b, "delete-branches", "k", "data")
@@ -369,7 +378,11 @@ func TestHandleObjectDeleteAdditionalBranches(t *testing.T) {
 
 	t.Run("delete locked object version", func(t *testing.T) {
 		mustCreateObjectLockBucket(t, b, "lock-delete-branches")
-		if err := b.SetBucketVersioning("lock-delete-branches", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"lock-delete-branches",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		retain := time.Now().UTC().Add(24 * time.Hour)

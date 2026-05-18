@@ -247,7 +247,10 @@ func TestBucketPolicyStatusBranches(t *testing.T) {
 		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
-		if err := b.PutBucketACL("policy-status", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutBucketACL(
+			"policy-status",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutBucketACL failed: %v", err)
 		}
 		if err := b.PutPublicAccessBlock(

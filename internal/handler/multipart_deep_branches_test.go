@@ -40,7 +40,8 @@ func TestUploadPartSSEResponseHeaderBranches(t *testing.T) {
 		if got := w.Header().Get("x-amz-server-side-encryption"); got != "aws:kms" {
 			t.Fatalf("unexpected sse header: %q", got)
 		}
-		if got := w.Header().Get("x-amz-server-side-encryption-aws-kms-key-id"); got != "kms-key-1" {
+		if got := w.Header().
+			Get("x-amz-server-side-encryption-aws-kms-key-id"); got != "kms-key-1" {
 			t.Fatalf("unexpected kms key header: %q", got)
 		}
 	})
@@ -63,10 +64,12 @@ func TestUploadPartSSEResponseHeaderBranches(t *testing.T) {
 			),
 		)
 		requireStatus(t, w, http.StatusOK)
-		if got := w.Header().Get("x-amz-server-side-encryption-customer-algorithm"); got != "AES256" {
+		if got := w.Header().
+			Get("x-amz-server-side-encryption-customer-algorithm"); got != "AES256" {
 			t.Fatalf("unexpected sse-c algorithm header: %q", got)
 		}
-		if got := w.Header().Get("x-amz-server-side-encryption-customer-key-md5"); got != "Xr4ilOzQ4PCOq3aQ0qbuaQ==" {
+		if got := w.Header().
+			Get("x-amz-server-side-encryption-customer-key-md5"); got != "Xr4ilOzQ4PCOq3aQ0qbuaQ==" {
 			t.Fatalf("unexpected sse-c md5 header: %q", got)
 		}
 	})
@@ -75,7 +78,11 @@ func TestUploadPartSSEResponseHeaderBranches(t *testing.T) {
 func TestCompleteMultipartUploadAdditionalBranches(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustPublicWriteBucket(t, b, "mp-complete", "minis3-access-key")
-	if err := b.SetBucketVersioning("mp-complete", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"mp-complete",
+		backend.VersioningEnabled,
+		backend.MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 
@@ -357,7 +364,8 @@ func TestUploadPartCopyAdditionalBranches(t *testing.T) {
 		if got := w.Header().Get("x-amz-server-side-encryption"); got != "aws:kms" {
 			t.Fatalf("unexpected sse header: %q", got)
 		}
-		if got := w.Header().Get("x-amz-server-side-encryption-aws-kms-key-id"); got != "kms-key-1" {
+		if got := w.Header().
+			Get("x-amz-server-side-encryption-aws-kms-key-id"); got != "kms-key-1" {
 			t.Fatalf("unexpected kms key id header: %q", got)
 		}
 	})
@@ -411,10 +419,12 @@ func TestUploadPartCopyAdditionalBranches(t *testing.T) {
 			),
 		)
 		requireStatus(t, w, http.StatusOK)
-		if got := w.Header().Get("x-amz-server-side-encryption-customer-algorithm"); got != "AES256" {
+		if got := w.Header().
+			Get("x-amz-server-side-encryption-customer-algorithm"); got != "AES256" {
 			t.Fatalf("unexpected sse-c algorithm header: %q", got)
 		}
-		if got := w.Header().Get("x-amz-server-side-encryption-customer-key-md5"); got != "Xr4ilOzQ4PCOq3aQ0qbuaQ==" {
+		if got := w.Header().
+			Get("x-amz-server-side-encryption-customer-key-md5"); got != "Xr4ilOzQ4PCOq3aQ0qbuaQ==" {
 			t.Fatalf("unexpected sse-c md5 header: %q", got)
 		}
 	})

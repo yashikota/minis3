@@ -29,11 +29,11 @@ func FuzzProvidedChecksumForPut(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, algorithm, crc32val, crc32c, crc64, sha1val, sha256val string) {
 		opts := PutObjectOptions{
-			ChecksumCRC32:    crc32val,
-			ChecksumCRC32C:   crc32c,
+			ChecksumCRC32:     crc32val,
+			ChecksumCRC32C:    crc32c,
 			ChecksumCRC64NVME: crc64,
-			ChecksumSHA1:     sha1val,
-			ChecksumSHA256:   sha256val,
+			ChecksumSHA1:      sha1val,
+			ChecksumSHA256:    sha256val,
 		}
 		_ = providedChecksumForPut(algorithm, opts)
 	})

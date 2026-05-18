@@ -43,12 +43,18 @@ func TestObjectLockConfigAndBucketCreationBranches(t *testing.T) {
 	if err := b.CreateBucket("versioned-enablable-lock"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if err := b.SetBucketVersioning("versioned-enablable-lock", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"versioned-enablable-lock",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	if err := b.PutObjectLockConfiguration("versioned-enablable-lock", &ObjectLockConfiguration{
 		ObjectLockEnabled: "Enabled",
-		Rule:              &ObjectLockRule{DefaultRetention: &DefaultRetention{Mode: RetentionModeGovernance, Days: 1}},
+		Rule: &ObjectLockRule{
+			DefaultRetention: &DefaultRetention{Mode: RetentionModeGovernance, Days: 1},
+		},
 	}); err != nil {
 		t.Fatalf("PutObjectLockConfiguration failed: %v", err)
 	}
@@ -62,7 +68,9 @@ func TestObjectLockConfigAndBucketCreationBranches(t *testing.T) {
 
 	if err := b.PutObjectLockConfiguration("versioned-enablable-lock", &ObjectLockConfiguration{
 		ObjectLockEnabled: "Enabled",
-		Rule:              &ObjectLockRule{DefaultRetention: &DefaultRetention{Mode: RetentionModeGovernance, Days: -1}},
+		Rule: &ObjectLockRule{
+			DefaultRetention: &DefaultRetention{Mode: RetentionModeGovernance, Days: -1},
+		},
 	}); !errors.Is(err, ErrInvalidRetentionPeriod) {
 		t.Fatalf("expected ErrInvalidRetentionPeriod for negative days, got %v", err)
 	}
@@ -91,10 +99,21 @@ func TestObjectRetentionBranches(t *testing.T) {
 	if err := b.CreateBucket("plain-retention-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if _, err := b.PutObject("plain-retention-bucket", "obj", []byte("x"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"plain-retention-bucket",
+		"obj",
+		[]byte("x"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
-	if err := b.PutObjectRetention("plain-retention-bucket", "obj", "", &ObjectLockRetention{}, false); !errors.Is(
+	if err := b.PutObjectRetention(
+		"plain-retention-bucket",
+		"obj",
+		"",
+		&ObjectLockRetention{},
+		false,
+	); !errors.Is(
 		err,
 		ErrObjectLockNotEnabled,
 	) {
@@ -104,7 +123,13 @@ func TestObjectRetentionBranches(t *testing.T) {
 	if err := b.CreateBucketWithObjectLock("retention-bucket-branches"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock failed: %v", err)
 	}
-	if err := b.PutObjectRetention("retention-bucket-branches", "missing", "", &ObjectLockRetention{}, false); !errors.Is(
+	if err := b.PutObjectRetention(
+		"retention-bucket-branches",
+		"missing",
+		"",
+		&ObjectLockRetention{},
+		false,
+	); !errors.Is(
 		err,
 		ErrObjectNotFound,
 	) {
@@ -120,24 +145,42 @@ func TestObjectRetentionBranches(t *testing.T) {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 
-	if err := b.PutObjectRetention("retention-bucket-branches", "obj", "missing-version", &ObjectLockRetention{}, false); !errors.Is(
+	if err := b.PutObjectRetention(
+		"retention-bucket-branches",
+		"obj",
+		"missing-version",
+		&ObjectLockRetention{},
+		false,
+	); !errors.Is(
 		err,
 		ErrVersionNotFound,
 	) {
 		t.Fatalf("expected ErrVersionNotFound, got %v", err)
 	}
 
-	if err := b.PutObjectRetention("retention-bucket-branches", "obj", obj.VersionId, &ObjectLockRetention{
-		Mode:            RetentionModeGovernance,
-		RetainUntilDate: future.Add(1 * time.Hour).Format(time.RFC3339),
-	}, false); err != nil {
+	if err := b.PutObjectRetention(
+		"retention-bucket-branches",
+		"obj",
+		obj.VersionId,
+		&ObjectLockRetention{
+			Mode:            RetentionModeGovernance,
+			RetainUntilDate: future.Add(1 * time.Hour).Format(time.RFC3339),
+		},
+		false,
+	); err != nil {
 		t.Fatalf("expected governance extension to succeed, got %v", err)
 	}
 
-	if err := b.PutObjectRetention("retention-bucket-branches", "obj", obj.VersionId, &ObjectLockRetention{
-		Mode:            RetentionModeCompliance,
-		RetainUntilDate: future.Add(2 * time.Hour).Format(time.RFC3339),
-	}, false); !errors.Is(
+	if err := b.PutObjectRetention(
+		"retention-bucket-branches",
+		"obj",
+		obj.VersionId,
+		&ObjectLockRetention{
+			Mode:            RetentionModeCompliance,
+			RetainUntilDate: future.Add(2 * time.Hour).Format(time.RFC3339),
+		},
+		false,
+	); !errors.Is(
 		err,
 		ErrObjectLocked,
 	) {
@@ -158,20 +201,32 @@ func TestObjectRetentionBranches(t *testing.T) {
 		t.Fatalf("PutObject compliance failed: %v", err)
 	}
 
-	if err := b.PutObjectRetention("retention-bucket-branches", "compliance", compObj.VersionId, &ObjectLockRetention{
-		Mode:            RetentionModeGovernance,
-		RetainUntilDate: compFuture.Add(1 * time.Hour).Format(time.RFC3339),
-	}, true); !errors.Is(
+	if err := b.PutObjectRetention(
+		"retention-bucket-branches",
+		"compliance",
+		compObj.VersionId,
+		&ObjectLockRetention{
+			Mode:            RetentionModeGovernance,
+			RetainUntilDate: compFuture.Add(1 * time.Hour).Format(time.RFC3339),
+		},
+		true,
+	); !errors.Is(
 		err,
 		ErrObjectLocked,
 	) {
 		t.Fatalf("expected ErrObjectLocked for compliance mode change, got %v", err)
 	}
 
-	if err := b.PutObjectRetention("retention-bucket-branches", "compliance", compObj.VersionId, &ObjectLockRetention{
-		Mode:            RetentionModeCompliance,
-		RetainUntilDate: compFuture.Add(-30 * time.Minute).Format(time.RFC3339),
-	}, true); !errors.Is(
+	if err := b.PutObjectRetention(
+		"retention-bucket-branches",
+		"compliance",
+		compObj.VersionId,
+		&ObjectLockRetention{
+			Mode:            RetentionModeCompliance,
+			RetainUntilDate: compFuture.Add(-30 * time.Minute).Format(time.RFC3339),
+		},
+		true,
+	); !errors.Is(
 		err,
 		ErrObjectLocked,
 	) {
@@ -182,7 +237,13 @@ func TestObjectRetentionBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteObject failed: %v", err)
 	}
-	if err := b.PutObjectRetention("retention-bucket-branches", "compliance", "", &ObjectLockRetention{}, false); !errors.Is(
+	if err := b.PutObjectRetention(
+		"retention-bucket-branches",
+		"compliance",
+		"",
+		&ObjectLockRetention{},
+		false,
+	); !errors.Is(
 		err,
 		ErrObjectNotFound,
 	) {
@@ -204,7 +265,11 @@ func TestObjectRetentionBranches(t *testing.T) {
 	) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
-	if _, err := b.GetObjectRetention("retention-bucket-branches", "obj", "missing-version"); !errors.Is(
+	if _, err := b.GetObjectRetention(
+		"retention-bucket-branches",
+		"obj",
+		"missing-version",
+	); !errors.Is(
 		err,
 		ErrVersionNotFound,
 	) {
@@ -231,7 +296,12 @@ func TestObjectLegalHoldBranches(t *testing.T) {
 	if _, err := b.GetObjectLegalHold("missing", "key", ""); !errors.Is(err, ErrBucketNotFound) {
 		t.Fatalf("expected ErrBucketNotFound, got %v", err)
 	}
-	if err := b.PutObjectLegalHold("missing", "key", "", &ObjectLockLegalHold{Status: LegalHoldStatusOn}); !errors.Is(
+	if err := b.PutObjectLegalHold(
+		"missing",
+		"key",
+		"",
+		&ObjectLockLegalHold{Status: LegalHoldStatusOn},
+	); !errors.Is(
 		err,
 		ErrBucketNotFound,
 	) {
@@ -241,7 +311,12 @@ func TestObjectLegalHoldBranches(t *testing.T) {
 	if err := b.CreateBucket("plain-legalhold-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if _, err := b.PutObject("plain-legalhold-bucket", "obj", []byte("x"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"plain-legalhold-bucket",
+		"obj",
+		[]byte("x"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 	if _, err := b.GetObjectLegalHold("plain-legalhold-bucket", "obj", ""); !errors.Is(
@@ -250,7 +325,12 @@ func TestObjectLegalHoldBranches(t *testing.T) {
 	) {
 		t.Fatalf("expected ErrObjectLockNotEnabled, got %v", err)
 	}
-	if err := b.PutObjectLegalHold("plain-legalhold-bucket", "obj", "", &ObjectLockLegalHold{Status: LegalHoldStatusOn}); !errors.Is(
+	if err := b.PutObjectLegalHold(
+		"plain-legalhold-bucket",
+		"obj",
+		"",
+		&ObjectLockLegalHold{Status: LegalHoldStatusOn},
+	); !errors.Is(
 		err,
 		ErrObjectLockNotEnabled,
 	) {
@@ -266,7 +346,12 @@ func TestObjectLegalHoldBranches(t *testing.T) {
 	) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
-	if err := b.PutObjectLegalHold("legalhold-bucket-branches", "missing", "", &ObjectLockLegalHold{Status: LegalHoldStatusOn}); !errors.Is(
+	if err := b.PutObjectLegalHold(
+		"legalhold-bucket-branches",
+		"missing",
+		"",
+		&ObjectLockLegalHold{Status: LegalHoldStatusOn},
+	); !errors.Is(
 		err,
 		ErrObjectNotFound,
 	) {
@@ -278,23 +363,41 @@ func TestObjectLegalHoldBranches(t *testing.T) {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 
-	if _, err := b.GetObjectLegalHold("legalhold-bucket-branches", "obj", "missing-version"); !errors.Is(
+	if _, err := b.GetObjectLegalHold(
+		"legalhold-bucket-branches",
+		"obj",
+		"missing-version",
+	); !errors.Is(
 		err,
 		ErrVersionNotFound,
 	) {
 		t.Fatalf("expected ErrVersionNotFound, got %v", err)
 	}
-	if err := b.PutObjectLegalHold("legalhold-bucket-branches", "obj", "missing-version", &ObjectLockLegalHold{Status: LegalHoldStatusOn}); !errors.Is(
+	if err := b.PutObjectLegalHold(
+		"legalhold-bucket-branches",
+		"obj",
+		"missing-version",
+		&ObjectLockLegalHold{Status: LegalHoldStatusOn},
+	); !errors.Is(
 		err,
 		ErrVersionNotFound,
 	) {
 		t.Fatalf("expected ErrVersionNotFound, got %v", err)
 	}
 
-	if err := b.PutObjectLegalHold("legalhold-bucket-branches", "obj", obj.VersionId, &ObjectLockLegalHold{Status: LegalHoldStatusOff}); err != nil {
+	if err := b.PutObjectLegalHold(
+		"legalhold-bucket-branches",
+		"obj",
+		obj.VersionId,
+		&ObjectLockLegalHold{Status: LegalHoldStatusOff},
+	); err != nil {
 		t.Fatalf("PutObjectLegalHold OFF failed: %v", err)
 	}
-	if hold, err := b.GetObjectLegalHold("legalhold-bucket-branches", "obj", obj.VersionId); err != nil {
+	if hold, err := b.GetObjectLegalHold(
+		"legalhold-bucket-branches",
+		"obj",
+		obj.VersionId,
+	); err != nil {
 		t.Fatalf("GetObjectLegalHold failed: %v", err)
 	} else if hold.Status != LegalHoldStatusOff {
 		t.Fatalf("expected legal hold OFF, got %q", hold.Status)
@@ -310,7 +413,12 @@ func TestObjectLegalHoldBranches(t *testing.T) {
 	) {
 		t.Fatalf("expected ErrObjectNotFound on delete marker latest, got %v", err)
 	}
-	if err := b.PutObjectLegalHold("legalhold-bucket-branches", "obj", "", &ObjectLockLegalHold{Status: LegalHoldStatusOn}); !errors.Is(
+	if err := b.PutObjectLegalHold(
+		"legalhold-bucket-branches",
+		"obj",
+		"",
+		&ObjectLockLegalHold{Status: LegalHoldStatusOn},
+	); !errors.Is(
 		err,
 		ErrObjectNotFound,
 	) {

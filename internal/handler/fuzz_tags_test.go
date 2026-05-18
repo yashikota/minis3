@@ -41,7 +41,12 @@ func FuzzParsePostTaggingXML(f *testing.F) {
 	f.Add("")
 	f.Add("not xml")
 	f.Add(`<Tagging><TagSet><Tag><Key></Key><Value></Value></Tag></TagSet></Tagging>`)
-	f.Add(`<Tagging><TagSet><Tag><Key>` + strings.Repeat("k", 200) + `</Key><Value>v</Value></Tag></TagSet></Tagging>`)
+	f.Add(
+		`<Tagging><TagSet><Tag><Key>` + strings.Repeat(
+			"k",
+			200,
+		) + `</Key><Value>v</Value></Tag></TagSet></Tagging>`,
+	)
 
 	f.Fuzz(func(t *testing.T, xml string) {
 		_, _, _ = parsePostTaggingXML(xml)

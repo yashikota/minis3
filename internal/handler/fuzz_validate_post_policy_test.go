@@ -25,7 +25,15 @@ func FuzzValidatePostPolicy(f *testing.F) {
 	f.Add("", "bucket", "key", "", int64(0))
 	f.Add("notbase64!", "bucket", "key", "", int64(100))
 	f.Add(base64.StdEncoding.EncodeToString([]byte(`{}`)), "bucket", "key", "", int64(0))
-	f.Add(base64.StdEncoding.EncodeToString([]byte(`{"expiration":"2020-01-01T00:00:00Z","conditions":[{"bucket":"b"}]}`)), "b", "k", "", int64(0))
+	f.Add(
+		base64.StdEncoding.EncodeToString(
+			[]byte(`{"expiration":"2020-01-01T00:00:00Z","conditions":[{"bucket":"b"}]}`),
+		),
+		"b",
+		"k",
+		"",
+		int64(0),
+	)
 
 	f.Fuzz(func(t *testing.T, policyB64, bucket, key, contentType string, size int64) {
 		if size < 0 {

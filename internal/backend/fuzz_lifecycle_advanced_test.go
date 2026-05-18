@@ -86,7 +86,7 @@ func FuzzLifecycleNoncurrentExpirationDue(f *testing.F) {
 			return
 		}
 		exp := &NoncurrentVersionExpiration{
-			NoncurrentDays:         noncurrentDays,
+			NoncurrentDays:          noncurrentDays,
 			NewerNoncurrentVersions: newerVersions,
 		}
 		lastMod := time.Unix(lastModUnix, 0)
@@ -120,32 +120,43 @@ func FuzzShouldDeleteExpiredObjectDeleteMarker(f *testing.F) {
 	f.Add("key2", false, true, 0, false, int64(1700000000))
 	f.Add("key3", true, false, 2, true, int64(1700000000))
 
-	f.Fuzz(func(t *testing.T, key string, expiredObjDelMarker, isDM bool, numVersions int, ruleEnabled bool, nowUnix int64) {
-		if numVersions < 0 || numVersions > 10 {
-			return
-		}
-		if nowUnix < 0 || nowUnix > 1e12 {
-			return
-		}
-		rule := LifecycleRule{
-			Status: "Enabled",
-			Expiration: &LifecycleExpiration{
-				ExpiredObjectDeleteMarker: expiredObjDelMarker,
-			},
-		}
-		if !ruleEnabled {
-			rule.Status = "Disabled"
-		}
-		var versions []*Object
-		if isDM {
-			versions = append(versions, &Object{IsDeleteMarker: true, LastModified: time.Unix(nowUnix-86400, 0)})
-		}
-		for i := 0; i < numVersions; i++ {
-			versions = append(versions, &Object{IsDeleteMarker: false})
-		}
-		now := time.Unix(nowUnix, 0)
-		_ = shouldDeleteExpiredObjectDeleteMarker(key, versions, []LifecycleRule{rule}, now, 24*time.Hour)
-	})
+	f.Fuzz(
+		func(t *testing.T, key string, expiredObjDelMarker, isDM bool, numVersions int, ruleEnabled bool, nowUnix int64) {
+			if numVersions < 0 || numVersions > 10 {
+				return
+			}
+			if nowUnix < 0 || nowUnix > 1e12 {
+				return
+			}
+			rule := LifecycleRule{
+				Status: "Enabled",
+				Expiration: &LifecycleExpiration{
+					ExpiredObjectDeleteMarker: expiredObjDelMarker,
+				},
+			}
+			if !ruleEnabled {
+				rule.Status = "Disabled"
+			}
+			var versions []*Object
+			if isDM {
+				versions = append(
+					versions,
+					&Object{IsDeleteMarker: true, LastModified: time.Unix(nowUnix-86400, 0)},
+				)
+			}
+			for i := 0; i < numVersions; i++ {
+				versions = append(versions, &Object{IsDeleteMarker: false})
+			}
+			now := time.Unix(nowUnix, 0)
+			_ = shouldDeleteExpiredObjectDeleteMarker(
+				key,
+				versions,
+				[]LifecycleRule{rule},
+				now,
+				24*time.Hour,
+			)
+		},
+	)
 }
 
 func FuzzIsArchivedStorageClass(f *testing.F) {

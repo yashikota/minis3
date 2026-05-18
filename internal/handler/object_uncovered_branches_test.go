@@ -118,7 +118,11 @@ func TestHandleObjectPutAdditionalBranchesUncovered(t *testing.T) {
 func TestHandleObjectReadDeleteHeadAdditionalBranchesUncovered(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-rdh")
-	if err := b.SetBucketVersioning("obj-rdh", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"obj-rdh",
+		backend.VersioningEnabled,
+		backend.MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 
@@ -452,7 +456,11 @@ func TestHandleCopyObjectAdditionalBranchesUncovered(t *testing.T) {
 func TestObjectACLAndAttributesAdditionalBranchesUncovered(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-acl-attr")
-	if err := b.SetBucketVersioning("obj-acl-attr", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"obj-acl-attr",
+		backend.VersioningEnabled,
+		backend.MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 

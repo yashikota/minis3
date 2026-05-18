@@ -219,7 +219,10 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 
 	t.Run("evaluateDeletePreconditions branches", func(t *testing.T) {
 		// nil object keeps delete idempotent.
-		if status, _, _ := evaluateDeletePreconditions(httptest.NewRequest(http.MethodDelete, "/", nil), nil); status != 0 {
+		if status, _, _ := evaluateDeletePreconditions(
+			httptest.NewRequest(http.MethodDelete, "/", nil),
+			nil,
+		); status != 0 {
 			t.Fatalf("status for nil object = %d, want 0", status)
 		}
 
@@ -229,13 +232,23 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 			Size:         3,
 		}
 		if status, _, _ := evaluateDeletePreconditions(
-			newRequest(http.MethodDelete, "http://example.test/", "", map[string]string{"If-Match": "\"other\""}),
+			newRequest(
+				http.MethodDelete,
+				"http://example.test/",
+				"",
+				map[string]string{"If-Match": "\"other\""},
+			),
 			obj,
 		); status != http.StatusPreconditionFailed {
 			t.Fatalf("If-Match mismatch status = %d, want 412", status)
 		}
 		if status, _, _ := evaluateDeletePreconditions(
-			newRequest(http.MethodDelete, "http://example.test/", "", map[string]string{"If-Match": "*"}),
+			newRequest(
+				http.MethodDelete,
+				"http://example.test/",
+				"",
+				map[string]string{"If-Match": "*"},
+			),
 			obj,
 		); status != 0 {
 			t.Fatalf("If-Match wildcard status = %d, want 0", status)
@@ -247,7 +260,10 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 			"",
 			map[string]string{"x-amz-if-match-last-modified-time": "invalid"},
 		)
-		if status, code, _ := evaluateDeletePreconditions(reqInvalidTime, obj); status != http.StatusBadRequest ||
+		if status, code, _ := evaluateDeletePreconditions(
+			reqInvalidTime,
+			obj,
+		); status != http.StatusBadRequest ||
 			code != "InvalidArgument" {
 			t.Fatalf(
 				"invalid last-modified result = (%d,%s), want (400,InvalidArgument)",
@@ -267,7 +283,10 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 					Format(time.RFC3339),
 			},
 		)
-		if status, code, _ := evaluateDeletePreconditions(reqTimeMismatch, obj); status != http.StatusPreconditionFailed ||
+		if status, code, _ := evaluateDeletePreconditions(
+			reqTimeMismatch,
+			obj,
+		); status != http.StatusPreconditionFailed ||
 			code != "PreconditionFailed" {
 			t.Fatalf("time mismatch result = (%d,%s), want (412,PreconditionFailed)", status, code)
 		}
@@ -278,7 +297,10 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 			"",
 			map[string]string{"x-amz-if-match-size": "-1"},
 		)
-		if status, code, _ := evaluateDeletePreconditions(reqInvalidSize, obj); status != http.StatusBadRequest ||
+		if status, code, _ := evaluateDeletePreconditions(
+			reqInvalidSize,
+			obj,
+		); status != http.StatusBadRequest ||
 			code != "InvalidArgument" {
 			t.Fatalf("invalid size result = (%d,%s), want (400,InvalidArgument)", status, code)
 		}
@@ -289,7 +311,10 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 			"",
 			map[string]string{"x-amz-if-match-size": "9"},
 		)
-		if status, code, _ := evaluateDeletePreconditions(reqSizeMismatch, obj); status != http.StatusPreconditionFailed ||
+		if status, code, _ := evaluateDeletePreconditions(
+			reqSizeMismatch,
+			obj,
+		); status != http.StatusPreconditionFailed ||
 			code != "PreconditionFailed" {
 			t.Fatalf("size mismatch result = (%d,%s), want (412,PreconditionFailed)", status, code)
 		}
@@ -317,7 +342,9 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 	})
 
 	t.Run("inferChecksumAlgorithmFromTrailer covers crc64", func(t *testing.T) {
-		if got := inferChecksumAlgorithmFromTrailer("x-amz-checksum-crc64nvme"); got != "CRC64NVME" {
+		if got := inferChecksumAlgorithmFromTrailer(
+			"x-amz-checksum-crc64nvme",
+		); got != "CRC64NVME" {
 			t.Fatalf("inferChecksumAlgorithmFromTrailer crc64 = %q, want CRC64NVME", got)
 		}
 	})
@@ -405,7 +432,11 @@ func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("delete marker branch", func(t *testing.T) {
-		if err := b.SetBucketVersioning("attr-bkt", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"attr-bkt",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		if _, err := b.DeleteObject("attr-bkt", "k", false); err != nil {

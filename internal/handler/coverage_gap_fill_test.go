@@ -234,7 +234,9 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 			t.Fatalf("PutBucketACL mp-gap private failed: %v", err)
 		}
 		if err := b.PutBucketOwnershipControls("mp-gap", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls enforced failed: %v", err)
 		}
@@ -254,7 +256,9 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 		requireS3ErrorCode(t, wACLNotSupported, "AccessControlListNotSupported")
 
 		if err := b.PutBucketOwnershipControls("mp-gap", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls preferred failed: %v", err)
 		}
@@ -563,7 +567,10 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		h, b := newTestHandler(t)
 		mustCreateBucket(t, b, "obj-put")
 		b.SetBucketOwner("obj-put", "minis3-access-key")
-		if err := b.PutBucketACL("obj-put", backend.CannedACLToPolicy("public-read-write")); err != nil {
+		if err := b.PutBucketACL(
+			"obj-put",
+			backend.CannedACLToPolicy("public-read-write"),
+		); err != nil {
 			t.Fatalf("PutBucketACL failed: %v", err)
 		}
 		if err := b.PutBucketACL("obj-put", backend.CannedACLToPolicy("private")); err != nil {
@@ -571,7 +578,9 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		}
 
 		if err := b.PutBucketOwnershipControls("obj-put", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls enforced failed: %v", err)
 		}
@@ -591,7 +600,9 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		requireS3ErrorCode(t, wPutDenied, "AccessControlListNotSupported")
 
 		if err := b.PutBucketOwnershipControls("obj-put", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls preferred failed: %v", err)
 		}
@@ -633,20 +644,30 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 
 		mustCreateBucket(t, b, "src-copy-gap")
 		mustPutObject(t, b, "src-copy-gap", "k", "v")
-		if err := b.PutObjectACL("src-copy-gap", "k", "", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutObjectACL(
+			"src-copy-gap",
+			"k",
+			"",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutObjectACL source failed: %v", err)
 		}
 
 		mustCreateBucket(t, b, "dst-copy-gap")
 		b.SetBucketOwner("dst-copy-gap", "minis3-access-key")
-		if err := b.PutBucketACL("dst-copy-gap", backend.CannedACLToPolicy("public-read-write")); err != nil {
+		if err := b.PutBucketACL(
+			"dst-copy-gap",
+			backend.CannedACLToPolicy("public-read-write"),
+		); err != nil {
 			t.Fatalf("PutBucketACL dst failed: %v", err)
 		}
 		if err := b.PutBucketACL("dst-copy-gap", backend.CannedACLToPolicy("private")); err != nil {
 			t.Fatalf("PutBucketACL dst private failed: %v", err)
 		}
 		if err := b.PutBucketOwnershipControls("dst-copy-gap", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls dst enforced failed: %v", err)
 		}
@@ -667,7 +688,9 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		requireS3ErrorCode(t, wCopyDenied, "AccessControlListNotSupported")
 
 		if err := b.PutBucketOwnershipControls("dst-copy-gap", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipObjectWriter}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipObjectWriter},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls dst writer failed: %v", err)
 		}
@@ -1007,7 +1030,11 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 
 		allowPolicy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::src-h2/*"}]}`
 		mustPutBucketPolicy(t, b, "src-h2", allowPolicy)
-		if got := h.loggingACLRequired(newRequest(http.MethodGet, "http://example.test/src-h2/k", "", nil), "src-h2", "k"); got != "-" {
+		if got := h.loggingACLRequired(
+			newRequest(http.MethodGet, "http://example.test/src-h2/k", "", nil),
+			"src-h2",
+			"k",
+		); got != "-" {
 			t.Fatalf("loggingACLRequired policy allow = %q, want -", got)
 		}
 		mustPutBucketPolicy(t, b, "src-h2", `{"Version":"2012-10-17","Statement":[]}`)
@@ -1047,7 +1074,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		getBucketACLForAccessCheckFn = origGetBucketACL
 
 		if err := b.PutBucketOwnershipControls("src-h2", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls enforced failed: %v", err)
 		}
@@ -1168,7 +1197,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		})
 
 		if err := b.PutBucketOwnershipControls("ctl", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls setup failed: %v", err)
 		}
@@ -1385,7 +1416,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		})
 
 		if err := b.PutBucketOwnershipControls("post-gap", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls enforced failed: %v", err)
 		}
@@ -1413,7 +1446,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wPostBOEOk, http.StatusNoContent)
 
 		if err := b.PutBucketOwnershipControls("post-gap", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls preferred failed: %v", err)
 		}
@@ -1429,7 +1464,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wPostPreferred, http.StatusNoContent)
 
 		if err := b.PutBucketOwnershipControls("post-gap", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipObjectWriter}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipObjectWriter},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls writer failed: %v", err)
 		}
@@ -1468,7 +1505,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			t.Fatalf("PutBucketACL mp-left private failed: %v", err)
 		}
 		if err := b.PutBucketOwnershipControls("mp-left", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls mp-left failed: %v", err)
 		}
@@ -1523,14 +1562,19 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		// Object remaining lines.
 		mustCreateBucket(t, b, "obj-left")
 		b.SetBucketOwner("obj-left", "minis3-access-key")
-		if err := b.PutBucketACL("obj-left", backend.CannedACLToPolicy("public-read-write")); err != nil {
+		if err := b.PutBucketACL(
+			"obj-left",
+			backend.CannedACLToPolicy("public-read-write"),
+		); err != nil {
 			t.Fatalf("PutBucketACL obj-left failed: %v", err)
 		}
 		if err := b.PutBucketACL("obj-left", backend.CannedACLToPolicy("private")); err != nil {
 			t.Fatalf("PutBucketACL obj-left private failed: %v", err)
 		}
 		if err := b.PutBucketOwnershipControls("obj-left", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls obj-left enforced failed: %v", err)
 		}
@@ -1546,7 +1590,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wPutBOE, http.StatusOK)
 
 		if err := b.PutBucketOwnershipControls("obj-left", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipObjectWriter}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipObjectWriter},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls obj-left writer failed: %v", err)
 		}
@@ -1604,7 +1650,11 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wMissingPart, http.StatusBadRequest)
 		requireS3ErrorCode(t, wMissingPart, "InvalidPart")
 
-		if err := b.SetBucketVersioning("obj-left", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"obj-left",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning obj-left failed: %v", err)
 		}
 		if _, err := b.DeleteObject("obj-left", "dm", false); err != nil {
@@ -1626,19 +1676,29 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 
 		mustCreateBucket(t, b, "src-left")
 		mustPutObject(t, b, "src-left", "k", "v")
-		if err := b.PutObjectACL("src-left", "k", "", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutObjectACL(
+			"src-left",
+			"k",
+			"",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutObjectACL src-left failed: %v", err)
 		}
 		mustCreateBucket(t, b, "dst-left")
 		b.SetBucketOwner("dst-left", "minis3-access-key")
-		if err := b.PutBucketACL("dst-left", backend.CannedACLToPolicy("public-read-write")); err != nil {
+		if err := b.PutBucketACL(
+			"dst-left",
+			backend.CannedACLToPolicy("public-read-write"),
+		); err != nil {
 			t.Fatalf("PutBucketACL dst-left failed: %v", err)
 		}
 		if err := b.PutBucketACL("dst-left", backend.CannedACLToPolicy("private")); err != nil {
 			t.Fatalf("PutBucketACL dst-left private failed: %v", err)
 		}
 		if err := b.PutBucketOwnershipControls("dst-left", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerEnforced},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls dst-left enforced failed: %v", err)
 		}
@@ -1658,7 +1718,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wCopyBOE, http.StatusOK)
 
 		if err := b.PutBucketOwnershipControls("dst-left", &backend.OwnershipControls{
-			Rules: []backend.OwnershipControlsRule{{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred}},
+			Rules: []backend.OwnershipControlsRule{
+				{ObjectOwnership: backend.ObjectOwnershipBucketOwnerPreferred},
+			},
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls dst-left preferred failed: %v", err)
 		}
@@ -1809,7 +1871,10 @@ func TestCoverageGapObjectPartAndDeleteMarkerBranches(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-part-branch")
 	b.SetBucketOwner("obj-part-branch", "minis3-access-key")
-	if err := b.PutBucketACL("obj-part-branch", backend.CannedACLToPolicy("public-read-write")); err != nil {
+	if err := b.PutBucketACL(
+		"obj-part-branch",
+		backend.CannedACLToPolicy("public-read-write"),
+	); err != nil {
 		t.Fatalf("PutBucketACL failed: %v", err)
 	}
 	mustPutObject(t, b, "obj-part-branch", "k", "abc")
@@ -1838,7 +1903,11 @@ func TestCoverageGapObjectPartAndDeleteMarkerBranches(t *testing.T) {
 	requireStatus(t, wMissingPart, http.StatusBadRequest)
 	requireS3ErrorCode(t, wMissingPart, "InvalidPart")
 
-	if err := b.SetBucketVersioning("obj-part-branch", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"obj-part-branch",
+		backend.VersioningEnabled,
+		backend.MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	mustPutObject(t, b, "obj-part-branch", "dm-live", "v")

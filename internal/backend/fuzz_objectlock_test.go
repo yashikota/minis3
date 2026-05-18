@@ -12,20 +12,22 @@ func FuzzIsObjectLocked(f *testing.F) {
 	f.Add("", "COMPLIANCE", int64(1800000000), true)
 	f.Add("OFF", "GOVERNANCE", int64(1800000000), true)
 
-	f.Fuzz(func(t *testing.T, legalHold, retentionMode string, retainUntilUnix int64, bypassGovernance bool) {
-		if retainUntilUnix < 0 || retainUntilUnix > 1e12 {
-			return
-		}
-		obj := &Object{
-			LegalHoldStatus: legalHold,
-			RetentionMode:   retentionMode,
-		}
-		if retainUntilUnix > 0 {
-			t2 := time.Unix(retainUntilUnix, 0)
-			obj.RetainUntilDate = &t2
-		}
-		_ = isObjectLocked(obj, bypassGovernance)
-	})
+	f.Fuzz(
+		func(t *testing.T, legalHold, retentionMode string, retainUntilUnix int64, bypassGovernance bool) {
+			if retainUntilUnix < 0 || retainUntilUnix > 1e12 {
+				return
+			}
+			obj := &Object{
+				LegalHoldStatus: legalHold,
+				RetentionMode:   retentionMode,
+			}
+			if retainUntilUnix > 0 {
+				t2 := time.Unix(retainUntilUnix, 0)
+				obj.RetainUntilDate = &t2
+			}
+			_ = isObjectLocked(obj, bypassGovernance)
+		},
+	)
 }
 
 func FuzzGenerateVersionId(f *testing.F) {

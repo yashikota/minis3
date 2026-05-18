@@ -6,8 +6,16 @@ import (
 )
 
 func FuzzLoggingConditionValues(f *testing.F) {
-	f.Add([]byte(`{"StringEquals":{"s3:x-amz-acl":"bucket-owner-full-control"}}`), "StringEquals", "s3:x-amz-acl")
-	f.Add([]byte(`{"StringLike":{"aws:SourceArn":"arn:aws:s3:::*"}}`), "StringLike", "aws:SourceArn")
+	f.Add(
+		[]byte(`{"StringEquals":{"s3:x-amz-acl":"bucket-owner-full-control"}}`),
+		"StringEquals",
+		"s3:x-amz-acl",
+	)
+	f.Add(
+		[]byte(`{"StringLike":{"aws:SourceArn":"arn:aws:s3:::*"}}`),
+		"StringLike",
+		"aws:SourceArn",
+	)
 	f.Add([]byte(`{"ArnLike":{"aws:SourceArn":"arn:aws:s3:::bucket"}}`), "ArnLike", "aws:SourceArn")
 	f.Add([]byte(`{}`), "StringEquals", "s3:x-amz-acl")
 	f.Add([]byte(`null`), "", "")

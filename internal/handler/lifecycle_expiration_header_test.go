@@ -158,9 +158,14 @@ func TestLifecycleHeaderHelperBranches(t *testing.T) {
 			}
 		}
 
-		if got, ok := lifecycleExpiryDate(&backend.LifecycleExpiration{Date: "2026-03-01"}, base); !ok {
+		if got, ok := lifecycleExpiryDate(
+			&backend.LifecycleExpiration{Date: "2026-03-01"},
+			base,
+		); !ok {
 			t.Fatal("date-based expiration should be valid")
-		} else if got.UTC().Format("2006-01-02") != "2026-03-01" {
+		} else if got.UTC().
+			Format("2006-01-02") !=
+			"2026-03-01" {
 			t.Fatalf("date expiry = %v, want 2026-03-01", got)
 		}
 

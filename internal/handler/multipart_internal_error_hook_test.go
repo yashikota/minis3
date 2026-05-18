@@ -276,7 +276,12 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	t.Run("copy part unexpected backend error", func(t *testing.T) {
 		mustCreateBucket(t, b, "src-b")
 		mustPutObject(t, b, "src-b", "src-k", "v")
-		if err := b.PutObjectACL("src-b", "src-k", "", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutObjectACL(
+			"src-b",
+			"src-k",
+			"",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutObjectACL failed: %v", err)
 		}
 		copyPartFn = func(

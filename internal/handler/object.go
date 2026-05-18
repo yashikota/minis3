@@ -237,7 +237,8 @@ func setRestoreHeader(w http.ResponseWriter, obj *backend.Object) {
 			w.Header().Set("x-amz-restore", `ongoing-request="true"`)
 		} else {
 			expiry := obj.RestoreExpiryDate.Format(http.TimeFormat)
-			w.Header().Set("x-amz-restore", fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`, expiry))
+			w.Header().
+				Set("x-amz-restore", fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`, expiry))
 		}
 	}
 }
@@ -1131,14 +1132,18 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if sse := r.Header.Get("x-amz-server-side-encryption"); sse != "" {
 			opts.ServerSideEncryption = sse
 		}
-		if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
+		if sseKmsKeyId := r.Header.Get(
+			"x-amz-server-side-encryption-aws-kms-key-id",
+		); sseKmsKeyId != "" {
 			opts.SSEKMSKeyId = sseKmsKeyId
 		}
 		// SSE-C headers
 		if sseCA := r.Header.Get("x-amz-server-side-encryption-customer-algorithm"); sseCA != "" {
 			opts.SSECustomerAlgorithm = sseCA
 		}
-		if sseCKMD5 := r.Header.Get("x-amz-server-side-encryption-customer-key-md5"); sseCKMD5 != "" {
+		if sseCKMD5 := r.Header.Get(
+			"x-amz-server-side-encryption-customer-key-md5",
+		); sseCKMD5 != "" {
 			opts.SSECustomerKeyMD5 = sseCKMD5
 		}
 
@@ -1272,7 +1277,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 						"The bucket does not allow ACLs",
 					)
 				} else {
-					backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+					backend.WriteError(
+						w,
+						http.StatusInternalServerError,
+						"InternalError",
+						err.Error(),
+					)
 				}
 				return
 			}
@@ -2017,9 +2027,19 @@ func (h *Handler) handleCopyObject(
 					"The specified bucket does not exist.",
 				)
 			} else if errors.Is(err, backend.ErrVersionNotFound) {
-				backend.WriteError(w, http.StatusNotFound, "NoSuchVersion", "The specified version does not exist.")
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchVersion",
+					"The specified version does not exist.",
+				)
 			} else {
-				backend.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+				backend.WriteError(
+					w,
+					http.StatusNotFound,
+					"NoSuchKey",
+					"The specified key does not exist.",
+				)
 			}
 			return
 		}
@@ -2108,7 +2128,9 @@ func (h *Handler) handleCopyObject(
 	if sse := r.Header.Get("x-amz-server-side-encryption"); sse != "" {
 		opts.ServerSideEncryption = sse
 	}
-	if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
+	if sseKmsKeyId := r.Header.Get(
+		"x-amz-server-side-encryption-aws-kms-key-id",
+	); sseKmsKeyId != "" {
 		opts.SSEKMSKeyId = sseKmsKeyId
 	}
 	// SSE-C headers
@@ -2202,9 +2224,19 @@ func (h *Handler) handleCopyObject(
 				"The specified bucket does not exist.",
 			)
 		} else if errors.Is(err, backend.ErrSourceObjectNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchKey",
+				"The specified key does not exist.",
+			)
 		} else if errors.Is(err, backend.ErrVersionNotFound) {
-			backend.WriteError(w, http.StatusNotFound, "NoSuchVersion", "The specified version does not exist.")
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchVersion",
+				"The specified version does not exist.",
+			)
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
 			backend.WriteError(
 				w,
@@ -2639,7 +2671,11 @@ func (h *Handler) handleGetObjectAttributes(
 	// Parse requested attributes
 	requestedAttrs := make(map[string]bool)
 	validAttr := map[string]bool{
-		"ETag": true, "Checksum": true, "ObjectSize": true, "StorageClass": true, "ObjectParts": true,
+		"ETag":         true,
+		"Checksum":     true,
+		"ObjectSize":   true,
+		"StorageClass": true,
+		"ObjectParts":  true,
 	}
 	for _, attr := range strings.Split(attributesHeader, ",") {
 		trimmed := strings.TrimSpace(attr)

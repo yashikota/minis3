@@ -316,7 +316,11 @@ func TestGetObjectAttributesHandler(t *testing.T) {
 	})
 
 	t.Run("delete marker", func(t *testing.T) {
-		if err := b.SetBucketVersioning("attrs", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"attrs",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		if _, err := b.DeleteObject("attrs", "obj", false); err != nil {

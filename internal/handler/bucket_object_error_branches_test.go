@@ -281,7 +281,11 @@ func TestObjectErrorBranches(t *testing.T) {
 		)
 		requireStatus(t, wKey, http.StatusNotFound)
 		requireS3ErrorCode(t, wKey, "NoSuchKey")
-		if err := b.SetBucketVersioning("obj", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"obj",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		wVersion := doRequest(

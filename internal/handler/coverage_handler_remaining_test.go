@@ -52,7 +52,10 @@ func TestPutBucketOwnershipAndPostBucketLoggingRemainingBranches(t *testing.T) {
 		h, b := newTestHandler(t)
 		mustCreateBucket(t, b, "own-branch")
 		b.SetBucketOwner("own-branch", "minis3-access-key")
-		if err := b.PutBucketACL("own-branch", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutBucketACL(
+			"own-branch",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutBucketACL failed: %v", err)
 		}
 
@@ -152,7 +155,11 @@ func TestLoggingConditionValuesAdditionalBranches(t *testing.T) {
 		"aws:SourceArn",
 	)
 	if found || len(values) != 0 {
-		t.Fatalf("loggingConditionValues non-map operator = (%v,%v), want (false,empty)", found, values)
+		t.Fatalf(
+			"loggingConditionValues non-map operator = (%v,%v), want (false,empty)",
+			found,
+			values,
+		)
 	}
 
 	values, found = loggingConditionValues(
@@ -161,7 +168,11 @@ func TestLoggingConditionValuesAdditionalBranches(t *testing.T) {
 		"aws:SourceArn",
 	)
 	if found || len(values) != 0 {
-		t.Fatalf("loggingConditionValues missing condition key = (%v,%v), want (false,empty)", found, values)
+		t.Fatalf(
+			"loggingConditionValues missing condition key = (%v,%v), want (false,empty)",
+			found,
+			values,
+		)
 	}
 }
 
@@ -506,7 +517,13 @@ func TestMapRequestToLoggingOperationRemainingBranches(t *testing.T) {
 	for _, tc := range tests {
 		req := httptest.NewRequest(tc.method, tc.target, nil)
 		if got := mapRequestToLoggingOperation(req, tc.key); got != tc.want {
-			t.Fatalf("mapRequestToLoggingOperation(%s,%s) = %q, want %q", tc.method, tc.target, got, tc.want)
+			t.Fatalf(
+				"mapRequestToLoggingOperation(%s,%s) = %q, want %q",
+				tc.method,
+				tc.target,
+				got,
+				tc.want,
+			)
 		}
 	}
 }
@@ -527,11 +544,16 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 		if err := b.PutBucketPolicy("access-remain", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
-		if err := b.PutBucketACL("access-remain", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutBucketACL(
+			"access-remain",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutBucketACL failed: %v", err)
 		}
 		if h.checkAccess(reqOther, "access-remain", "s3:GetObject", "k") {
-			t.Fatal("checkAccess should deny when allow statement exists but conditions do not match")
+			t.Fatal(
+				"checkAccess should deny when allow statement exists but conditions do not match",
+			)
 		}
 	})
 
@@ -715,7 +737,13 @@ func TestCheckAccessWithContextRestrictPublicBucketsBranch(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.test/ctx-restrict/k", nil)
 	req.Header.Set("Authorization", authHeader("tenant-access-key"))
-	if h.checkAccessWithContext(req, "ctx-restrict", "s3:GetObject", "k", backend.PolicyEvalContext{}) {
+	if h.checkAccessWithContext(
+		req,
+		"ctx-restrict",
+		"s3:GetObject",
+		"k",
+		backend.PolicyEvalContext{},
+	) {
 		t.Fatal("checkAccessWithContext should deny non-owner access with RestrictPublicBuckets")
 	}
 }
@@ -730,7 +758,11 @@ func TestBucketPolicyOwnerDenyExemptionBranches(t *testing.T) {
 		t.Fatalf("PutBucketPolicy failed: %v", err)
 	}
 
-	ownerReq := httptest.NewRequest(http.MethodGet, "http://example.test/deny-owner-exempt?policy", nil)
+	ownerReq := httptest.NewRequest(
+		http.MethodGet,
+		"http://example.test/deny-owner-exempt?policy",
+		nil,
+	)
 	ownerReq.Header.Set("Authorization", authHeader("minis3-access-key"))
 
 	if !h.checkAccess(ownerReq, "deny-owner-exempt", "s3:GetBucketPolicy", "") {
@@ -770,7 +802,12 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "src-remain")
 	mustPutObject(t, b, "src-remain", "src", "source-data")
-	if err := b.PutObjectACL("src-remain", "src", "", backend.CannedACLToPolicy("public-read")); err != nil {
+	if err := b.PutObjectACL(
+		"src-remain",
+		"src",
+		"",
+		backend.CannedACLToPolicy("public-read"),
+	); err != nil {
 		t.Fatalf("PutObjectACL failed: %v", err)
 	}
 	mustPublicWriteBucket(t, b, "dst-remain", "dst-owner")
@@ -787,7 +824,9 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				"http://example.test/dst-remain/sse-invalid?uploadId="+url.QueryEscape(uploadID)+"&partNumber=1",
+				"http://example.test/dst-remain/sse-invalid?uploadId="+url.QueryEscape(
+					uploadID,
+				)+"&partNumber=1",
 				"",
 				map[string]string{
 					"Authorization":                authHeader("dst-owner"),
@@ -816,7 +855,9 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				"http://example.test/dst-remain/dest-ssec?uploadId="+url.QueryEscape(uploadID)+"&partNumber=1",
+				"http://example.test/dst-remain/dest-ssec?uploadId="+url.QueryEscape(
+					uploadID,
+				)+"&partNumber=1",
 				"",
 				map[string]string{
 					"Authorization":     authHeader("dst-owner"),
@@ -858,7 +899,9 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			h,
 			newRequest(
 				http.MethodPut,
-				"http://example.test/dst-remain/ssec-source?uploadId="+url.QueryEscape(uploadID)+"&partNumber=1",
+				"http://example.test/dst-remain/ssec-source?uploadId="+url.QueryEscape(
+					uploadID,
+				)+"&partNumber=1",
 				"",
 				map[string]string{
 					"Authorization":     authHeader("dst-owner"),
@@ -994,7 +1037,11 @@ func TestObjectRemainingBranches(t *testing.T) {
 
 		mustCreateBucket(t, b, "obj-remain-log-target")
 		b.SetBucketOwner("obj-remain-log-target", "minis3-access-key")
-		if err := b.PutBucketPolicy("obj-remain-log-target", `{"Statement":[]}`, false); err != nil {
+		if err := b.PutBucketPolicy(
+			"obj-remain-log-target",
+			`{"Statement":[]}`,
+			false,
+		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 		h.loggingMu.Lock()
@@ -1022,32 +1069,35 @@ func TestObjectRemainingBranches(t *testing.T) {
 		requireS3ErrorCode(t, wPut, "AccessDenied")
 	})
 
-	t.Run("archived object without read-through returns forbidden invalid state", func(t *testing.T) {
-		t.Setenv("MINIS3_CLOUD_ALLOW_READ_THROUGH", "false")
-		h, b := newTestHandler(t)
-		mustCreateBucket(t, b, "obj-archive")
-		b.SetBucketOwner("obj-archive", "minis3-access-key")
-		if _, err := b.PutObject(
-			"obj-archive",
-			"cold",
-			[]byte("payload"),
-			backend.PutObjectOptions{StorageClass: "GLACIER"},
-		); err != nil {
-			t.Fatalf("PutObject GLACIER failed: %v", err)
-		}
+	t.Run(
+		"archived object without read-through returns forbidden invalid state",
+		func(t *testing.T) {
+			t.Setenv("MINIS3_CLOUD_ALLOW_READ_THROUGH", "false")
+			h, b := newTestHandler(t)
+			mustCreateBucket(t, b, "obj-archive")
+			b.SetBucketOwner("obj-archive", "minis3-access-key")
+			if _, err := b.PutObject(
+				"obj-archive",
+				"cold",
+				[]byte("payload"),
+				backend.PutObjectOptions{StorageClass: "GLACIER"},
+			); err != nil {
+				t.Fatalf("PutObject GLACIER failed: %v", err)
+			}
 
-		w := doRequest(
-			h,
-			newRequest(
-				http.MethodGet,
-				"http://example.test/obj-archive/cold",
-				"",
-				map[string]string{"Authorization": authHeader("minis3-access-key")},
-			),
-		)
-		requireStatus(t, w, http.StatusForbidden)
-		requireS3ErrorCode(t, w, "InvalidObjectState")
-	})
+			w := doRequest(
+				h,
+				newRequest(
+					http.MethodGet,
+					"http://example.test/obj-archive/cold",
+					"",
+					map[string]string{"Authorization": authHeader("minis3-access-key")},
+				),
+			)
+			requireStatus(t, w, http.StatusForbidden)
+			requireS3ErrorCode(t, w, "InvalidObjectState")
+		},
+	)
 
 	t.Run("restore object access denied and read/internal errors", func(t *testing.T) {
 		h, b := newTestHandler(t)

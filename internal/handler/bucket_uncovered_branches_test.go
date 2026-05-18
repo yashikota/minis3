@@ -276,7 +276,10 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		requireStatus(t, wIdempotent, http.StatusOK)
 
 		mustCreateBucket(t, b, "create-public")
-		if err := b.PutBucketACL("create-public", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutBucketACL(
+			"create-public",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutBucketACL failed: %v", err)
 		}
 		wPublic := doRequest(
@@ -633,7 +636,11 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wV1, http.StatusOK)
 
-		if err := b.SetBucketVersioning("cfg-err", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"cfg-err",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "cfg-err", "ver-obj", "data")

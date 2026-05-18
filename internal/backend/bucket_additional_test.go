@@ -60,7 +60,12 @@ func TestBucketManagementAndListing(t *testing.T) {
 		t.Fatalf("unexpected next page result: %+v", nextPage)
 	}
 
-	if _, err := b.PutObject("gamma-bucket", "obj", []byte("data"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"gamma-bucket",
+		"obj",
+		[]byte("data"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 	if err := b.DeleteBucket("gamma-bucket"); !errors.Is(err, ErrBucketNotEmpty) {
@@ -129,7 +134,11 @@ func TestBucketVersioningAndTypeHelpers(t *testing.T) {
 		t.Fatalf("unexpected default versioning: status=%v mfa=%v", status, mfa)
 	}
 
-	if err := b.SetBucketVersioning("versioning-bucket", VersioningEnabled, MFADeleteEnabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"versioning-bucket",
+		VersioningEnabled,
+		MFADeleteEnabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	status, mfa, err = b.GetBucketVersioning("versioning-bucket")
@@ -153,7 +162,11 @@ func TestBucketVersioningAndTypeHelpers(t *testing.T) {
 	if err := b.CreateBucketWithObjectLock("locked-bucket"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock failed: %v", err)
 	}
-	if err := b.SetBucketVersioning("locked-bucket", VersioningSuspended, MFADeleteDisabled); !errors.Is(
+	if err := b.SetBucketVersioning(
+		"locked-bucket",
+		VersioningSuspended,
+		MFADeleteDisabled,
+	); !errors.Is(
 		err,
 		ErrObjectLockNotEnabled,
 	) {
@@ -216,7 +229,10 @@ func TestACLAndPublicAccessHelpers(t *testing.T) {
 		t.Fatal("missing bucket must not be treated as public")
 	}
 
-	if err := b.PutBucketACL("acl-bucket", CannedACLToPolicy(string(ACLPublicReadWrite))); err != nil {
+	if err := b.PutBucketACL(
+		"acl-bucket",
+		CannedACLToPolicy(string(ACLPublicReadWrite)),
+	); err != nil {
 		t.Fatalf("PutBucketACL failed: %v", err)
 	}
 	if !b.IsBucketPubliclyReadable("acl-bucket") || !b.IsBucketPubliclyWritable("acl-bucket") {
@@ -237,14 +253,23 @@ func TestACLAndPublicAccessHelpers(t *testing.T) {
 		t.Fatal("default object ACL should be private")
 	}
 
-	if err := b.PutObjectACL("acl-bucket", "obj", "", CannedACLToPolicy(string(ACLPublicRead))); err != nil {
+	if err := b.PutObjectACL(
+		"acl-bucket",
+		"obj",
+		"",
+		CannedACLToPolicy(string(ACLPublicRead)),
+	); err != nil {
 		t.Fatalf("PutObjectACL failed: %v", err)
 	}
 	if !b.IsObjectPubliclyReadable("acl-bucket", "obj", "") {
 		t.Fatal("object should be publicly readable")
 	}
 
-	if err := b.SetBucketVersioning("acl-bucket", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"acl-bucket",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	v1, err := b.PutObject("acl-bucket", "versioned", []byte("v1"), PutObjectOptions{})
@@ -256,10 +281,20 @@ func TestACLAndPublicAccessHelpers(t *testing.T) {
 		t.Fatalf("PutObject v2 failed: %v", err)
 	}
 
-	if err := b.PutObjectACL("acl-bucket", "versioned", v1.VersionId, CannedACLToPolicy(string(ACLPrivate))); err != nil {
+	if err := b.PutObjectACL(
+		"acl-bucket",
+		"versioned",
+		v1.VersionId,
+		CannedACLToPolicy(string(ACLPrivate)),
+	); err != nil {
 		t.Fatalf("PutObjectACL v1 failed: %v", err)
 	}
-	if err := b.PutObjectACL("acl-bucket", "versioned", v2.VersionId, CannedACLToPolicy(string(ACLPublicRead))); err != nil {
+	if err := b.PutObjectACL(
+		"acl-bucket",
+		"versioned",
+		v2.VersionId,
+		CannedACLToPolicy(string(ACLPublicRead)),
+	); err != nil {
 		t.Fatalf("PutObjectACL v2 failed: %v", err)
 	}
 
@@ -291,7 +326,12 @@ func TestACLAndPublicAccessHelpers(t *testing.T) {
 	) {
 		t.Fatalf("expected ErrVersionNotFound, got %v", err)
 	}
-	if err := b.PutObjectACL("acl-bucket", "versioned", "missing-version", NewDefaultACL()); !errors.Is(
+	if err := b.PutObjectACL(
+		"acl-bucket",
+		"versioned",
+		"missing-version",
+		NewDefaultACL(),
+	); !errors.Is(
 		err,
 		ErrVersionNotFound,
 	) {
@@ -308,7 +348,12 @@ func TestACLAndPublicAccessHelpers(t *testing.T) {
 	) {
 		t.Fatalf("expected ErrObjectNotFound for delete marker ACL, got %v", err)
 	}
-	if err := b.PutObjectACL("acl-bucket", "versioned", delRes.VersionId, NewDefaultACL()); !errors.Is(
+	if err := b.PutObjectACL(
+		"acl-bucket",
+		"versioned",
+		delRes.VersionId,
+		NewDefaultACL(),
+	); !errors.Is(
 		err,
 		ErrObjectNotFound,
 	) {
@@ -424,7 +469,12 @@ func TestACLNormalizationForXMLRoundTrip(t *testing.T) {
 		t.Fatalf("expected CanonicalUser grantee xsi:type in XML: %s", string(bucketXML))
 	}
 
-	if _, err := b.PutObject("acl-xml-bucket", "obj", []byte("data"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"acl-xml-bucket",
+		"obj",
+		[]byte("data"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 	objectACL := &AccessControlPolicy{
@@ -801,7 +851,11 @@ func TestGetObjectVersionLookup(t *testing.T) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 
-	if err := b.SetBucketVersioning("obj-version-bucket", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"obj-version-bucket",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 

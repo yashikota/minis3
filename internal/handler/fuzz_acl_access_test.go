@@ -34,7 +34,12 @@ func FuzzEffectiveACLForResponse(f *testing.F) {
 
 func FuzzAclAllowsReadFuzz(f *testing.F) {
 	f.Add("http://acs.amazonaws.com/groups/global/AllUsers", "READ", "user-id", false)
-	f.Add("http://acs.amazonaws.com/groups/global/AuthenticatedUsers", "FULL_CONTROL", "user-id", false)
+	f.Add(
+		"http://acs.amazonaws.com/groups/global/AuthenticatedUsers",
+		"FULL_CONTROL",
+		"user-id",
+		false,
+	)
 	f.Add("", "READ", "user-id", true)
 	f.Add("http://acs.amazonaws.com/groups/global/AllUsers", "WRITE", "", true)
 
@@ -55,7 +60,12 @@ func FuzzAclAllowsReadFuzz(f *testing.F) {
 
 func FuzzAclAllowsWriteFuzz(f *testing.F) {
 	f.Add("http://acs.amazonaws.com/groups/global/AllUsers", "WRITE", "user-id", false)
-	f.Add("http://acs.amazonaws.com/groups/global/AuthenticatedUsers", "FULL_CONTROL", "user-id", false)
+	f.Add(
+		"http://acs.amazonaws.com/groups/global/AuthenticatedUsers",
+		"FULL_CONTROL",
+		"user-id",
+		false,
+	)
 	f.Add("", "WRITE", "", true)
 
 	f.Fuzz(func(t *testing.T, uri, perm, requesterID string, isAnonymous bool) {
@@ -74,24 +84,32 @@ func FuzzAclAllowsWriteFuzz(f *testing.F) {
 }
 
 func FuzzAclAllowsACPFuzz(f *testing.F) {
-	f.Add("http://acs.amazonaws.com/groups/global/AllUsers", "READ_ACP", "user-id", false, "READ_ACP")
+	f.Add(
+		"http://acs.amazonaws.com/groups/global/AllUsers",
+		"READ_ACP",
+		"user-id",
+		false,
+		"READ_ACP",
+	)
 	f.Add("", "FULL_CONTROL", "owner-id", false, "WRITE_ACP")
 	f.Add("", "WRITE_ACP", "", true, "WRITE_ACP")
 
-	f.Fuzz(func(t *testing.T, uri, grantPerm, requesterID string, isAnonymous bool, checkPerm string) {
-		acl := &backend.AccessControlPolicy{
-			Owner: &backend.Owner{ID: requesterID},
-			AccessControlList: backend.AccessControlList{
-				Grants: []backend.Grant{
-					{
-						Grantee:    &backend.Grantee{Type: "Group", URI: uri, ID: requesterID},
-						Permission: grantPerm,
+	f.Fuzz(
+		func(t *testing.T, uri, grantPerm, requesterID string, isAnonymous bool, checkPerm string) {
+			acl := &backend.AccessControlPolicy{
+				Owner: &backend.Owner{ID: requesterID},
+				AccessControlList: backend.AccessControlList{
+					Grants: []backend.Grant{
+						{
+							Grantee:    &backend.Grantee{Type: "Group", URI: uri, ID: requesterID},
+							Permission: grantPerm,
+						},
 					},
 				},
-			},
-		}
-		_ = aclAllowsACP(acl, requesterID, isAnonymous, checkPerm)
-	})
+			}
+			_ = aclAllowsACP(acl, requesterID, isAnonymous, checkPerm)
+		},
+	)
 }
 
 func FuzzNormalizeAndValidateACL(f *testing.F) {

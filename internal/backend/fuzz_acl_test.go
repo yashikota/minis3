@@ -14,9 +14,11 @@ func FuzzCannedACLToPolicyForOwner(f *testing.F) {
 	f.Add("", "id", "name", "bid", "bname")
 	f.Add("unknown-acl", "id", "name", "bid", "bname")
 
-	f.Fuzz(func(t *testing.T, cannedACL, ownerID, ownerName, bucketOwnerID, bucketOwnerName string) {
-		owner := &Owner{ID: ownerID, DisplayName: ownerName}
-		bucketOwner := &Owner{ID: bucketOwnerID, DisplayName: bucketOwnerName}
-		_ = CannedACLToPolicyForOwner(cannedACL, owner, bucketOwner)
-	})
+	f.Fuzz(
+		func(t *testing.T, cannedACL, ownerID, ownerName, bucketOwnerID, bucketOwnerName string) {
+			owner := &Owner{ID: ownerID, DisplayName: ownerName}
+			bucketOwner := &Owner{ID: bucketOwnerID, DisplayName: bucketOwnerName}
+			_ = CannedACLToPolicyForOwner(cannedACL, owner, bucketOwner)
+		},
+	)
 }

@@ -69,7 +69,13 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 	}); !errors.Is(err, ErrBucketNotFound) {
 		t.Fatalf("PutBucketOwnershipControls missing = %v, want ErrBucketNotFound", err)
 	}
-	if err := b.PutBucketOwnershipControls("src-controls", nil); !errors.Is(err, ErrInvalidRequest) {
+	if err := b.PutBucketOwnershipControls(
+		"src-controls",
+		nil,
+	); !errors.Is(
+		err,
+		ErrInvalidRequest,
+	) {
 		t.Fatalf("PutBucketOwnershipControls nil = %v, want ErrInvalidRequest", err)
 	}
 	if err := b.PutBucketOwnershipControls("src-controls", &OwnershipControls{}); !errors.Is(
@@ -96,7 +102,10 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 			err,
 		)
 	}
-	if err := b.PutBucketACL("src-controls", NewDefaultACLForOwner(OwnerForAccessKey("root-access-key"))); err != nil {
+	if err := b.PutBucketACL(
+		"src-controls",
+		NewDefaultACLForOwner(OwnerForAccessKey("root-access-key")),
+	); err != nil {
 		t.Fatalf("PutBucketACL owner-only failed: %v", err)
 	}
 	if err := b.PutBucketOwnershipControls("src-controls", &OwnershipControls{
@@ -126,7 +135,10 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 		err,
 		ErrOwnershipControlsNotFound,
 	) {
-		t.Fatalf("GetBucketOwnershipControls after delete = %v, want ErrOwnershipControlsNotFound", err)
+		t.Fatalf(
+			"GetBucketOwnershipControls after delete = %v, want ErrOwnershipControlsNotFound",
+			err,
+		)
 	}
 
 	if !bucketACLCompatibleWithOwnerEnforced(&Bucket{
@@ -253,10 +265,18 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 		t.Fatalf("TargetObjectKeyFormat should default to SimplePrefix, got %+v", afterPut)
 	}
 	if afterPut.LoggingEnabled.LoggingType != BucketLoggingTypeStandard {
-		t.Fatalf("LoggingType default = %q, want %q", afterPut.LoggingEnabled.LoggingType, BucketLoggingTypeStandard)
+		t.Fatalf(
+			"LoggingType default = %q, want %q",
+			afterPut.LoggingEnabled.LoggingType,
+			BucketLoggingTypeStandard,
+		)
 	}
 	if afterPut.LoggingEnabled.ObjectRollTime != DefaultObjectRollTime {
-		t.Fatalf("ObjectRollTime default = %d, want %d", afterPut.LoggingEnabled.ObjectRollTime, DefaultObjectRollTime)
+		t.Fatalf(
+			"ObjectRollTime default = %d, want %d",
+			afterPut.LoggingEnabled.ObjectRollTime,
+			DefaultObjectRollTime,
+		)
 	}
 
 	srcBucket, _ = b.GetBucket("src-controls")
@@ -343,7 +363,10 @@ func TestBackendBucketLoggingEqualityHelpersCoverage(t *testing.T) {
 	}
 	if !bucketLoggingConfigEqual(
 		&BucketLoggingStatus{LoggingEnabled: &LoggingEnabled{
-			TargetBucket: "target", TargetPrefix: "logs/", LoggingType: BucketLoggingTypeStandard, ObjectRollTime: DefaultObjectRollTime,
+			TargetBucket:   "target",
+			TargetPrefix:   "logs/",
+			LoggingType:    BucketLoggingTypeStandard,
+			ObjectRollTime: DefaultObjectRollTime,
 		}},
 		&BucketLoggingStatus{LoggingEnabled: &LoggingEnabled{
 			TargetBucket: "target", TargetPrefix: "logs/", LoggingType: "", ObjectRollTime: 0,
@@ -474,26 +497,40 @@ func TestBackendBucketLoggingEqualityHelpersCoverage(t *testing.T) {
 		t.Fatal("bucketLoggingFilterEqual(empty,nil) should be true")
 	}
 	if bucketLoggingFilterEqual(
-		&LoggingFilter{Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}}},
+		&LoggingFilter{
+			Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}},
+		},
 		&LoggingFilter{Key: &LoggingKeyFilter{FilterRules: []FilterRule{}}},
 	) {
 		t.Fatal("bucketLoggingFilterEqual should detect len mismatch")
 	}
 	if bucketLoggingFilterEqual(
-		&LoggingFilter{Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}}},
-		&LoggingFilter{Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "suffix", Value: "a/"}}}},
+		&LoggingFilter{
+			Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}},
+		},
+		&LoggingFilter{
+			Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "suffix", Value: "a/"}}},
+		},
 	) {
 		t.Fatal("bucketLoggingFilterEqual should detect rule name mismatch")
 	}
 	if bucketLoggingFilterEqual(
-		&LoggingFilter{Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}}},
-		&LoggingFilter{Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "b/"}}}},
+		&LoggingFilter{
+			Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}},
+		},
+		&LoggingFilter{
+			Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "b/"}}},
+		},
 	) {
 		t.Fatal("bucketLoggingFilterEqual should detect rule value mismatch")
 	}
 	if !bucketLoggingFilterEqual(
-		&LoggingFilter{Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}}},
-		&LoggingFilter{Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}}},
+		&LoggingFilter{
+			Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}},
+		},
+		&LoggingFilter{
+			Key: &LoggingKeyFilter{FilterRules: []FilterRule{{Name: "prefix", Value: "a/"}}},
+		},
 	) {
 		t.Fatal("bucketLoggingFilterEqual should accept equal rules")
 	}
@@ -502,7 +539,9 @@ func TestBackendBucketLoggingEqualityHelpersCoverage(t *testing.T) {
 		t.Fatal("bucketLogKeyFormatEqual(nil,nil) should be true")
 	}
 	if bucketLogKeyFormatEqual(
-		&TargetObjectKeyFormat{PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "DeliveryTime"}},
+		&TargetObjectKeyFormat{
+			PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "DeliveryTime"},
+		},
 		&TargetObjectKeyFormat{SimplePrefix: &SimplePrefix{}},
 	) {
 		t.Fatal("bucketLogKeyFormatEqual should detect simple/partitioned mismatch")
@@ -523,14 +562,22 @@ func TestBackendBucketLoggingEqualityHelpersCoverage(t *testing.T) {
 		t.Fatal("bucketLogKeyFormatEqual simple/simple should be true")
 	}
 	if bucketLogKeyFormatEqual(
-		&TargetObjectKeyFormat{PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "DeliveryTime"}},
-		&TargetObjectKeyFormat{PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "EventTime"}},
+		&TargetObjectKeyFormat{
+			PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "DeliveryTime"},
+		},
+		&TargetObjectKeyFormat{
+			PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "EventTime"},
+		},
 	) {
 		t.Fatal("bucketLogKeyFormatEqual should detect partition date source mismatch")
 	}
 	if !bucketLogKeyFormatEqual(
-		&TargetObjectKeyFormat{PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "DeliveryTime"}},
-		&TargetObjectKeyFormat{PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "DeliveryTime"}},
+		&TargetObjectKeyFormat{
+			PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "DeliveryTime"},
+		},
+		&TargetObjectKeyFormat{
+			PartitionedPrefix: &PartitionedPrefix{PartitionDateSource: "DeliveryTime"},
+		},
 	) {
 		t.Fatal("bucketLogKeyFormatEqual partitioned equal should be true")
 	}
@@ -557,7 +604,12 @@ func TestBackendObjectACLAndDeletePreconditionHelpersCoverage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutBucketOwnershipControls preferred setup failed: %v", err)
 	}
-	if _, err := b.PutObject("objacl-controls", "k", []byte("data"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"objacl-controls",
+		"k",
+		[]byte("data"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 
@@ -596,13 +648,22 @@ func TestBackendObjectACLAndDeletePreconditionHelpersCoverage(t *testing.T) {
 	if !strings.Contains(checksumCRC64NVMEBase64([]byte("abc")), "=") {
 		t.Fatalf("checksumCRC64NVMEBase64 should return base64 output")
 	}
-	if got := providedChecksumForPut("CRC64NVME", PutObjectOptions{ChecksumCRC64NVME: "crc64"}); got != "crc64" {
+	if got := providedChecksumForPut(
+		"CRC64NVME",
+		PutObjectOptions{ChecksumCRC64NVME: "crc64"},
+	); got != "crc64" {
 		t.Fatalf("providedChecksumForPut(CRC64NVME) = %q, want crc64", got)
 	}
-	if got := providedChecksumForPut("SHA256", PutObjectOptions{ChecksumSHA256: "sha256"}); got != "sha256" {
+	if got := providedChecksumForPut(
+		"SHA256",
+		PutObjectOptions{ChecksumSHA256: "sha256"},
+	); got != "sha256" {
 		t.Fatalf("providedChecksumForPut(SHA256) = %q, want sha256", got)
 	}
-	if got := providedChecksumForPut("unknown", PutObjectOptions{ChecksumSHA256: "sha256"}); got != "" {
+	if got := providedChecksumForPut(
+		"unknown",
+		PutObjectOptions{ChecksumSHA256: "sha256"},
+	); got != "" {
 		t.Fatalf("providedChecksumForPut(unknown) = %q, want empty", got)
 	}
 
@@ -764,7 +825,12 @@ func TestBackendRestoreAndLifecycleHelperCoverage(t *testing.T) {
 		24*time.Hour,
 	)
 	if !ok || class != "DEEP_ARCHIVE" || dueAt.IsZero() {
-		t.Fatalf("dueLifecycleTransitionStorageClass = (%q,%v,%v), want DEEP_ARCHIVE,non-zero,true", class, dueAt, ok)
+		t.Fatalf(
+			"dueLifecycleTransitionStorageClass = (%q,%v,%v), want DEEP_ARCHIVE,non-zero,true",
+			class,
+			dueAt,
+			ok,
+		)
 	}
 
 	ncClass, _, ncOK := dueNoncurrentTransitionStorageClass(
@@ -780,7 +846,11 @@ func TestBackendRestoreAndLifecycleHelperCoverage(t *testing.T) {
 		3,
 	)
 	if !ncOK || ncClass != "DEEP_ARCHIVE" {
-		t.Fatalf("dueNoncurrentTransitionStorageClass = (%q,%v), want DEEP_ARCHIVE,true", ncClass, ncOK)
+		t.Fatalf(
+			"dueNoncurrentTransitionStorageClass = (%q,%v), want DEEP_ARCHIVE,true",
+			ncClass,
+			ncOK,
+		)
 	}
 
 	lcBackend := New()
@@ -903,7 +973,10 @@ func TestBackendRestoreAndLifecycleHelperCoverage(t *testing.T) {
 	obj.RestoreOngoing = true
 	if changed := (&Backend{}).restoreExpiredArchivedObjectIfNeeded(obj, now); !changed ||
 		obj.RestoreExpiryDate != nil || obj.Size != 0 || len(obj.Data) != 0 || obj.RestoreOngoing {
-		t.Fatalf("restoreExpiredArchivedObjectIfNeeded expired should clear restore state, got %+v", obj)
+		t.Fatalf(
+			"restoreExpiredArchivedObjectIfNeeded expired should clear restore state, got %+v",
+			obj,
+		)
 	}
 
 	b := New()
@@ -1153,7 +1226,12 @@ func TestBackendPutCopyDeletePolicyAndRetentionRemainingBranches(t *testing.T) {
 		t.Fatalf("CopyObject owner-enforced/CRC64 result unexpected: %+v", copied)
 	}
 
-	if _, err := b.PutObject("copy-dst-rem", "delete-precond", []byte("12345"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"copy-dst-rem",
+		"delete-precond",
+		[]byte("12345"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject delete-precond failed: %v", err)
 	}
 	past := time.Now().UTC().Add(-time.Hour)

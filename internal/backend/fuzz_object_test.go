@@ -47,7 +47,9 @@ func FuzzIsValidJSON(f *testing.F) {
 	f.Add(`true`)
 	f.Add(`false`)
 	f.Add(`[1, "two", null, true, {"five": 5}]`)
-	f.Add(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:*","Resource":"*"}]}`)
+	f.Add(
+		`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:*","Resource":"*"}]}`,
+	)
 	f.Add("\xff\xfe")
 
 	f.Fuzz(func(t *testing.T, s string) {
@@ -57,12 +59,18 @@ func FuzzIsValidJSON(f *testing.F) {
 
 func FuzzIsSupportedBucketPolicy(f *testing.F) {
 	f.Add(`{"Version":"2012-10-17","Statement":[]}`)
-	f.Add(`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bucket/*"}]}`)
+	f.Add(
+		`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bucket/*"}]}`,
+	)
 	f.Add("")
 	f.Add("{}")
 	f.Add("not json")
-	f.Add(`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::123456789012:root"},"Action":["s3:*"],"Resource":["arn:aws:s3:::bucket","arn:aws:s3:::bucket/*"]}]}`)
-	f.Add(`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bucket/*","Condition":{"StringEquals":{"aws:UserAgent":"test"}}}]}`)
+	f.Add(
+		`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::123456789012:root"},"Action":["s3:*"],"Resource":["arn:aws:s3:::bucket","arn:aws:s3:::bucket/*"]}]}`,
+	)
+	f.Add(
+		`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bucket/*","Condition":{"StringEquals":{"aws:UserAgent":"test"}}}]}`,
+	)
 	f.Add(`{"Version":"2008-10-17","Statement":[]}`)
 
 	f.Fuzz(func(t *testing.T, policy string) {

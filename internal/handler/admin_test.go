@@ -41,11 +41,16 @@ func TestHandleAdmin_ForceDeleteBucket(t *testing.T) {
 		mustCreateObjectLockBucket(t, b, "lock-bucket")
 
 		retain := time.Now().Add(24 * 365 * time.Hour)
-		if _, err := b.PutObject("lock-bucket", "locked-key", []byte("data"), backend.PutObjectOptions{
-			RetentionMode:   backend.RetentionModeCompliance,
-			RetainUntilDate: &retain,
-			LegalHoldStatus: backend.LegalHoldStatusOn,
-		}); err != nil {
+		if _, err := b.PutObject(
+			"lock-bucket",
+			"locked-key",
+			[]byte("data"),
+			backend.PutObjectOptions{
+				RetentionMode:   backend.RetentionModeCompliance,
+				RetainUntilDate: &retain,
+				LegalHoldStatus: backend.LegalHoldStatusOn,
+			},
+		); err != nil {
 			t.Fatal(err)
 		}
 

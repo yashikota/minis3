@@ -8,7 +8,11 @@ import (
 )
 
 func FuzzXMLObjectLockConfiguration(f *testing.F) {
-	f.Add([]byte(`<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`))
+	f.Add(
+		[]byte(
+			`<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`,
+		),
+	)
 	f.Add([]byte(`<ObjectLockConfiguration></ObjectLockConfiguration>`))
 	f.Add([]byte(`not xml`))
 	f.Add([]byte{})
@@ -31,7 +35,11 @@ func FuzzXMLDeleteRequest(f *testing.F) {
 }
 
 func FuzzXMLCompleteMultipartUpload(f *testing.F) {
-	f.Add([]byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"abc"</ETag></Part></CompleteMultipartUpload>`))
+	f.Add(
+		[]byte(
+			`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"abc"</ETag></Part></CompleteMultipartUpload>`,
+		),
+	)
 	f.Add([]byte{})
 
 	f.Fuzz(func(t *testing.T, data []byte) {

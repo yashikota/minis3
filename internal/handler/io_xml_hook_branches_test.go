@@ -244,7 +244,12 @@ func TestXMLMarshalErrorHookBranches(t *testing.T) {
 	); err != nil {
 		t.Fatalf("PutPublicAccessBlock failed: %v", err)
 	}
-	if _, err := b.PutObjectTagging("marshal-bucket", "obj", "", map[string]string{"a": "b"}); err != nil {
+	if _, err := b.PutObjectTagging(
+		"marshal-bucket",
+		"obj",
+		"",
+		map[string]string{"a": "b"},
+	); err != nil {
 		t.Fatalf("PutObjectTagging failed: %v", err)
 	}
 

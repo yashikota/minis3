@@ -942,7 +942,12 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 						"The bucket does not allow ACLs",
 					)
 				} else {
-					backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+					backend.WriteError(
+						w,
+						http.StatusInternalServerError,
+						"InternalError",
+						err.Error(),
+					)
 				}
 				return
 			}
@@ -1117,7 +1122,12 @@ func (h *Handler) handlePostObjectFormUpload(
 			if statusCode == http.StatusForbidden {
 				backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 			} else {
-				backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid policy document")
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Invalid policy document",
+				)
 			}
 			return
 		}
@@ -1207,7 +1217,10 @@ func (h *Handler) handlePostObjectFormUpload(
 		}
 	}
 
-	if redirectURL := getMultipartFormValue(formFields, "success_action_redirect"); redirectURL != "" {
+	if redirectURL := getMultipartFormValue(
+		formFields,
+		"success_action_redirect",
+	); redirectURL != "" {
 		if parsed, parseErr := url.Parse(redirectURL); parseErr == nil {
 			redirectParams := strings.Join([]string{
 				"bucket=" + url.QueryEscape(bucketName),
@@ -2381,7 +2394,12 @@ func (h *Handler) handlePutBucketOwnershipControls(
 				"Bucket cannot have ACLs set with ObjectOwnership's BucketOwnerEnforced setting",
 			)
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
-			backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Invalid ownership controls.")
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"Invalid ownership controls.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -2650,7 +2668,12 @@ func (h *Handler) handlePutBucketLogging(
 				"The specified key does not exist.",
 			)
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
-			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid bucket logging configuration.")
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Invalid bucket logging configuration.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}

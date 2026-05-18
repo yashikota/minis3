@@ -94,9 +94,14 @@ func TestPutObjectBranches(t *testing.T) {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
 	if err := b.PutBucketEncryption("put-branches", &ServerSideEncryptionConfiguration{
-		Rules: []ServerSideEncryptionRule{{
-			ApplyServerSideEncryptionByDefault: &ServerSideEncryptionByDefault{SSEAlgorithm: SSEAlgorithmAWSKMS, KMSMasterKeyID: "kms-default"},
-		}},
+		Rules: []ServerSideEncryptionRule{
+			{
+				ApplyServerSideEncryptionByDefault: &ServerSideEncryptionByDefault{
+					SSEAlgorithm:   SSEAlgorithmAWSKMS,
+					KMSMasterKeyID: "kms-default",
+				},
+			},
+		},
 	}); err != nil {
 		t.Fatalf("PutBucketEncryption failed: %v", err)
 	}
@@ -197,7 +202,12 @@ func TestPutObjectBranches(t *testing.T) {
 		t.Fatalf("expected computed CRC32 checksum, err=%v obj=%+v", err, obj)
 	}
 
-	if _, err := b.PutObject("put-branches", "k-lock", []byte("x"), PutObjectOptions{RetentionMode: RetentionModeGovernance}); !errors.Is(
+	if _, err := b.PutObject(
+		"put-branches",
+		"k-lock",
+		[]byte("x"),
+		PutObjectOptions{RetentionMode: RetentionModeGovernance},
+	); !errors.Is(
 		err,
 		ErrInvalidRequest,
 	) {
@@ -220,10 +230,19 @@ func TestDeleteObjectVersionBranches(t *testing.T) {
 	if err := b.CreateBucket("delete-version-branches"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if err := b.SetBucketVersioning("delete-version-branches", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"delete-version-branches",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
-	if _, err := b.DeleteObjectVersion("delete-version-branches", "missing", "v", false); !errors.Is(
+	if _, err := b.DeleteObjectVersion(
+		"delete-version-branches",
+		"missing",
+		"v",
+		false,
+	); !errors.Is(
 		err,
 		ErrObjectNotFound,
 	) {
@@ -233,7 +252,12 @@ func TestDeleteObjectVersionBranches(t *testing.T) {
 	v1, _ := b.PutObject("delete-version-branches", "k", []byte("v1"), PutObjectOptions{})
 	v2, _ := b.PutObject("delete-version-branches", "k", []byte("v2"), PutObjectOptions{})
 
-	if _, err := b.DeleteObjectVersion("delete-version-branches", "k", "missing", false); !errors.Is(
+	if _, err := b.DeleteObjectVersion(
+		"delete-version-branches",
+		"k",
+		"missing",
+		false,
+	); !errors.Is(
 		err,
 		ErrVersionNotFound,
 	) {
@@ -257,10 +281,20 @@ func TestDeleteObjectVersionBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteObject create marker failed: %v", err)
 	}
-	if _, err := b.DeleteObjectVersion("delete-version-branches", "k", dm.VersionId, false); err != nil {
+	if _, err := b.DeleteObjectVersion(
+		"delete-version-branches",
+		"k",
+		dm.VersionId,
+		false,
+	); err != nil {
 		t.Fatalf("DeleteObjectVersion delete marker failed: %v", err)
 	}
-	if _, err := b.DeleteObjectVersion("delete-version-branches", "k", v1.VersionId, false); err != nil {
+	if _, err := b.DeleteObjectVersion(
+		"delete-version-branches",
+		"k",
+		v1.VersionId,
+		false,
+	); err != nil {
 		t.Fatalf("DeleteObjectVersion v1 failed: %v", err)
 	}
 	if _, ok := b.GetBucket("delete-version-branches"); !ok {
@@ -281,20 +315,38 @@ func TestCopyObjectBranches(t *testing.T) {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
 
-	if _, _, err := b.CopyObject("missing", "k", "", "dst-copy-branches", "d", CopyObjectOptions{}); !errors.Is(
+	if _, _, err := b.CopyObject(
+		"missing",
+		"k",
+		"",
+		"dst-copy-branches",
+		"d",
+		CopyObjectOptions{},
+	); !errors.Is(
 		err,
 		ErrSourceBucketNotFound,
 	) {
 		t.Fatalf("expected ErrSourceBucketNotFound, got %v", err)
 	}
-	if _, _, err := b.CopyObject("src-copy-branches", "missing", "", "dst-copy-branches", "d", CopyObjectOptions{}); !errors.Is(
+	if _, _, err := b.CopyObject(
+		"src-copy-branches",
+		"missing",
+		"",
+		"dst-copy-branches",
+		"d",
+		CopyObjectOptions{},
+	); !errors.Is(
 		err,
 		ErrSourceObjectNotFound,
 	) {
 		t.Fatalf("expected ErrSourceObjectNotFound, got %v", err)
 	}
 
-	if err := b.SetBucketVersioning("src-copy-branches", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"src-copy-branches",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	srcObj, _ := b.PutObject("src-copy-branches", "src", []byte("data"), PutObjectOptions{
@@ -312,7 +364,14 @@ func TestCopyObjectBranches(t *testing.T) {
 		WebsiteRedirectLocation: "/redir",
 		ChecksumAlgorithm:       "SHA256",
 	})
-	if _, _, err := b.CopyObject("src-copy-branches", "src", "missing-version", "dst-copy-branches", "d", CopyObjectOptions{}); !errors.Is(
+	if _, _, err := b.CopyObject(
+		"src-copy-branches",
+		"src",
+		"missing-version",
+		"dst-copy-branches",
+		"d",
+		CopyObjectOptions{},
+	); !errors.Is(
 		err,
 		ErrVersionNotFound,
 	) {
@@ -320,7 +379,14 @@ func TestCopyObjectBranches(t *testing.T) {
 	}
 
 	dmRes, _ := b.DeleteObject("src-copy-branches", "src", false)
-	if _, _, err := b.CopyObject("src-copy-branches", "src", dmRes.VersionId, "dst-copy-branches", "d", CopyObjectOptions{}); !errors.Is(
+	if _, _, err := b.CopyObject(
+		"src-copy-branches",
+		"src",
+		dmRes.VersionId,
+		"dst-copy-branches",
+		"d",
+		CopyObjectOptions{},
+	); !errors.Is(
 		err,
 		ErrSourceObjectNotFound,
 	) {
@@ -331,27 +397,50 @@ func TestCopyObjectBranches(t *testing.T) {
 	if _, err := b.DeleteObject("src-copy-branches", "only-marker", false); err != nil {
 		t.Fatalf("DeleteObject only-marker failed: %v", err)
 	}
-	if _, _, err := b.CopyObject("src-copy-branches", "only-marker", "", "dst-copy-branches", "d", CopyObjectOptions{}); !errors.Is(
+	if _, _, err := b.CopyObject(
+		"src-copy-branches",
+		"only-marker",
+		"",
+		"dst-copy-branches",
+		"d",
+		CopyObjectOptions{},
+	); !errors.Is(
 		err,
 		ErrSourceObjectNotFound,
 	) {
 		t.Fatalf("expected ErrSourceObjectNotFound for latest=nil source, got %v", err)
 	}
 
-	if _, _, err := b.CopyObject("src-copy-branches", "src", srcObj.VersionId, "missing", "d", CopyObjectOptions{}); !errors.Is(
+	if _, _, err := b.CopyObject(
+		"src-copy-branches",
+		"src",
+		srcObj.VersionId,
+		"missing",
+		"d",
+		CopyObjectOptions{},
+	); !errors.Is(
 		err,
 		ErrDestinationBucketNotFound,
 	) {
 		t.Fatalf("expected ErrDestinationBucketNotFound, got %v", err)
 	}
 
-	if err := b.SetBucketVersioning("dst-copy-branches", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"dst-copy-branches",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	if err := b.PutBucketEncryption("dst-copy-branches", &ServerSideEncryptionConfiguration{
-		Rules: []ServerSideEncryptionRule{{
-			ApplyServerSideEncryptionByDefault: &ServerSideEncryptionByDefault{SSEAlgorithm: SSEAlgorithmAWSKMS, KMSMasterKeyID: "dst-kms"},
-		}},
+		Rules: []ServerSideEncryptionRule{
+			{
+				ApplyServerSideEncryptionByDefault: &ServerSideEncryptionByDefault{
+					SSEAlgorithm:   SSEAlgorithmAWSKMS,
+					KMSMasterKeyID: "dst-kms",
+				},
+			},
+		},
 	}); err != nil {
 		t.Fatalf("PutBucketEncryption failed: %v", err)
 	}
@@ -407,7 +496,11 @@ func TestCopyObjectBranches(t *testing.T) {
 	}
 
 	// COPY directive branches incl metadata/tags copy, website/storage/SSE copy and destination default encryption
-	if err := b.SetBucketVersioning("dst-copy-branches", VersioningUnset, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"dst-copy-branches",
+		VersioningUnset,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	copiedDefault, _, err := b.CopyObject(
@@ -483,11 +576,25 @@ func TestCopyObjectBranches(t *testing.T) {
 	}
 
 	// Checksum override extra algorithms
-	if objSHA1, _, err := b.CopyObject("src-copy-branches", "src", srcObj.VersionId, "dst-copy-branches", "dst-sha1", CopyObjectOptions{ChecksumAlgorithm: "SHA1"}); err != nil ||
+	if objSHA1, _, err := b.CopyObject(
+		"src-copy-branches",
+		"src",
+		srcObj.VersionId,
+		"dst-copy-branches",
+		"dst-sha1",
+		CopyObjectOptions{ChecksumAlgorithm: "SHA1"},
+	); err != nil ||
 		objSHA1.ChecksumSHA1 == "" {
 		t.Fatalf("expected SHA1 recompute, err=%v obj=%+v", err, objSHA1)
 	}
-	if objSHA256, _, err := b.CopyObject("src-copy-branches", "src", srcObj.VersionId, "dst-copy-branches", "dst-sha256", CopyObjectOptions{ChecksumAlgorithm: "SHA256"}); err != nil ||
+	if objSHA256, _, err := b.CopyObject(
+		"src-copy-branches",
+		"src",
+		srcObj.VersionId,
+		"dst-copy-branches",
+		"dst-sha256",
+		CopyObjectOptions{ChecksumAlgorithm: "SHA256"},
+	); err != nil ||
 		objSHA256.ChecksumSHA256 == "" {
 		t.Fatalf("expected SHA256 recompute, err=%v obj=%+v", err, objSHA256)
 	}
@@ -558,7 +665,11 @@ func TestDeleteObjectsAndListObjectVersionsBranches(t *testing.T) {
 	if err := b.CreateBucket("versions-branches"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if err := b.SetBucketVersioning("versions-branches", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"versions-branches",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	vA1, _ := b.PutObject("versions-branches", "a/obj", []byte("a1"), PutObjectOptions{})
@@ -664,7 +775,12 @@ func TestObjectTaggingBranches(t *testing.T) {
 	if err := b.CreateBucket("tagging-branches"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if _, err := b.PutObjectTagging("tagging-branches", "missing", "", map[string]string{"a": "b"}); !errors.Is(
+	if _, err := b.PutObjectTagging(
+		"tagging-branches",
+		"missing",
+		"",
+		map[string]string{"a": "b"},
+	); !errors.Is(
 		err,
 		ErrObjectNotFound,
 	) {
@@ -677,11 +793,20 @@ func TestObjectTaggingBranches(t *testing.T) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 
-	if err := b.SetBucketVersioning("tagging-branches", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"tagging-branches",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	obj, _ := b.PutObject("tagging-branches", "k", []byte("data"), PutObjectOptions{})
-	if _, err := b.PutObjectTagging("tagging-branches", "k", "missing-version", map[string]string{"a": "b"}); !errors.Is(
+	if _, err := b.PutObjectTagging(
+		"tagging-branches",
+		"k",
+		"missing-version",
+		map[string]string{"a": "b"},
+	); !errors.Is(
 		err,
 		ErrVersionNotFound,
 	) {
@@ -697,7 +822,12 @@ func TestObjectTaggingBranches(t *testing.T) {
 	if _, err := b.DeleteObject("tagging-branches", "k", false); err != nil {
 		t.Fatalf("DeleteObject failed: %v", err)
 	}
-	if _, err := b.PutObjectTagging("tagging-branches", "k", "", map[string]string{"a": "b"}); !errors.Is(
+	if _, err := b.PutObjectTagging(
+		"tagging-branches",
+		"k",
+		"",
+		map[string]string{"a": "b"},
+	); !errors.Is(
 		err,
 		ErrObjectNotFound,
 	) {
@@ -710,7 +840,12 @@ func TestObjectTaggingBranches(t *testing.T) {
 		t.Fatalf("expected ErrObjectNotFound for delete marker, got %v", err)
 	}
 
-	if _, err := b.PutObjectTagging("tagging-branches", "k", obj.VersionId, map[string]string{"a": "b"}); err != nil {
+	if _, err := b.PutObjectTagging(
+		"tagging-branches",
+		"k",
+		obj.VersionId,
+		map[string]string{"a": "b"},
+	); err != nil {
 		t.Fatalf("expected tagging specific non-delete version success, got %v", err)
 	}
 	if _, err := b.DeleteObjectTagging("tagging-branches", "k", obj.VersionId); err != nil {
@@ -723,10 +858,19 @@ func TestListObjectsHidesKeysWithCurrentDeleteMarker(t *testing.T) {
 	if err := b.CreateBucket("list-delete-marker"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if err := b.SetBucketVersioning("list-delete-marker", VersioningEnabled, MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"list-delete-marker",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
-	if _, err := b.PutObject("list-delete-marker", "k", []byte("v1"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"list-delete-marker",
+		"k",
+		[]byte("v1"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 	if _, err := b.DeleteObject("list-delete-marker", "k", false); err != nil {

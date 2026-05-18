@@ -60,7 +60,12 @@ func TestCheckAccessAdditionalBranches(t *testing.T) {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
 	b.SetBucketOwner("access-branch", "owner-ak")
-	if _, err := b.PutObject("access-branch", "obj", []byte("data"), backend.PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"access-branch",
+		"obj",
+		[]byte("data"),
+		backend.PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 	h := New(b)
@@ -95,7 +100,10 @@ func TestCheckAccessAdditionalBranches(t *testing.T) {
 		if err := b.DeleteBucketPolicy("access-branch"); err != nil {
 			t.Fatalf("DeleteBucketPolicy failed: %v", err)
 		}
-		if err := b.PutBucketACL("access-branch", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutBucketACL(
+			"access-branch",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutBucketACL failed: %v", err)
 		}
 		if err := b.PutPublicAccessBlock(

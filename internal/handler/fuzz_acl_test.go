@@ -20,24 +20,26 @@ func FuzzAclFromGrantHeaders(f *testing.F) {
 	f.Add("unknown=value", "", "", "", "")
 	f.Add("", "", "", "", "")
 
-	f.Fuzz(func(t *testing.T, grantRead, grantWrite, grantReadACP, grantWriteACP, grantFull string) {
-		req := httptest.NewRequest(http.MethodPut, "/bucket/key", nil)
-		if grantRead != "" {
-			req.Header.Set("x-amz-grant-read", grantRead)
-		}
-		if grantWrite != "" {
-			req.Header.Set("x-amz-grant-write", grantWrite)
-		}
-		if grantReadACP != "" {
-			req.Header.Set("x-amz-grant-read-acp", grantReadACP)
-		}
-		if grantWriteACP != "" {
-			req.Header.Set("x-amz-grant-write-acp", grantWriteACP)
-		}
-		if grantFull != "" {
-			req.Header.Set("x-amz-grant-full-control", grantFull)
-		}
-		owner := &backend.Owner{ID: "owner-id", DisplayName: "owner"}
-		_, _ = aclFromGrantHeaders(req, owner)
-	})
+	f.Fuzz(
+		func(t *testing.T, grantRead, grantWrite, grantReadACP, grantWriteACP, grantFull string) {
+			req := httptest.NewRequest(http.MethodPut, "/bucket/key", nil)
+			if grantRead != "" {
+				req.Header.Set("x-amz-grant-read", grantRead)
+			}
+			if grantWrite != "" {
+				req.Header.Set("x-amz-grant-write", grantWrite)
+			}
+			if grantReadACP != "" {
+				req.Header.Set("x-amz-grant-read-acp", grantReadACP)
+			}
+			if grantWriteACP != "" {
+				req.Header.Set("x-amz-grant-write-acp", grantWriteACP)
+			}
+			if grantFull != "" {
+				req.Header.Set("x-amz-grant-full-control", grantFull)
+			}
+			owner := &backend.Owner{ID: "owner-id", DisplayName: "owner"}
+			_, _ = aclFromGrantHeaders(req, owner)
+		},
+	)
 }

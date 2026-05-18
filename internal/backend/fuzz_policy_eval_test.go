@@ -49,9 +49,15 @@ func FuzzEvaluateBucketPolicyAccess(f *testing.F) {
 }
 
 func FuzzIsPolicyPublic(f *testing.F) {
-	f.Add(`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"*"}]}`)
-	f.Add(`{"Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789012:root"},"Action":"s3:GetObject","Resource":"*"}]}`)
-	f.Add(`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"*","Condition":{"StringEquals":{"aws:Referer":"x"}}}]}`)
+	f.Add(
+		`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"*"}]}`,
+	)
+	f.Add(
+		`{"Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789012:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+	)
+	f.Add(
+		`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"*","Condition":{"StringEquals":{"aws:Referer":"x"}}}]}`,
+	)
 	f.Add("")
 	f.Add("{}")
 	f.Add("invalid")
@@ -120,7 +126,13 @@ func FuzzMatchResourcePattern(f *testing.F) {
 func FuzzEvaluateCondition(f *testing.F) {
 	f.Add("StringEquals", "aws:Referer", "http://example.com", "s3:GetObject", "http://example.com")
 	f.Add("StringNotEquals", "aws:Referer", "http://bad.com", "s3:GetObject", "http://example.com")
-	f.Add("StringLike", "aws:Referer", "http://*.example.com/*", "s3:GetObject", "http://www.example.com/page")
+	f.Add(
+		"StringLike",
+		"aws:Referer",
+		"http://*.example.com/*",
+		"s3:GetObject",
+		"http://www.example.com/page",
+	)
 	f.Add("StringNotLike", "aws:Referer", "http://bad.*", "s3:GetObject", "http://good.com")
 	f.Add("Null", "aws:Referer", "true", "s3:GetObject", "")
 	f.Add("Null", "aws:Referer", "false", "s3:GetObject", "value")

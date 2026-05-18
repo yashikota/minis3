@@ -118,7 +118,11 @@ func TestCopyObjectAdditionalBranches(t *testing.T) {
 		h, b := setupCopyHandler(t)
 		b.SetBucketOwner("src", "copy-owner")
 		b.SetBucketOwner("dst", "copy-owner")
-		if err := b.SetBucketVersioning("src", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"src",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "src", "key", "new-data")
@@ -144,7 +148,11 @@ func TestCopyObjectAdditionalBranches(t *testing.T) {
 		h, b := setupCopyHandler(t)
 		b.SetBucketOwner("src", "copy-owner")
 		b.SetBucketOwner("dst", "copy-owner")
-		if err := b.SetBucketVersioning("src", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"src",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "src", "key", "new-data")
@@ -181,7 +189,11 @@ func TestCopyObjectAdditionalBranches(t *testing.T) {
 		h, b := setupCopyHandler(t)
 		b.SetBucketOwner("src", "copy-owner")
 		b.SetBucketOwner("dst", "copy-owner")
-		if err := b.SetBucketVersioning("src", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"src",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "src", "key", "new-data")
@@ -231,10 +243,18 @@ func TestCopyObjectAdditionalBranches(t *testing.T) {
 		h, b := setupCopyHandler(t)
 		b.SetBucketOwner("src", "copy-owner")
 		b.SetBucketOwner("dst", "copy-owner")
-		if err := b.SetBucketVersioning("src", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"src",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
-		if err := b.SetBucketVersioning("dst", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"dst",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "src", "key", "latest-data")

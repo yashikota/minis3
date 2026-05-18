@@ -53,17 +53,19 @@ func FuzzSetStorageAndEncryptionHeaders(f *testing.F) {
 	f.Add("", "", "", "", "")
 	f.Add("INTELLIGENT_TIERING", "aws:kms:dsse", "key-id", "", "")
 
-	f.Fuzz(func(t *testing.T, storageClass, sse, sseKMSKeyID, sseCustomerAlgo, sseCustomerKeyMD5 string) {
-		obj := &backend.Object{
-			StorageClass:         storageClass,
-			ServerSideEncryption: sse,
-			SSEKMSKeyId:          sseKMSKeyID,
-			SSECustomerAlgorithm: sseCustomerAlgo,
-			SSECustomerKeyMD5:    sseCustomerKeyMD5,
-		}
-		recorder := httptest.NewRecorder()
-		setStorageAndEncryptionHeaders(recorder, obj)
-	})
+	f.Fuzz(
+		func(t *testing.T, storageClass, sse, sseKMSKeyID, sseCustomerAlgo, sseCustomerKeyMD5 string) {
+			obj := &backend.Object{
+				StorageClass:         storageClass,
+				ServerSideEncryption: sse,
+				SSEKMSKeyId:          sseKMSKeyID,
+				SSECustomerAlgorithm: sseCustomerAlgo,
+				SSECustomerKeyMD5:    sseCustomerKeyMD5,
+			}
+			recorder := httptest.NewRecorder()
+			setStorageAndEncryptionHeaders(recorder, obj)
+		},
+	)
 }
 
 func FuzzSetChecksumResponseHeaders(f *testing.F) {

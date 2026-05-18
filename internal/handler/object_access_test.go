@@ -37,7 +37,10 @@ func TestHandleObjectAnonymousPutAllowedOnPublicWriteBucket(t *testing.T) {
 	if err := b.CreateBucket("bucket-public-write"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
-	if err := b.PutBucketACL("bucket-public-write", backend.CannedACLToPolicy("public-read-write")); err != nil {
+	if err := b.PutBucketACL(
+		"bucket-public-write",
+		backend.CannedACLToPolicy("public-read-write"),
+	); err != nil {
 		t.Fatalf("PutBucketACL failed: %v", err)
 	}
 	h := New(b)
@@ -64,13 +67,23 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
 	b.SetBucketOwner("bucket-acl", "minis3-access-key")
-	if _, err := b.PutObject("bucket-acl", "obj", []byte("data"), backend.PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"bucket-acl",
+		"obj",
+		[]byte("data"),
+		backend.PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 	h := New(b)
 
 	t.Run("public-read object is readable anonymously", func(t *testing.T) {
-		if err := b.PutObjectACL("bucket-acl", "obj", "", backend.CannedACLToPolicy("public-read")); err != nil {
+		if err := b.PutObjectACL(
+			"bucket-acl",
+			"obj",
+			"",
+			backend.CannedACLToPolicy("public-read"),
+		); err != nil {
 			t.Fatalf("PutObjectACL failed: %v", err)
 		}
 
@@ -84,7 +97,12 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 	})
 
 	t.Run("private object is not readable anonymously", func(t *testing.T) {
-		if err := b.PutObjectACL("bucket-acl", "obj", "", backend.CannedACLToPolicy("private")); err != nil {
+		if err := b.PutObjectACL(
+			"bucket-acl",
+			"obj",
+			"",
+			backend.CannedACLToPolicy("private"),
+		); err != nil {
 			t.Fatalf("PutObjectACL failed: %v", err)
 		}
 
@@ -175,7 +193,10 @@ func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
 	b.SetBucketOwner("bucket-owner-read-test", "minis3-access-key")
-	if err := b.PutBucketACL("bucket-owner-read-test", backend.CannedACLToPolicy("public-read-write")); err != nil {
+	if err := b.PutBucketACL(
+		"bucket-owner-read-test",
+		backend.CannedACLToPolicy("public-read-write"),
+	); err != nil {
 		t.Fatalf("PutBucketACL failed: %v", err)
 	}
 	h := New(b)
@@ -641,7 +662,12 @@ func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
 		t.Fatalf("CreateBucket failed: %v", err)
 	}
 	b.SetBucketOwner("bucket-copy-acl", "minis3-access-key")
-	if _, err := b.PutObject("bucket-copy-acl", "src", []byte("data"), backend.PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"bucket-copy-acl",
+		"src",
+		[]byte("data"),
+		backend.PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 	h := New(b)

@@ -44,7 +44,12 @@ func FuzzParseMultipartFormFields(f *testing.F) {
 
 func FuzzIsAnonymousRequestExtended(f *testing.F) {
 	f.Add("", "", "", "")
-	f.Add("AWS4-HMAC-SHA256 Credential=AKID/20230101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=abc", "", "", "")
+	f.Add(
+		"AWS4-HMAC-SHA256 Credential=AKID/20230101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=abc",
+		"",
+		"",
+		"",
+	)
 	f.Add("", "X-Amz-Credential", "AKID/20230101/us-east-1/s3/aws4_request", "")
 	f.Add("", "AWSAccessKeyId", "AKID", "sig")
 	f.Add("AWS AKID:sig", "", "", "")

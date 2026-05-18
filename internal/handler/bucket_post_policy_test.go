@@ -805,16 +805,34 @@ func TestResolvePostPolicyFieldValue(t *testing.T) {
 		"x-amz-meta-project":      "alpha",
 	}
 
-	if got := resolvePostPolicyFieldValue("bucket", "bucket-a", "k", "text/plain", form); got != "bucket-a" {
+	if got := resolvePostPolicyFieldValue(
+		"bucket",
+		"bucket-a",
+		"k",
+		"text/plain",
+		form,
+	); got != "bucket-a" {
 		t.Fatalf("unexpected bucket value: %q", got)
 	}
 	if got := resolvePostPolicyFieldValue("$key", "bucket-a", "k", "text/plain", form); got != "k" {
 		t.Fatalf("unexpected key value: %q", got)
 	}
-	if got := resolvePostPolicyFieldValue("$Content-Type", "bucket-a", "k", "text/plain", form); got != "text/plain" {
+	if got := resolvePostPolicyFieldValue(
+		"$Content-Type",
+		"bucket-a",
+		"k",
+		"text/plain",
+		form,
+	); got != "text/plain" {
 		t.Fatalf("unexpected content-type value: %q", got)
 	}
-	if got := resolvePostPolicyFieldValue("$x-amz-meta-project", "bucket-a", "k", "text/plain", form); got != "alpha" {
+	if got := resolvePostPolicyFieldValue(
+		"$x-amz-meta-project",
+		"bucket-a",
+		"k",
+		"text/plain",
+		form,
+	); got != "alpha" {
 		t.Fatalf("unexpected form field value: %q", got)
 	}
 }

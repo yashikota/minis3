@@ -203,7 +203,10 @@ func TestPolicyPrincipalHelperBranches(t *testing.T) {
 	}
 
 	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"other"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"},{"Effect":"Allow","Principal":{"AWS":"other"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`
-	if effect := EvaluateBucketPolicyAccess(policy, PolicyEvalContext{Action: "s3:GetObject", Resource: "arn:aws:s3:::b/k", AccessKey: "ak"}); effect != PolicyEffectDefault {
+	if effect := EvaluateBucketPolicyAccess(
+		policy,
+		PolicyEvalContext{Action: "s3:GetObject", Resource: "arn:aws:s3:::b/k", AccessKey: "ak"},
+	); effect != PolicyEffectDefault {
 		t.Fatalf("expected principal mismatch to result in default effect, got %v", effect)
 	}
 }
@@ -773,7 +776,13 @@ func TestCompleteMultipartUploadNormalizedPartsGuardBranch(t *testing.T) {
 		t.Fatalf("CreateMultipartUpload failed: %v", err)
 	}
 
-	if _, err := b.UploadPart("multipart-normalize-guard", "obj", upload.UploadId, 1, []byte("x")); err != nil {
+	if _, err := b.UploadPart(
+		"multipart-normalize-guard",
+		"obj",
+		upload.UploadId,
+		1,
+		[]byte("x"),
+	); err != nil {
 		t.Fatalf("UploadPart failed: %v", err)
 	}
 

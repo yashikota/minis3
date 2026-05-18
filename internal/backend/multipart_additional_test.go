@@ -124,13 +124,31 @@ func TestListPartsScenarios(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMultipartUpload failed: %v", err)
 	}
-	if _, err := b.UploadPart("parts-bucket", "obj", upload.UploadId, 1, []byte("part-1")); err != nil {
+	if _, err := b.UploadPart(
+		"parts-bucket",
+		"obj",
+		upload.UploadId,
+		1,
+		[]byte("part-1"),
+	); err != nil {
 		t.Fatalf("UploadPart 1 failed: %v", err)
 	}
-	if _, err := b.UploadPart("parts-bucket", "obj", upload.UploadId, 2, []byte("part-2")); err != nil {
+	if _, err := b.UploadPart(
+		"parts-bucket",
+		"obj",
+		upload.UploadId,
+		2,
+		[]byte("part-2"),
+	); err != nil {
 		t.Fatalf("UploadPart 2 failed: %v", err)
 	}
-	if _, err := b.UploadPart("parts-bucket", "obj", upload.UploadId, 3, []byte("part-3")); err != nil {
+	if _, err := b.UploadPart(
+		"parts-bucket",
+		"obj",
+		upload.UploadId,
+		3,
+		[]byte("part-3"),
+	); err != nil {
 		t.Fatalf("UploadPart 3 failed: %v", err)
 	}
 
@@ -160,13 +178,23 @@ func TestListPartsScenarios(t *testing.T) {
 		t.Fatalf("unexpected second page result: %+v", res)
 	}
 
-	if _, _, err := b.ListParts("parts-bucket", "wrong-key", upload.UploadId, ListPartsOptions{}); !errors.Is(
+	if _, _, err := b.ListParts(
+		"parts-bucket",
+		"wrong-key",
+		upload.UploadId,
+		ListPartsOptions{},
+	); !errors.Is(
 		err,
 		ErrNoSuchUpload,
 	) {
 		t.Fatalf("expected ErrNoSuchUpload for wrong key, got %v", err)
 	}
-	if _, _, err := b.ListParts("parts-bucket", "obj", "missing-upload", ListPartsOptions{}); !errors.Is(
+	if _, _, err := b.ListParts(
+		"parts-bucket",
+		"obj",
+		"missing-upload",
+		ListPartsOptions{},
+	); !errors.Is(
 		err,
 		ErrNoSuchUpload,
 	) {

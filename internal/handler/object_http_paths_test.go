@@ -147,7 +147,11 @@ func TestHandleObjectMainPaths(t *testing.T) {
 	})
 
 	t.Run("head object on delete marker", func(t *testing.T) {
-		if err := b.SetBucketVersioning("obj-http", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"obj-http",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "obj-http", "ver", "v1")

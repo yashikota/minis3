@@ -52,7 +52,11 @@ func TestBucketOperationHandlers(t *testing.T) {
 	mustPutObject(t, b, "bucket", "a/1.txt", "one")
 	mustPutObject(t, b, "bucket", "a/2.txt", "two")
 
-	if err := b.SetBucketVersioning("bucket", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"bucket",
+		backend.VersioningEnabled,
+		backend.MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	mustPutObject(t, b, "bucket", "versioned.txt", "v1")

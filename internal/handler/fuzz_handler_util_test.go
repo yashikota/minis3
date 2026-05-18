@@ -25,7 +25,11 @@ func FuzzExtractBucketAndKey(f *testing.F) {
 }
 
 func FuzzExtractAccessKey(f *testing.F) {
-	f.Add("AWS4-HMAC-SHA256 Credential=AKID/20230101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=sig", "", "")
+	f.Add(
+		"AWS4-HMAC-SHA256 Credential=AKID/20230101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=sig",
+		"",
+		"",
+	)
 	f.Add("AWS AKID:signature", "", "")
 	f.Add("", "AKID/20230101/us-east-1/s3/aws4_request", "")
 	f.Add("", "", "AKID")

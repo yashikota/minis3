@@ -277,10 +277,20 @@ func TestGetBucketUsage(t *testing.T) {
 		if err := b.CreateBucket("usage-unversioned"); err != nil {
 			t.Fatalf("CreateBucket failed: %v", err)
 		}
-		if _, err := b.PutObject("usage-unversioned", "a", []byte("abc"), PutObjectOptions{}); err != nil {
+		if _, err := b.PutObject(
+			"usage-unversioned",
+			"a",
+			[]byte("abc"),
+			PutObjectOptions{},
+		); err != nil {
 			t.Fatalf("PutObject a failed: %v", err)
 		}
-		if _, err := b.PutObject("usage-unversioned", "b", []byte("hello"), PutObjectOptions{}); err != nil {
+		if _, err := b.PutObject(
+			"usage-unversioned",
+			"b",
+			[]byte("hello"),
+			PutObjectOptions{},
+		); err != nil {
 			t.Fatalf("PutObject b failed: %v", err)
 		}
 
@@ -308,11 +318,20 @@ func TestGetBucketUsage(t *testing.T) {
 		if err := b.CreateBucket("usage-versioned"); err != nil {
 			t.Fatalf("CreateBucket failed: %v", err)
 		}
-		if err := b.SetBucketVersioning("usage-versioned", VersioningEnabled, MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"usage-versioned",
+			VersioningEnabled,
+			MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 
-		if _, err := b.PutObject("usage-versioned", "k", []byte("abc"), PutObjectOptions{}); err != nil {
+		if _, err := b.PutObject(
+			"usage-versioned",
+			"k",
+			[]byte("abc"),
+			PutObjectOptions{},
+		); err != nil {
 			t.Fatalf("PutObject failed: %v", err)
 		}
 		if _, err := b.DeleteObject("usage-versioned", "k", false); err != nil {
@@ -352,7 +371,12 @@ func TestForceDeleteBucket(t *testing.T) {
 		if err := b.CreateBucket("test-bucket"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := b.PutObject("test-bucket", "key1", []byte("data"), PutObjectOptions{}); err != nil {
+		if _, err := b.PutObject(
+			"test-bucket",
+			"key1",
+			[]byte("data"),
+			PutObjectOptions{},
+		); err != nil {
 			t.Fatal(err)
 		}
 

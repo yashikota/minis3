@@ -372,7 +372,9 @@ func (h *Handler) handleCreateMultipartUpload(
 	if sse := r.Header.Get("x-amz-server-side-encryption"); sse != "" {
 		opts.ServerSideEncryption = sse
 	}
-	if sseKmsKeyId := r.Header.Get("x-amz-server-side-encryption-aws-kms-key-id"); sseKmsKeyId != "" {
+	if sseKmsKeyId := r.Header.Get(
+		"x-amz-server-side-encryption-aws-kms-key-id",
+	); sseKmsKeyId != "" {
 		opts.SSEKMSKeyId = sseKmsKeyId
 	}
 	// SSE-C headers

@@ -147,7 +147,12 @@ func TestLoadCopySourceObjectForUploadPart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PutObject v1 failed: %v", err)
 	}
-	if _, err := b.PutObject("src-load", "ver", []byte("two"), backend.PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"src-load",
+		"ver",
+		[]byte("two"),
+		backend.PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject v2 failed: %v", err)
 	}
 

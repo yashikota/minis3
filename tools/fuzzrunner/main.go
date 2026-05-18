@@ -19,7 +19,11 @@ type fuzzTarget struct {
 
 func main() {
 	fuzzTime := flag.String("fuzztime", "3m", "value for go test -fuzztime")
-	parallel := flag.Int("parallel", 0, "number of fuzz targets to run concurrently; 0 uses runtime.NumCPU")
+	parallel := flag.Int(
+		"parallel",
+		0,
+		"number of fuzz targets to run concurrently; 0 uses runtime.NumCPU",
+	)
 	flag.Parse()
 
 	if err := run(context.Background(), *fuzzTime, normalizeParallel(*parallel)); err != nil {
@@ -41,7 +45,12 @@ func run(ctx context.Context, fuzzTime string, parallel int) error {
 		parallel = len(targets)
 	}
 
-	fmt.Printf("running %d fuzz targets with parallel=%d fuzztime=%s\n", len(targets), parallel, fuzzTime)
+	fmt.Printf(
+		"running %d fuzz targets with parallel=%d fuzztime=%s\n",
+		len(targets),
+		parallel,
+		fuzzTime,
+	)
 
 	jobs := make(chan fuzzTarget)
 	errs := make(chan error, len(targets))
@@ -70,7 +79,11 @@ func run(ctx context.Context, fuzzTime string, parallel int) error {
 		failures = append(failures, err.Error())
 	}
 	if len(failures) > 0 {
-		return fmt.Errorf("%d fuzz target(s) failed:\n%s", len(failures), strings.Join(failures, "\n"))
+		return fmt.Errorf(
+			"%d fuzz target(s) failed:\n%s",
+			len(failures),
+			strings.Join(failures, "\n"),
+		)
 	}
 	return nil
 }
@@ -108,7 +121,12 @@ func goList(ctx context.Context, pattern string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "go", "list", pattern)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("go list %s failed: %w\n%s", pattern, err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf(
+			"go list %s failed: %w\n%s",
+			pattern,
+			err,
+			strings.TrimSpace(string(out)),
+		)
 	}
 	return nonEmptyLines(string(out)), nil
 }
@@ -117,7 +135,12 @@ func goTestListFuzz(ctx context.Context, pkg string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "go", "test", "-list", "^Fuzz", pkg)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("go test -list ^Fuzz %s failed: %w\n%s", pkg, err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf(
+			"go test -list ^Fuzz %s failed: %w\n%s",
+			pkg,
+			err,
+			strings.TrimSpace(string(out)),
+		)
 	}
 
 	var names []string

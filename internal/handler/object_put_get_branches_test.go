@@ -99,7 +99,11 @@ func TestHandleObjectGetAdditionalErrorBranches(t *testing.T) {
 
 	t.Run("get missing version returns no such version", func(t *testing.T) {
 		mustCreateBucket(t, b, "obj-get-version")
-		if err := b.SetBucketVersioning("obj-get-version", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"obj-get-version",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "obj-get-version", "k", "v1")
@@ -118,7 +122,11 @@ func TestHandleObjectGetAdditionalErrorBranches(t *testing.T) {
 
 	t.Run("get latest delete marker returns delete marker headers", func(t *testing.T) {
 		mustCreateBucket(t, b, "obj-get-delete-marker")
-		if err := b.SetBucketVersioning("obj-get-delete-marker", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"obj-get-delete-marker",
+			backend.VersioningEnabled,
+			backend.MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "obj-get-delete-marker", "k", "v1")

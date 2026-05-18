@@ -52,13 +52,13 @@ func FuzzChecksumFromCompletePart(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, algorithm, checksumValue string) {
 		part := backend.CompletePart{
-			PartNumber:       1,
-			ETag:             "\"etag\"",
-			ChecksumCRC32:    checksumValue,
-			ChecksumCRC32C:   checksumValue,
+			PartNumber:        1,
+			ETag:              "\"etag\"",
+			ChecksumCRC32:     checksumValue,
+			ChecksumCRC32C:    checksumValue,
 			ChecksumCRC64NVME: checksumValue,
-			ChecksumSHA1:     checksumValue,
-			ChecksumSHA256:   checksumValue,
+			ChecksumSHA1:      checksumValue,
+			ChecksumSHA256:    checksumValue,
 		}
 		_ = checksumFromCompletePart(algorithm, part)
 	})

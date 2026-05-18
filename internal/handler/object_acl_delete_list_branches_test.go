@@ -16,7 +16,11 @@ import (
 func TestDeleteObjectsResponseBranches(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "delobj-branch")
-	if err := b.SetBucketVersioning("delobj-branch", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"delobj-branch",
+		backend.VersioningEnabled,
+		backend.MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 
@@ -504,7 +508,11 @@ func TestObjectTaggingAdditionalBranches(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "tag-branch")
 	b.SetBucketOwner("tag-branch", "owner-ak")
-	if err := b.SetBucketVersioning("tag-branch", backend.VersioningEnabled, backend.MFADeleteDisabled); err != nil {
+	if err := b.SetBucketVersioning(
+		"tag-branch",
+		backend.VersioningEnabled,
+		backend.MFADeleteDisabled,
+	); err != nil {
 		t.Fatalf("SetBucketVersioning failed: %v", err)
 	}
 	mustPutObject(t, b, "tag-branch", "k", "v")

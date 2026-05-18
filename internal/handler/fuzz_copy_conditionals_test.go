@@ -16,30 +16,32 @@ func FuzzEvaluateCopySourceConditionals(f *testing.F) {
 	f.Add("", "", "", "Thu, 01 Jan 2024 00:00:00 GMT", "\"etag\"", int64(1700000000))
 	f.Add("", "", "", "", "\"etag\"", int64(1700000000))
 
-	f.Fuzz(func(t *testing.T, ifMatch, ifUnmodifiedSince, ifNoneMatch, ifModifiedSince, etag string, lastModUnix int64) {
-		if lastModUnix < 0 || lastModUnix > 1e12 {
-			return
-		}
-		req := httptest.NewRequest(http.MethodPut, "/bucket/key", nil)
-		if ifMatch != "" {
-			req.Header.Set("x-amz-copy-source-if-match", ifMatch)
-		}
-		if ifUnmodifiedSince != "" {
-			req.Header.Set("x-amz-copy-source-if-unmodified-since", ifUnmodifiedSince)
-		}
-		if ifNoneMatch != "" {
-			req.Header.Set("x-amz-copy-source-if-none-match", ifNoneMatch)
-		}
-		if ifModifiedSince != "" {
-			req.Header.Set("x-amz-copy-source-if-modified-since", ifModifiedSince)
-		}
-		lastMod := time.Unix(lastModUnix, 0)
-		srcObj := &backend.Object{
-			ETag:         etag,
-			LastModified: lastMod,
-		}
-		_ = evaluateCopySourceConditionals(req, srcObj)
-	})
+	f.Fuzz(
+		func(t *testing.T, ifMatch, ifUnmodifiedSince, ifNoneMatch, ifModifiedSince, etag string, lastModUnix int64) {
+			if lastModUnix < 0 || lastModUnix > 1e12 {
+				return
+			}
+			req := httptest.NewRequest(http.MethodPut, "/bucket/key", nil)
+			if ifMatch != "" {
+				req.Header.Set("x-amz-copy-source-if-match", ifMatch)
+			}
+			if ifUnmodifiedSince != "" {
+				req.Header.Set("x-amz-copy-source-if-unmodified-since", ifUnmodifiedSince)
+			}
+			if ifNoneMatch != "" {
+				req.Header.Set("x-amz-copy-source-if-none-match", ifNoneMatch)
+			}
+			if ifModifiedSince != "" {
+				req.Header.Set("x-amz-copy-source-if-modified-since", ifModifiedSince)
+			}
+			lastMod := time.Unix(lastModUnix, 0)
+			srcObj := &backend.Object{
+				ETag:         etag,
+				LastModified: lastMod,
+			}
+			_ = evaluateCopySourceConditionals(req, srcObj)
+		},
+	)
 }
 
 func FuzzLifecycleObjectHasTagForHeader(f *testing.F) {

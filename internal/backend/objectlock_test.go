@@ -257,7 +257,12 @@ func TestPutObjectRetentionVersionNotFound(t *testing.T) {
 	if err := b.CreateBucketWithObjectLock("bucket-retention-version"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock failed: %v", err)
 	}
-	if _, err := b.PutObject("bucket-retention-version", "obj", []byte("data"), PutObjectOptions{}); err != nil {
+	if _, err := b.PutObject(
+		"bucket-retention-version",
+		"obj",
+		[]byte("data"),
+		PutObjectOptions{},
+	); err != nil {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 

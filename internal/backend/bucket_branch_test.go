@@ -24,7 +24,11 @@ func TestBucketBranchCoverage(t *testing.T) {
 		if err := b.DeleteBucketTagging("missing"); !errors.Is(err, ErrBucketNotFound) {
 			t.Fatalf("expected ErrBucketNotFound from DeleteBucketTagging, got %v", err)
 		}
-		if err := b.PutBucketPolicy("missing", `{"Version":"2012-10-17","Statement":[]}`, false); !errors.Is(
+		if err := b.PutBucketPolicy(
+			"missing",
+			`{"Version":"2012-10-17","Statement":[]}`,
+			false,
+		); !errors.Is(
 			err,
 			ErrBucketNotFound,
 		) {
@@ -60,10 +64,19 @@ func TestBucketBranchCoverage(t *testing.T) {
 		if err := b.CreateBucket("usage-nil-latest"); err != nil {
 			t.Fatalf("CreateBucket failed: %v", err)
 		}
-		if err := b.SetBucketVersioning("usage-nil-latest", VersioningEnabled, MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"usage-nil-latest",
+			VersioningEnabled,
+			MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
-		if _, err := b.PutObject("usage-nil-latest", "key", []byte("data"), PutObjectOptions{}); err != nil {
+		if _, err := b.PutObject(
+			"usage-nil-latest",
+			"key",
+			[]byte("data"),
+			PutObjectOptions{},
+		); err != nil {
 			t.Fatalf("PutObject failed: %v", err)
 		}
 		if _, err := b.DeleteObject("usage-nil-latest", "key", false); err != nil {
@@ -81,7 +94,11 @@ func TestBucketBranchCoverage(t *testing.T) {
 			)
 		}
 
-		if err := b.SetBucketVersioning("usage-nil-latest", VersioningSuspended, MFADeleteDisabled); err != nil {
+		if err := b.SetBucketVersioning(
+			"usage-nil-latest",
+			VersioningSuspended,
+			MFADeleteDisabled,
+		); err != nil {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		if _, err := b.DeleteObject("usage-nil-latest", "only-marker", false); err != nil {
