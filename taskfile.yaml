@@ -30,6 +30,14 @@ tasks:
     cmds:
       - richgo test -v -shuffle=on -race ./...
 
+  fuzz:
+    desc: "Run all fuzz tests in parallel (auto-detects CPU count)"
+    vars:
+      FUZZ_TIME: '{{.FUZZ_TIME | default "3m"}}'
+      FUZZ_PARALLEL: '{{.FUZZ_PARALLEL | default "0"}}'
+    cmds:
+      - go run ./tools/fuzzrunner -fuzztime={{.FUZZ_TIME}} -parallel={{.FUZZ_PARALLEL}}
+
   s3-test:
     desc: "ceph/s3-tests test"
     dir: integration/s3-test

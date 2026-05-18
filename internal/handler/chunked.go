@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -57,6 +58,11 @@ func (cr *chunkedReader) readChunk() ([]byte, error) {
 	size, err := strconv.ParseInt(sizePart, 16, 64)
 	if err != nil {
 		return nil, err
+	}
+
+	const maxChunkSize = 64 * 1024 * 1024 // 64 MiB
+	if size < 0 || size > maxChunkSize {
+		return nil, errors.New("chunk size exceeds maximum allowed")
 	}
 
 	if size == 0 {
