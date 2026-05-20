@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -164,12 +166,38 @@ func runFuzzTarget(ctx context.Context, target fuzzTarget, fuzzTime string) erro
 		"-fuzztime="+fuzzTime,
 		"-parallel=1",
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	var buf bytes.Buffer
+	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
+
 	if err := cmd.Run(); err != nil {
+		// Go 1.25+ exits with status 1 and "context deadline exceeded"
+		// when a fuzz target reaches its -fuzztime limit. This is expected
+		// and not a real failure.
+		if isDeadlineOnly(buf.String()) {
+			return nil
+		}
 		return fmt.Errorf("%s %s: %w", target.pkg, target.name, err)
 	}
 	return nil
+}
+
+// isDeadlineOnly returns true when the only failure reason is the fuzz-time
+// context deadline being reached (Go 1.25+ behaviour). Real fuzz crashes
+// produce sub-test failures (e.g. "--- FAIL: FuzzXxx/corpus-entry") and
+// are never suppressed.
+func isDeadlineOnly(output string) bool {
+	if !strings.Contains(output, "context deadline exceeded") {
+		return false
+	}
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "--- FAIL:") && strings.Contains(trimmed, "/") {
+			return false
+		}
+	}
+	return true
 }
 
 func nonEmptyLines(s string) []string {

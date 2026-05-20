@@ -19,6 +19,50 @@ func TestNormalizeParallel(t *testing.T) {
 	}
 }
 
+func TestIsDeadlineOnly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{
+			name:   "deadline only",
+			output: "--- FAIL: FuzzXxx (60.07s)\n    context deadline exceeded\nFAIL\n",
+			want:   true,
+		},
+		{
+			name:   "real crash",
+			output: "--- FAIL: FuzzXxx (5.23s)\n    --- FAIL: FuzzXxx/abc123 (0.00s)\nFAIL\n",
+			want:   false,
+		},
+		{
+			name:   "no deadline message",
+			output: "--- FAIL: FuzzXxx (5.23s)\n    some other error\nFAIL\n",
+			want:   false,
+		},
+		{
+			name:   "pass output",
+			output: "PASS\nok  example/pkg 60.058s\n",
+			want:   false,
+		},
+		{
+			name:   "seed corpus failure",
+			output: "--- FAIL: FuzzXxx (0.00s)\n    --- FAIL: FuzzXxx/seed#0 (0.00s)\n        test.go:14: got true; want false\nFAIL\n",
+			want:   false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isDeadlineOnly(tc.output); got != tc.want {
+				t.Fatalf("isDeadlineOnly() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNonEmptyLines(t *testing.T) {
 	t.Parallel()
 
