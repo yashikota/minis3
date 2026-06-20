@@ -362,38 +362,34 @@ func matchWildcard(pattern, s string) bool {
 }
 
 func wildcardMatch(pattern, s string) bool {
-	for len(pattern) > 0 {
-		switch pattern[0] {
-		case '*':
-			// Skip consecutive *
-			for len(pattern) > 0 && pattern[0] == '*' {
-				pattern = pattern[1:]
-			}
-			if len(pattern) == 0 {
-				return true // trailing * matches everything
-			}
-			// Try matching rest of pattern at each position
-			for i := 0; i <= len(s); i++ {
-				if wildcardMatch(pattern, s[i:]) {
-					return true
-				}
-			}
+	px, sx := 0, 0
+	starIdx, matchIdx := -1, 0
+
+	for sx < len(s) {
+		if px < len(pattern) && pattern[px] == '?' {
+			px++
+			sx++
+		} else if px < len(pattern) && pattern[px] == '*' {
+			starIdx = px
+			matchIdx = sx
+			px++
+		} else if px < len(pattern) && pattern[px] == s[sx] {
+			px++
+			sx++
+		} else if starIdx >= 0 {
+			matchIdx++
+			sx = matchIdx
+			px = starIdx + 1
+		} else {
 			return false
-		case '?':
-			if len(s) == 0 {
-				return false
-			}
-			pattern = pattern[1:]
-			s = s[1:]
-		default:
-			if len(s) == 0 || pattern[0] != s[0] {
-				return false
-			}
-			pattern = pattern[1:]
-			s = s[1:]
 		}
 	}
-	return len(s) == 0
+
+	for px < len(pattern) && pattern[px] == '*' {
+		px++
+	}
+
+	return px == len(pattern)
 }
 
 func getConditionKeyValue(condKey string, ctx PolicyEvalContext) string {
