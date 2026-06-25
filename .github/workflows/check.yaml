@@ -9,9 +9,12 @@ on:
       - "go.mod"
       - "go.sum"
       - ".golangci.yaml"
-      - "Taskfile.yaml"
+      - "taskfile.yaml"
       - ".github/workflows/check.yaml"
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * 0"
 
 jobs:
   lint:
@@ -83,3 +86,50 @@ jobs:
 
       - name: Run fuzz tests
         run: task fuzz FUZZ_TIME=1m FUZZ_PARALLEL=0
+
+  mutation:
+    name: mutation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+            path: ~/.local/share/aquaproj-aqua
+            key: v2-aqua-installer-${{runner.os}}-${{runner.arch}}-${{hashFiles('aqua.yaml')}}
+            restore-keys: |
+              v2-aqua-installer-${{runner.os}}-${{runner.arch}}-
+
+      - uses: aquaproj/aqua-installer@11dd79b4e498d471a9385aa9fb7f62bb5f52a73c # v4.0.4
+        with:
+            aqua_version: v2.60.1
+
+      - name: Run mutation tests for PR diff
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+          task mutation-test \
+            GREMLINS_DIFF="origin/${GITHUB_BASE_REF}" \
+            GREMLINS_OUTPUT=gremlins.json \
+            GREMLINS_WORKERS=2 \
+            GREMLINS_TEST_CPU=1
+
+      - name: Run full mutation tests
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        run: |
+          task mutation-test \
+            GREMLINS_OUTPUT=gremlins.json \
+            GREMLINS_WORKERS=2 \
+            GREMLINS_TEST_CPU=1
+
+      - name: Upload Gremlins report
+        if: always() && hashFiles('gremlins.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gremlins-report
+          path: gremlins.json

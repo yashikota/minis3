@@ -38,6 +38,48 @@ tasks:
     cmds:
       - go run ./tools/fuzzrunner -fuzztime={{.FUZZ_TIME}} -parallel={{.FUZZ_PARALLEL}}
 
+  mutation-test:
+    desc: "Run Gremlins mutation tests"
+    vars:
+      GREMLINS_VERSION: '{{.GREMLINS_VERSION | default "v0.6.0"}}'
+      GREMLINS_PATH: '{{.GREMLINS_PATH | default "."}}'
+      GREMLINS_DIFF: '{{.GREMLINS_DIFF | default ""}}'
+      GREMLINS_OUTPUT: '{{.GREMLINS_OUTPUT | default ""}}'
+      GREMLINS_OUTPUT_STATUSES: '{{.GREMLINS_OUTPUT_STATUSES | default "lct"}}'
+      GREMLINS_THRESHOLD_EFFICACY: '{{.GREMLINS_THRESHOLD_EFFICACY | default "80"}}'
+      GREMLINS_THRESHOLD_MCOVER: '{{.GREMLINS_THRESHOLD_MCOVER | default "80"}}'
+      GREMLINS_WORKERS: '{{.GREMLINS_WORKERS | default "0"}}'
+      GREMLINS_TEST_CPU: '{{.GREMLINS_TEST_CPU | default "0"}}'
+      GREMLINS_TIMEOUT_COEFFICIENT: '{{.GREMLINS_TIMEOUT_COEFFICIENT | default "3"}}'
+      GREMLINS_EXTRA_ARGS: '{{.GREMLINS_EXTRA_ARGS | default ""}}'
+    cmds:
+      - |
+        set -- \
+          "{{.GREMLINS_PATH}}" \
+          --coverpkg="./..." \
+          --invert-assignments \
+          --invert-bitwise \
+          --invert-bwassign \
+          --invert-logical \
+          --invert-loopctrl \
+          --remove-self-assignments \
+          --output-statuses="{{.GREMLINS_OUTPUT_STATUSES}}" \
+          --threshold-efficacy="{{.GREMLINS_THRESHOLD_EFFICACY}}" \
+          --threshold-mcover="{{.GREMLINS_THRESHOLD_MCOVER}}" \
+          --workers="{{.GREMLINS_WORKERS}}" \
+          --test-cpu="{{.GREMLINS_TEST_CPU}}" \
+          --timeout-coefficient="{{.GREMLINS_TIMEOUT_COEFFICIENT}}"
+        if [ -n "{{.GREMLINS_DIFF}}" ]; then
+          set -- "$@" --diff="{{.GREMLINS_DIFF}}"
+        fi
+        if [ -n "{{.GREMLINS_OUTPUT}}" ]; then
+          set -- "$@" --output="{{.GREMLINS_OUTPUT}}"
+        fi
+        if [ -n "{{.GREMLINS_EXTRA_ARGS}}" ]; then
+          set -- "$@" {{.GREMLINS_EXTRA_ARGS}}
+        fi
+        go run github.com/go-gremlins/gremlins/cmd/gremlins@{{.GREMLINS_VERSION}} unleash "$@"
+
   s3-test:
     desc: "ceph/s3-tests test"
     dir: integration/s3-test
