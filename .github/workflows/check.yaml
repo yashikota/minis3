@@ -34,7 +34,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         with:
-            aqua_version: v2.60.1
+            aqua_version: v2.60.2
 
       - name: Run lint
         run: task lint
@@ -58,7 +58,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         with:
-            aqua_version: v2.60.1
+            aqua_version: v2.60.2
 
       - name: Run test
         run: |
@@ -82,7 +82,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         with:
-            aqua_version: v2.60.1
+            aqua_version: v2.60.2
 
       - name: Run fuzz tests
         run: task fuzz FUZZ_TIME=1m FUZZ_PARALLEL=0
@@ -107,7 +107,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         with:
-            aqua_version: v2.60.1
+            aqua_version: v2.60.2
 
       - name: Run mutation tests for PR diff
         if: github.event_name == 'pull_request'
