@@ -43,7 +43,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@96a9bc20066c5bf5e275b41019cfc165b25f4e2e # v4.0.5
         with:
-          aqua_version: v2.60.1
+          aqua_version: v2.60.2
 
       - name: Run s3-test
         run: task s3-test || true
