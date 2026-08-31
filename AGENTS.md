@@ -19,7 +19,7 @@
 - `go test ./... -coverprofile=coverage.txt`: reproduce coverage job locally.
 
 ## Coding Style & Naming Conventions
-- Target Go version in `go.mod` (currently 1.25.x).
+- Target Go version in `go.mod` (currently 1.27.x).
 - Use configured formatters (`gofmt`, `gofumpt`, `goimports`).
 - Keep file names lowercase and domain-oriented (for example `bucket.go`, `objectlock.go`).
 - Tests must be in `*_test.go`; branch-focused suites can use `*_branches_test.go`.
