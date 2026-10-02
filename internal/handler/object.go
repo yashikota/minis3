@@ -404,9 +404,8 @@ func validateSSEHeaders(r *http.Request) (string, string) {
 	if sseKmsKeyId != "" && sse != "aws:kms" && sse != "aws:kms:dsse" {
 		return "InvalidArgument", "SSE-KMS key ID is not applicable without aws:kms encryption."
 	}
-	if (sse == "aws:kms" || sse == "aws:kms:dsse") && sseKmsKeyId == "" {
-		return "InvalidArgument", "SSE-KMS key ID must be specified."
-	}
+	// AWS allows omitting the KMS key ID when aws:kms/aws:kms:dsse is specified
+	// (the default KMS key is used), so an empty key ID is valid here.
 
 	// SSE-C header completeness: all or none
 	hasAlgo := sseCA != ""
