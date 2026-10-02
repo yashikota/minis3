@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/yashikota/minis3/internal/backend"
 )
@@ -348,7 +347,7 @@ func (h *Handler) handleCreateMultipartUpload(
 		opts.RetentionMode = lockMode
 	}
 	if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
-		t, parseErr := time.Parse(time.RFC3339, retainUntil)
+		t, parseErr := backend.ParseRetainUntilDate(retainUntil)
 		if parseErr == nil {
 			opts.RetainUntilDate = &t
 		}

@@ -1107,7 +1107,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.RetentionMode = lockMode
 		}
 		if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
-			t, err := time.Parse(time.RFC3339, retainUntil)
+			t, err := backend.ParseRetainUntilDate(retainUntil)
 			if err == nil {
 				t = t.UTC().Truncate(time.Second)
 				opts.RetainUntilDate = &t
@@ -2115,7 +2115,7 @@ func (h *Handler) handleCopyObject(
 		opts.RetentionMode = lockMode
 	}
 	if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
-		t, err := time.Parse(time.RFC3339, retainUntil)
+		t, err := backend.ParseRetainUntilDate(retainUntil)
 		if err == nil {
 			opts.RetainUntilDate = &t
 		}
