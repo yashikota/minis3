@@ -252,6 +252,47 @@ func TestObjectRetentionHandlers(t *testing.T) {
 	})
 }
 
+func TestPutObjectRetentionBypassCaseInsensitive(t *testing.T) {
+	for _, bypassValue := range []string{"true", "True", "TRUE", "tRuE"} {
+		t.Run("bypass "+bypassValue, func(t *testing.T) {
+			h, b := newTestHandler(t)
+			mustCreateObjectLockBucket(t, b, "lock-bucket")
+			retainedUntil := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+			if _, err := b.PutObject(
+				"lock-bucket",
+				"locked",
+				[]byte("data"),
+				backend.PutObjectOptions{RetentionMode: "GOVERNANCE", RetainUntilDate: &retainedUntil},
+			); err != nil {
+				t.Fatalf("PutObject locked failed: %v", err)
+			}
+			shortened := time.Now().Add(time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339)
+			payload := `<?xml version="1.0" encoding="UTF-8"?><Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>` + shortened + `</RetainUntilDate></Retention>`
+			wDenied := doRequest(
+				h,
+				newRequest(
+					http.MethodPut,
+					"http://example.test/lock-bucket/locked?retention",
+					payload,
+					nil,
+				),
+			)
+			requireStatus(t, wDenied, http.StatusForbidden)
+			requireS3ErrorCode(t, wDenied, "AccessDenied")
+			w := doRequest(
+				h,
+				newRequest(
+					http.MethodPut,
+					"http://example.test/lock-bucket/locked?retention",
+					payload,
+					map[string]string{"x-amz-bypass-governance-retention": bypassValue},
+				),
+			)
+			requireStatus(t, w, http.StatusOK)
+		})
+	}
+}
+
 func TestObjectLegalHoldHandlers(t *testing.T) {
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "plain-bucket")
