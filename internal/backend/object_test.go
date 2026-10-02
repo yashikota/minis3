@@ -1207,15 +1207,9 @@ func TestListObjectVersionsStableSort(t *testing.T) {
 	}
 
 	// Simulate same-millisecond puts / clock skew: force identical
-	// LastModified on all versions of the key.
-	b.mu.Lock()
-	fixed := time.Now().UTC()
-	for _, v := range b.buckets["versions-stable-sort"].Objects[key].Versions {
-		v.LastModified = fixed
-	}
-	b.mu.Unlock()
-
-	versionIDs := func(res *ListObjectVersionsResult) []string {
+	// LastModified on all versions of the key. Capture the pre-force
+	// (newest-first) order first: the stable sort must preserve it.
+	idsOf := func(res *ListObjectVersionsResult) []string {
 		ids := make([]string, 0, len(res.Versions)+len(res.DeleteMarkers))
 		for _, v := range res.Versions {
 			ids = append(ids, v.VersionId)
@@ -1225,6 +1219,22 @@ func TestListObjectVersionsStableSort(t *testing.T) {
 		}
 		return ids
 	}
+	pre, err := b.ListObjectVersions("versions-stable-sort", "", "", "", "", 100)
+	if err != nil {
+		t.Fatalf("ListObjectVersions (pre) failed: %v", err)
+	}
+	want := idsOf(pre)
+	if len(want) != n {
+		t.Fatalf("expected %d versions, got %d (%v)", n, len(want), want)
+	}
+	b.mu.Lock()
+	fixed := time.Now().UTC()
+	for _, v := range b.buckets["versions-stable-sort"].Objects[key].Versions {
+		v.LastModified = fixed
+	}
+	b.mu.Unlock()
+
+	versionIDs := idsOf
 
 	res1, err := b.ListObjectVersions("versions-stable-sort", "", "", "", "", 100)
 	if err != nil {
@@ -1243,11 +1253,9 @@ func TestListObjectVersionsStableSort(t *testing.T) {
 	if !reflect.DeepEqual(ids1, ids2) {
 		t.Fatalf("ListObjectVersions order not stable across calls:\n1st: %v\n2nd: %v", ids1, ids2)
 	}
-	// Tie-break must be deterministic: VersionId descending when
-	// LastModified is equal.
-	for i := 1; i < len(ids1); i++ {
-		if ids1[i-1] < ids1[i] {
-			t.Fatalf("expected VersionId descending tie-break, got %v", ids1)
-		}
+	// With equal LastModified the stable sort must preserve insertion
+	// (newest-first) order.
+	if !reflect.DeepEqual(ids1, want) {
+		t.Fatalf("expected insertion (newest-first) order preserved on LastModified tie:\nwant: %v\ngot:  %v", want, ids1)
 	}
 }
