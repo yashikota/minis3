@@ -183,7 +183,7 @@ curl -i http://127.0.0.1:9191/health
 | ---- | ---------------------------------------------- |
 | `UploadPartCopy` | `CopySourceSSECustomerAlgorithm`, `CopySourceSSECustomerKey`, `CopySourceSSECustomerKeyMD5`, `SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5` |
 | `RestoreObject` | リストアは即時完了。`x-amz-restore` は常に `ongoing-request="false"` を返す |
-| `aws:kms` 指定の `PutObject` / `CopyObject` | `x-amz-server-side-encryption-aws-kms-key-id` が必須（AWS のデフォルトキー省略は未対応） |
+| `aws:kms` 指定の `PutObject` / `CopyObject` | `x-amz-server-side-encryption-aws-kms-key-id` は任意（省略時は AWS 同様デフォルトキー扱い）。ヘッダーは保存のみで実際の暗号化はしない |
 | `PutBucketPolicy` | `NotPrincipal` と `Allow` を組み合わせたステートメントは拒否される |
 | SigV2 署名付き URL | `Expires` の形式・期限のみ検証し、署名自体は検証しない（モック用途） |
 

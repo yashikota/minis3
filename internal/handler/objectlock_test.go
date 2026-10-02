@@ -262,7 +262,10 @@ func TestPutObjectRetentionBypassCaseInsensitive(t *testing.T) {
 				"lock-bucket",
 				"locked",
 				[]byte("data"),
-				backend.PutObjectOptions{RetentionMode: "GOVERNANCE", RetainUntilDate: &retainedUntil},
+				backend.PutObjectOptions{
+					RetentionMode:   "GOVERNANCE",
+					RetainUntilDate: &retainedUntil,
+				},
 			); err != nil {
 				t.Fatalf("PutObject locked failed: %v", err)
 			}

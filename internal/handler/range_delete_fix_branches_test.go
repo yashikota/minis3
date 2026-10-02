@@ -23,7 +23,12 @@ func TestGetEmptyObjectRangeReturns416(t *testing.T) {
 	for _, header := range []string{"bytes=-1", "bytes=0-"} {
 		w := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/range-zero/empty", "", map[string]string{"Range": header}),
+			newRequest(
+				http.MethodGet,
+				"http://example.test/range-zero/empty",
+				"",
+				map[string]string{"Range": header},
+			),
 		)
 		requireStatus(t, w, http.StatusRequestedRangeNotSatisfiable)
 		requireS3ErrorCode(t, w, "InvalidRange")

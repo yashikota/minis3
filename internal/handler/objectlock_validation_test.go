@@ -151,7 +151,12 @@ func TestCreateMultipartObjectLockValidation(t *testing.T) {
 			key := fmt.Sprintf("mpu-validation-%d", i)
 			w := doRequest(
 				h,
-				newRequest(http.MethodPost, "http://example.test/lock-mpu/"+key+"?uploads", "", headers),
+				newRequest(
+					http.MethodPost,
+					"http://example.test/lock-mpu/"+key+"?uploads",
+					"",
+					headers,
+				),
 			)
 			requireStatus(t, w, tc.wantStatus)
 			if tc.wantCode != "" {

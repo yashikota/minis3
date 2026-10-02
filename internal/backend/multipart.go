@@ -57,7 +57,10 @@ func (b *Backend) CreateMultipartUpload(
 	}
 
 	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
-		if err := validateObjectLockRetention(opts.RetentionMode, opts.RetainUntilDate); err != nil {
+		if err := validateObjectLockRetention(
+			opts.RetentionMode,
+			opts.RetainUntilDate,
+		); err != nil {
 			return nil, err
 		}
 		if !bucket.ObjectLockEnabled {
@@ -193,13 +196,9 @@ func (b *Backend) CompleteMultipartUpload(
 	if len(parts) == 0 {
 		return nil, ErrInvalidPart
 	}
-	seen := make(map[int]bool, len(parts))
-	for _, p := range parts {
-		if seen[p.PartNumber] {
-			return nil, ErrInvalidPart
-		}
-		seen[p.PartNumber] = true
-	}
+	// Duplicate part numbers are allowed: the last entry wins, matching AWS
+	// behavior (see s3-tests test_multipart_resend_first_finishes_last, where
+	// a resent part appears twice in the Complete request).
 	normalizedParts := normalizeCompleteParts(parts)
 
 	// Validate parts are in ascending order and exist
@@ -372,7 +371,10 @@ func (b *Backend) CompleteMultipartUpload(
 
 	// Set Object Lock fields if provided
 	if upload.RetentionMode != "" || upload.LegalHoldStatus != "" {
-		if err := validateObjectLockRetention(upload.RetentionMode, upload.RetainUntilDate); err != nil {
+		if err := validateObjectLockRetention(
+			upload.RetentionMode,
+			upload.RetainUntilDate,
+		); err != nil {
 			return nil, err
 		}
 		if !bucket.ObjectLockEnabled {
