@@ -1108,10 +1108,17 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
 			t, err := time.Parse(time.RFC3339, retainUntil)
-			if err == nil {
-				t = t.UTC().Truncate(time.Second)
-				opts.RetainUntilDate = &t
+			if err != nil {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Invalid x-amz-object-lock-retain-until-date header. Expected RFC3339 format.",
+				)
+				return
 			}
+			t = t.UTC().Truncate(time.Second)
+			opts.RetainUntilDate = &t
 		}
 		if legalHold := r.Header.Get("x-amz-object-lock-legal-hold"); legalHold != "" {
 			opts.LegalHoldStatus = legalHold
@@ -2116,9 +2123,17 @@ func (h *Handler) handleCopyObject(
 	}
 	if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
 		t, err := time.Parse(time.RFC3339, retainUntil)
-		if err == nil {
-			opts.RetainUntilDate = &t
+		if err != nil {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Invalid x-amz-object-lock-retain-until-date header. Expected RFC3339 format.",
+			)
+			return
 		}
+		t = t.UTC().Truncate(time.Second)
+		opts.RetainUntilDate = &t
 	}
 	if legalHold := r.Header.Get("x-amz-object-lock-legal-hold"); legalHold != "" {
 		opts.LegalHoldStatus = legalHold

@@ -139,46 +139,22 @@ func TestCompleteMultipartUploadAdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("invalid request when object lock fields on non-lock bucket", func(t *testing.T) {
-		uploadID := createMultipartUpload(
-			t,
-			h,
-			"mp-complete",
-			"lock-missing",
-			map[string]string{
-				"Authorization":          authHeader("minis3-access-key"),
-				"x-amz-object-lock-mode": backend.RetentionModeGovernance,
-				"x-amz-object-lock-retain-until-date": time.Now().
-					UTC().
-					Add(24 * time.Hour).
-					Format(time.RFC3339),
-			},
-		)
-		wPart := doRequest(
-			h,
-			newRequest(
-				http.MethodPut,
-				fmt.Sprintf(
-					"http://example.test/mp-complete/lock-missing?uploadId=%s&partNumber=1",
-					uploadID,
-				),
-				"single",
-				map[string]string{"Authorization": authHeader("minis3-access-key")},
-			),
-		)
-		requireStatus(t, wPart, http.StatusOK)
-		etag := wPart.Header().Get("ETag")
-
-		complete := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
+		// CreateMultipartUpload now validates Object Lock fields eagerly and
+		// rejects lock headers for buckets without Object Lock configuration.
 		w := doRequest(
 			h,
 			newRequest(
 				http.MethodPost,
-				fmt.Sprintf(
-					"http://example.test/mp-complete/lock-missing?uploadId=%s",
-					uploadID,
-				),
-				complete,
-				nil,
+				"http://example.test/mp-complete/lock-missing?uploads",
+				"",
+				map[string]string{
+					"Authorization":          authHeader("minis3-access-key"),
+					"x-amz-object-lock-mode": backend.RetentionModeGovernance,
+					"x-amz-object-lock-retain-until-date": time.Now().
+						UTC().
+						Add(24 * time.Hour).
+						Format(time.RFC3339),
+				},
 			),
 		)
 		requireStatus(t, w, http.StatusBadRequest)

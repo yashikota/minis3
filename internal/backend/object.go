@@ -340,6 +340,9 @@ func (b *Backend) PutObject(
 
 	// Set Object Lock fields if provided
 	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
+		if err := validateObjectLockRetention(opts.RetentionMode, opts.RetainUntilDate); err != nil {
+			return nil, err
+		}
 		if !bucket.ObjectLockEnabled {
 			return nil, ErrInvalidRequest
 		}
@@ -668,6 +671,9 @@ func (b *Backend) CopyObject(
 
 	// Handle Object Lock fields
 	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
+		if err := validateObjectLockRetention(opts.RetentionMode, opts.RetainUntilDate); err != nil {
+			return nil, "", err
+		}
 		// Explicit override: destination bucket must have Object Lock enabled
 		if !dstBkt.ObjectLockEnabled {
 			return nil, "", ErrInvalidRequest

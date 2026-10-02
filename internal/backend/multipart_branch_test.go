@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMultipartCreateAndUploadPartBranches(t *testing.T) {
@@ -444,24 +445,15 @@ func TestCompleteMultipartUploadDefaultsAndLocks(t *testing.T) {
 		t.Fatal("expected generated version id when versioning enabled")
 	}
 
-	// object lock fields on non-lock bucket should fail
-	uploadLock, _ := b.CreateMultipartUpload(
+	// object lock fields on non-lock bucket should fail at Create
+	futureLock := time.Now().UTC().Add(24 * time.Hour)
+	if _, err := b.CreateMultipartUpload(
 		"complete-defaults",
 		"obj-lock",
-		CreateMultipartUploadOptions{RetentionMode: RetentionModeGovernance},
-	)
-	partLock, _ := b.UploadPart(
-		"complete-defaults",
-		"obj-lock",
-		uploadLock.UploadId,
-		1,
-		[]byte("x"),
-	)
-	if _, err := b.CompleteMultipartUpload(
-		"complete-defaults",
-		"obj-lock",
-		uploadLock.UploadId,
-		[]CompletePart{{PartNumber: 1, ETag: partLock.ETag}},
+		CreateMultipartUploadOptions{
+			RetentionMode:   RetentionModeGovernance,
+			RetainUntilDate: &futureLock,
+		},
 	); !errors.Is(
 		err,
 		ErrInvalidRequest,

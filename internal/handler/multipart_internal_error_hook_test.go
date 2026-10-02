@@ -10,7 +10,7 @@ import (
 
 func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	h, b := newTestHandler(t)
-	mustCreateBucket(t, b, "mp-hook")
+	mustCreateObjectLockBucket(t, b, "mp-hook")
 
 	restoreCreate := createMultipartUploadFn
 	restoreUploadPart := uploadPartFn
