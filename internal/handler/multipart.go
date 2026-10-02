@@ -1123,6 +1123,13 @@ func (h *Handler) handleUploadPartCopy(
 				"InvalidRange",
 				"The requested range is not satisfiable.",
 			)
+		} else if errors.Is(err, backend.ErrInvalidRequest) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"Part number must be an integer between 1 and 10000.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
