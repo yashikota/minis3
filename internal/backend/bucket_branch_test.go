@@ -86,9 +86,9 @@ func TestBucketBranchCoverage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetBucketUsage failed: %v", err)
 		}
-		if count != 1 || bytesUsed != 4 {
+		if count != 0 || bytesUsed != 0 {
 			t.Fatalf(
-				"unexpected usage for key with older live version: count=%d bytes=%d",
+				"hidden key must not be counted: count=%d bytes=%d",
 				count,
 				bytesUsed,
 			)
@@ -108,9 +108,9 @@ func TestBucketBranchCoverage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetBucketUsage failed: %v", err)
 		}
-		if count != 1 || bytesUsed != 4 {
+		if count != 0 || bytesUsed != 0 {
 			t.Fatalf(
-				"expected only live key to be counted, got count=%d bytes=%d",
+				"expected no visible keys to be counted, got count=%d bytes=%d",
 				count,
 				bytesUsed,
 			)
@@ -141,4 +141,152 @@ func TestBucketBranchCoverage(t *testing.T) {
 			t.Fatal("missing object must not be publicly readable")
 		}
 	})
+}
+
+func TestGetBucketUsageVisibleOnly(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, b *Backend, bucket string)
+		wantCount int
+		wantBytes int64
+	}{
+		{
+			name: "visible object is counted",
+			setup: func(t *testing.T, b *Backend, bucket string) {
+				t.Helper()
+				if _, err := b.PutObject(
+					bucket,
+					"visible",
+					[]byte("abc"),
+					PutObjectOptions{},
+				); err != nil {
+					t.Fatalf("PutObject failed: %v", err)
+				}
+			},
+			wantCount: 1,
+			wantBytes: 3,
+		},
+		{
+			name: "delete marker hides key",
+			setup: func(t *testing.T, b *Backend, bucket string) {
+				t.Helper()
+				if _, err := b.PutObject(
+					bucket,
+					"hidden",
+					[]byte("data"),
+					PutObjectOptions{},
+				); err != nil {
+					t.Fatalf("PutObject failed: %v", err)
+				}
+				if _, err := b.DeleteObject(bucket, "hidden", false); err != nil {
+					t.Fatalf("DeleteObject failed: %v", err)
+				}
+			},
+			wantCount: 0,
+			wantBytes: 0,
+		},
+		{
+			name: "marker-only key is not counted",
+			setup: func(t *testing.T, b *Backend, bucket string) {
+				t.Helper()
+				if _, err := b.DeleteObject(bucket, "ghost", false); err != nil {
+					t.Fatalf("DeleteObject failed: %v", err)
+				}
+			},
+			wantCount: 0,
+			wantBytes: 0,
+		},
+		{
+			name: "mixed visible and hidden keys counts only visible",
+			setup: func(t *testing.T, b *Backend, bucket string) {
+				t.Helper()
+				if _, err := b.PutObject(
+					bucket,
+					"keep",
+					[]byte("hello"),
+					PutObjectOptions{},
+				); err != nil {
+					t.Fatalf("PutObject failed: %v", err)
+				}
+				if _, err := b.PutObject(
+					bucket,
+					"hide",
+					[]byte("data"),
+					PutObjectOptions{},
+				); err != nil {
+					t.Fatalf("PutObject failed: %v", err)
+				}
+				if _, err := b.DeleteObject(bucket, "hide", false); err != nil {
+					t.Fatalf("DeleteObject failed: %v", err)
+				}
+			},
+			wantCount: 1,
+			wantBytes: 5,
+		},
+		{
+			name: "removing delete marker restores visibility",
+			setup: func(t *testing.T, b *Backend, bucket string) {
+				t.Helper()
+				if _, err := b.PutObject(
+					bucket,
+					"resurrect",
+					[]byte("abcd"),
+					PutObjectOptions{},
+				); err != nil {
+					t.Fatalf("PutObject failed: %v", err)
+				}
+				delRes, err := b.DeleteObject(bucket, "resurrect", false)
+				if err != nil {
+					t.Fatalf("DeleteObject failed: %v", err)
+				}
+				if delRes == nil || delRes.VersionId == "" {
+					t.Fatalf("expected delete marker version id, got %+v", delRes)
+				}
+				if _, err := b.DeleteObjectVersion(
+					bucket,
+					"resurrect",
+					delRes.VersionId,
+					false,
+				); err != nil {
+					t.Fatalf("DeleteObjectVersion failed: %v", err)
+				}
+			},
+			wantCount: 1,
+			wantBytes: 4,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := New()
+			bucket := "usage-visible-only"
+			if len(tests) > 1 {
+				bucket = "usage-visible-only-" + string(rune('a'+i))
+			}
+			if err := b.CreateBucket(bucket); err != nil {
+				t.Fatalf("CreateBucket failed: %v", err)
+			}
+			if err := b.SetBucketVersioning(
+				bucket,
+				VersioningEnabled,
+				MFADeleteDisabled,
+			); err != nil {
+				t.Fatalf("SetBucketVersioning failed: %v", err)
+			}
+			tt.setup(t, b, bucket)
+			count, bytesUsed, err := b.GetBucketUsage(bucket)
+			if err != nil {
+				t.Fatalf("GetBucketUsage failed: %v", err)
+			}
+			if count != tt.wantCount || bytesUsed != tt.wantBytes {
+				t.Fatalf(
+					"GetBucketUsage() = (%d, %d), want (%d, %d)",
+					count,
+					bytesUsed,
+					tt.wantCount,
+					tt.wantBytes,
+				)
+			}
+		})
+	}
 }

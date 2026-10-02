@@ -314,7 +314,7 @@ func TestGetBucketUsage(t *testing.T) {
 		}
 	})
 
-	t.Run("latest delete marker still counts latest non-delete version", func(t *testing.T) {
+	t.Run("delete marker hides key from usage", func(t *testing.T) {
 		if err := b.CreateBucket("usage-versioned"); err != nil {
 			t.Fatalf("CreateBucket failed: %v", err)
 		}
@@ -342,9 +342,9 @@ func TestGetBucketUsage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetBucketUsage failed: %v", err)
 		}
-		if count != 1 || bytesUsed != 3 {
+		if count != 0 || bytesUsed != 0 {
 			t.Fatalf(
-				"unexpected usage with delete marker latest: count=%d bytes=%d",
+				"hidden key must not be counted: count=%d bytes=%d",
 				count,
 				bytesUsed,
 			)
