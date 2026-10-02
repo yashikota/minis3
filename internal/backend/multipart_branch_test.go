@@ -352,11 +352,10 @@ func TestCompleteMultipartUploadDuplicatePartNumberUsesLastEntry(t *testing.T) {
 		t.Fatalf("UploadPart last failed: %v", err)
 	}
 
-	// BREAKING CHANGE: duplicate part numbers are now rejected with
-	// ErrInvalidPart instead of keeping the last entry. AWS may return
-	// InvalidPart for duplicates, and silently deduplicating could mask
-	// client bugs and bypass order validation (e.g. [3,1,3] -> [1,3]).
-	if _, err := b.CompleteMultipartUpload(
+	// Duplicate part numbers are allowed: the last entry wins, matching AWS
+	// behavior (see s3-tests test_multipart_resend_first_finishes_last,
+	// where a resent part appears twice in the Complete request).
+	obj, err := b.CompleteMultipartUpload(
 		"complete-duplicate-part",
 		"obj",
 		upload.UploadId,
@@ -364,35 +363,36 @@ func TestCompleteMultipartUploadDuplicatePartNumberUsesLastEntry(t *testing.T) {
 			{PartNumber: 1, ETag: first.ETag},
 			{PartNumber: 1, ETag: last.ETag},
 		},
-	); !errors.Is(err, ErrInvalidPart) {
-		t.Fatalf("expected ErrInvalidPart for duplicate part numbers, got %v", err)
+	)
+	if err != nil {
+		t.Fatalf("CompleteMultipartUpload failed: %v", err)
+	}
+	if got := string(obj.Data); got != "AAAAAAAA" {
+		t.Fatalf("completed object data = %q, want %q", got, "AAAAAAAA")
 	}
 }
 
-func TestCompleteMultipartUploadDuplicatePartNumbersRejected(t *testing.T) {
+func TestCompleteMultipartUploadDuplicatePartNumbersDeduplicated(t *testing.T) {
 	tests := []struct {
 		name      string
 		partNums  []int
-		wantErr   error
 		wantParts int
 	}{
-		{name: "adjacent duplicate", partNums: []int{1, 2, 2, 3}, wantErr: ErrInvalidPart},
-		{
-			name:     "non-adjacent duplicate bypassing order check",
-			partNums: []int{3, 1, 3},
-			wantErr:  ErrInvalidPart,
-		},
-		{name: "valid ascending", partNums: []int{1, 2, 3}, wantErr: nil, wantParts: 3},
+		// Duplicates collapse to the last entry, then the normalized list
+		// must still be strictly ascending.
+		{name: "adjacent duplicate", partNums: []int{1, 2, 2, 3}, wantParts: 3},
+		{name: "non-adjacent duplicate", partNums: []int{3, 1, 3}, wantParts: 2},
+		{name: "valid ascending", partNums: []int{1, 2, 3}, wantParts: 3},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := New()
-			if err := b.CreateBucket("complete-dup-reject"); err != nil {
+			if err := b.CreateBucket("complete-dup-dedupe"); err != nil {
 				t.Fatalf("CreateBucket failed: %v", err)
 			}
 			upload, err := b.CreateMultipartUpload(
-				"complete-dup-reject",
+				"complete-dup-dedupe",
 				"obj",
 				CreateMultipartUploadOptions{},
 			)
@@ -407,7 +407,7 @@ func TestCompleteMultipartUploadDuplicatePartNumbersRejected(t *testing.T) {
 					size = make([]byte, 5*1024*1024)
 				}
 				p, err := b.UploadPart(
-					"complete-dup-reject",
+					"complete-dup-dedupe",
 					"obj",
 					upload.UploadId,
 					n,
@@ -425,17 +425,11 @@ func TestCompleteMultipartUploadDuplicatePartNumbersRejected(t *testing.T) {
 			}
 
 			obj, err := b.CompleteMultipartUpload(
-				"complete-dup-reject",
+				"complete-dup-dedupe",
 				"obj",
 				upload.UploadId,
 				parts,
 			)
-			if tt.wantErr != nil {
-				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("expected %v, got %v", tt.wantErr, err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("CompleteMultipartUpload failed: %v", err)
 			}

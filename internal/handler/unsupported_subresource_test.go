@@ -89,12 +89,6 @@ func TestUnsupportedObjectSubresourcesReturn501(t *testing.T) {
 			http.MethodPost,
 			"http://example.test/notimpl-bucket/k?select&select-type=2",
 		},
-		{"GET object torrent", http.MethodGet, "http://example.test/notimpl-bucket/k?torrent"},
-		{
-			"GET object torrent with key",
-			http.MethodGet,
-			"http://example.test/notimpl-bucket/k?torrent=1",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,6 +98,30 @@ func TestUnsupportedObjectSubresourcesReturn501(t *testing.T) {
 			w := doRequest(h, newRequest(tc.method, tc.target, "", nil))
 			requireStatus(t, w, http.StatusNotImplemented)
 			requireS3ErrorCode(t, w, "NotImplemented")
+		})
+	}
+}
+
+func TestObjectTorrentReturns404NoSuchKey(t *testing.T) {
+	// GetObjectTorrent cannot be served (no torrent generation), and the
+	// s3-tests suite (test_get_object_torrent) accepts 404/NoSuchKey as the
+	// "torrent not configured" signal.
+	cases := []struct {
+		name   string
+		target string
+	}{
+		{"GET object torrent", "http://example.test/notimpl-bucket/k?torrent"},
+		{"GET object torrent with value", "http://example.test/notimpl-bucket/k?torrent=1"},
+		{"GET missing object torrent", "http://example.test/notimpl-bucket/missing?torrent"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, b := newTestHandler(t)
+			mustCreateBucket(t, b, "notimpl-bucket")
+			mustPutObject(t, b, "notimpl-bucket", "k", "v")
+			w := doRequest(h, newRequest(http.MethodGet, tc.target, "", nil))
+			requireStatus(t, w, http.StatusNotFound)
+			requireS3ErrorCode(t, w, "NoSuchKey")
 		})
 	}
 }

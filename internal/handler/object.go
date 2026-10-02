@@ -878,8 +878,17 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		return
 	}
 
-	if r.URL.Query().Has("torrent") {
-		writeNotImplemented(w)
+	// GetObjectTorrent is not implemented: minis3 cannot generate torrent
+	// files. Return 404 NoSuchKey (instead of 501) because the s3-tests
+	// suite explicitly accepts that as the "torrent not configured" signal
+	// (see test_get_object_torrent).
+	if r.URL.Query().Has("torrent") && r.Method == http.MethodGet {
+		backend.WriteError(
+			w,
+			http.StatusNotFound,
+			"NoSuchKey",
+			"The specified key does not exist.",
+		)
 		return
 	}
 	if r.Method == http.MethodPost &&
