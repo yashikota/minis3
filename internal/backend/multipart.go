@@ -225,7 +225,7 @@ func (b *Backend) CompleteMultipartUpload(
 	for _, etag := range partETags {
 		decoded, err := hex.DecodeString(etag)
 		if err != nil {
-			return nil, fmt.Errorf("invalid ETag format: %w", err)
+			return nil, ErrInvalidPart
 		}
 		md5Hash.Write(decoded)
 	}
