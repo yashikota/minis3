@@ -630,6 +630,42 @@ func parseOptionalObjectAttributes(r *http.Request) map[string]bool {
 	return attrs
 }
 
+// unsupportedBucketSubresources lists bucket-level subresources that are part of
+// the S3 API but not implemented by minis3. Requests carrying any of these must
+// fail with 501 NotImplemented instead of falling through to ListObjects or
+// bucket creation/deletion.
+var unsupportedBucketSubresources = []string{
+	"notification",
+	"replication",
+	"analytics",
+	"inventory",
+	"metrics",
+	"accelerate",
+	"intelligent-tiering",
+	"select",
+	"select-type",
+}
+
+// isUnsupportedSubresource reports whether q carries an unimplemented S3 subresource.
+func isUnsupportedSubresource(q url.Values) bool {
+	for _, key := range unsupportedBucketSubresources {
+		if _, ok := q[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// writeNotImplemented writes a 501 NotImplemented S3 error for unimplemented subresources.
+func writeNotImplemented(w http.ResponseWriter) {
+	backend.WriteError(
+		w,
+		http.StatusNotImplemented,
+		"NotImplemented",
+		"The requested subresource is not implemented.",
+	)
+}
+
 // handleBucket handles bucket-level operations.
 func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketName string) {
 	// Handle ACL operations
@@ -716,6 +752,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			h.handleGetPublicAccessBlock(w, r, bucketName)
 			return
 		}
+		if isUnsupportedSubresource(r.URL.Query()) {
+			writeNotImplemented(w)
+			return
+		}
 		if r.URL.Query().Get("list-type") == "2" {
 			h.handleListObjectsV2(w, r, bucketName)
 			return
@@ -728,6 +768,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("delete") {
 			h.handleDeleteObjects(w, r, bucketName)
+			return
+		}
+		if isUnsupportedSubresource(r.URL.Query()) {
+			writeNotImplemented(w)
 			return
 		}
 		h.handlePostObjectFormUpload(w, r, bucketName)
@@ -778,6 +822,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("publicAccessBlock") {
 			h.handlePutPublicAccessBlock(w, r, bucketName)
+			return
+		}
+		if isUnsupportedSubresource(r.URL.Query()) {
+			writeNotImplemented(w)
 			return
 		}
 		locationConstraint := ""
@@ -989,6 +1037,10 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if r.URL.Query().Has("publicAccessBlock") {
 			h.handleDeletePublicAccessBlock(w, r, bucketName)
+			return
+		}
+		if isUnsupportedSubresource(r.URL.Query()) {
+			writeNotImplemented(w)
 			return
 		}
 		err := deleteBucketFn(h, bucketName)
