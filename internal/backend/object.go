@@ -1170,22 +1170,40 @@ func (b *Backend) ListObjectVersions(
 		return allVersions[i].object.LastModified.After(allVersions[j].object.LastModified)
 	})
 
-	// Apply key-marker and version-id-marker
+	// Apply key-marker and version-id-marker.
+	// AWS spec (ListObjectVersions KeyMarker/VersionIdMarker):
+	// - keyMarker alone skips all versions of the marker key and starts
+	//   at the first entry with key greater than the marker.
+	// - keyMarker with versionIdMarker starts right after the exact
+	//   (key, version-id) entry; if the version id is unknown, start at
+	//   the first entry with a greater key.
 	startIdx := 0
 	if keyMarker != "" {
-		for i, ve := range allVersions {
-			if ve.key > keyMarker {
-				startIdx = i
-				break
+		if versionIdMarker == "" {
+			// Skip every entry of keyMarker; start at the first
+			// entry with a greater key.
+			startIdx = len(allVersions)
+			for i, ve := range allVersions {
+				if ve.key > keyMarker {
+					startIdx = i
+					break
+				}
 			}
-			if ve.key == keyMarker && versionIdMarker != "" && ve.versionId == versionIdMarker {
-				startIdx = i + 1
-				break
+		} else {
+			startIdx = len(allVersions)
+			for i, ve := range allVersions {
+				if ve.key == keyMarker && ve.versionId == versionIdMarker {
+					startIdx = i + 1
+					break
+				}
+				if ve.key > keyMarker {
+					startIdx = i
+					break
+				}
 			}
-			if ve.key == keyMarker && versionIdMarker == "" {
-				// Skip all versions of keyMarker
-				continue
-			}
+			// Exact (key, version-id) match at the tail yields
+			// startIdx == len(allVersions) via i+1; no extra guard needed
+			// beyond the tail check below.
 		}
 		// If marker is after all entries
 		if startIdx == 0 && len(allVersions) > 0 &&
