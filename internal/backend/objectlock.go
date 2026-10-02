@@ -4,6 +4,31 @@ import (
 	"time"
 )
 
+// retainUntilDateLayouts lists the accepted RetainUntilDate formats.
+// AWS documents RetainUntilDate as ISO 8601, and clients in the wild send
+// variants (fractional seconds, Zulu, numeric offsets) that strict RFC3339
+// parsing rejects. RFC3339Nano already covers fractional variants, while the
+// explicit millis/Zulu layouts keep intent obvious and guard against
+// toolchain layout changes.
+var retainUntilDateLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05.000Z",
+	"2006-01-02T15:04:05Z",
+}
+
+// ParseRetainUntilDate parses an S3 RetainUntilDate value, accepting ISO 8601
+// variants (RFC3339Nano, RFC3339, millisecond Zulu, plain Zulu, numeric
+// offsets). It returns an error when none of the layouts match.
+func ParseRetainUntilDate(value string) (time.Time, error) {
+	for _, layout := range retainUntilDateLayouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, ErrInvalidRequest
+}
+
 // GetObjectLockConfiguration returns the Object Lock configuration for a bucket.
 func (b *Backend) GetObjectLockConfiguration(bucketName string) (*ObjectLockConfiguration, error) {
 	b.mu.RLock()
@@ -184,7 +209,7 @@ func (b *Backend) PutObjectRetention(
 	// Parse new retain-until-date
 	var newRetainUntil *time.Time
 	if retention.RetainUntilDate != "" {
-		t, err := time.Parse(time.RFC3339, retention.RetainUntilDate)
+		t, err := ParseRetainUntilDate(retention.RetainUntilDate)
 		if err != nil {
 			return ErrInvalidRequest
 		}

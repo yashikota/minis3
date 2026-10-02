@@ -303,6 +303,13 @@ func (h *Handler) handlePutObjectRetention(
 				"MalformedXML",
 				"The XML you provided was not well-formed or did not validate against our published schema.",
 			)
+		} else if errors.Is(err, backend.ErrInvalidRequest) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"The RetainUntilDate value is invalid.",
+			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
