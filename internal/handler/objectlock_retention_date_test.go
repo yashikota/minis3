@@ -27,7 +27,12 @@ func TestPutObjectRetentionDateFormatsBranch(t *testing.T) {
 			)
 			w := doRequest(
 				h,
-				newRequest(http.MethodPut, "http://example.test/retdate-bucket/obj?retention", payload, nil),
+				newRequest(
+					http.MethodPut,
+					"http://example.test/retdate-bucket/obj?retention",
+					payload,
+					nil,
+				),
 			)
 			requireStatus(t, w, http.StatusOK)
 		})
@@ -51,7 +56,12 @@ func TestPutObjectRetentionDateFormatsBranch(t *testing.T) {
 			)
 			w := doRequest(
 				h,
-				newRequest(http.MethodPut, "http://example.test/retdate-bucket/obj?retention", payload, nil),
+				newRequest(
+					http.MethodPut,
+					"http://example.test/retdate-bucket/obj?retention",
+					payload,
+					nil,
+				),
 			)
 			requireStatus(t, w, http.StatusBadRequest)
 			requireS3ErrorCode(t, w, "InvalidRequest")

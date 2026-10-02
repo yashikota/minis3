@@ -377,7 +377,11 @@ func TestCompleteMultipartUploadDuplicatePartNumbersRejected(t *testing.T) {
 		wantParts int
 	}{
 		{name: "adjacent duplicate", partNums: []int{1, 2, 2, 3}, wantErr: ErrInvalidPart},
-		{name: "non-adjacent duplicate bypassing order check", partNums: []int{3, 1, 3}, wantErr: ErrInvalidPart},
+		{
+			name:     "non-adjacent duplicate bypassing order check",
+			partNums: []int{3, 1, 3},
+			wantErr:  ErrInvalidPart,
+		},
 		{name: "valid ascending", partNums: []int{1, 2, 3}, wantErr: nil, wantParts: 3},
 	}
 

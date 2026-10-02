@@ -62,7 +62,11 @@ func TestVerifyPresignedURLV4MixedCaseSignedHeaders(t *testing.T) {
 	query.Set("X-Amz-Expires", strconv.FormatInt(300, 10))
 	query.Set("X-Amz-SignedHeaders", "Host")
 
-	req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket/key?"+query.Encode(), nil)
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"http://example.test/bucket/key?"+query.Encode(),
+		nil,
+	)
 	req.Host = "example.test"
 
 	secretKey := DefaultCredentials()["minis3-access-key"]

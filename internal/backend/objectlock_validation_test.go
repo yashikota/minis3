@@ -73,7 +73,12 @@ func TestObjectLockRetentionModeValidation(t *testing.T) {
 				})
 				if tc.wantErr {
 					if !errors.Is(err, ErrInvalidRequest) {
-						t.Fatalf("PutObject mode=%q date=%v = %v, want ErrInvalidRequest", tc.mode, date, err)
+						t.Fatalf(
+							"PutObject mode=%q date=%v = %v, want ErrInvalidRequest",
+							tc.mode,
+							date,
+							err,
+						)
 					}
 					return
 				}
@@ -107,10 +112,17 @@ func TestObjectLockRetentionModeValidation(t *testing.T) {
 					d := future
 					date = &d
 				}
-				_, _, err := b.CopyObject("lock-copy", "seed", "", "lock-copy", "dst-"+tc.name, CopyObjectOptions{
-					RetentionMode:   tc.mode,
-					RetainUntilDate: date,
-				})
+				_, _, err := b.CopyObject(
+					"lock-copy",
+					"seed",
+					"",
+					"lock-copy",
+					"dst-"+tc.name,
+					CopyObjectOptions{
+						RetentionMode:   tc.mode,
+						RetainUntilDate: date,
+					},
+				)
 				if tc.wantErr {
 					if !errors.Is(err, ErrInvalidRequest) {
 						t.Fatalf("CopyObject mode=%q = %v, want ErrInvalidRequest", tc.mode, err)
@@ -147,13 +159,21 @@ func TestObjectLockRetentionModeValidation(t *testing.T) {
 					d := future
 					date = &d
 				}
-				_, err := b.CreateMultipartUpload("lock-mpu", "k-"+tc.name, CreateMultipartUploadOptions{
-					RetentionMode:   tc.mode,
-					RetainUntilDate: date,
-				})
+				_, err := b.CreateMultipartUpload(
+					"lock-mpu",
+					"k-"+tc.name,
+					CreateMultipartUploadOptions{
+						RetentionMode:   tc.mode,
+						RetainUntilDate: date,
+					},
+				)
 				if tc.wantErr {
 					if !errors.Is(err, ErrInvalidRequest) {
-						t.Fatalf("CreateMultipartUpload mode=%q = %v, want ErrInvalidRequest", tc.mode, err)
+						t.Fatalf(
+							"CreateMultipartUpload mode=%q = %v, want ErrInvalidRequest",
+							tc.mode,
+							err,
+						)
 					}
 					return
 				}
@@ -187,7 +207,11 @@ func TestObjectLockRetentionModeValidation(t *testing.T) {
 					d := future
 					date = &d
 				}
-				upload, err := b.CreateMultipartUpload("lock-complete", "k-"+tc.name, CreateMultipartUploadOptions{})
+				upload, err := b.CreateMultipartUpload(
+					"lock-complete",
+					"k-"+tc.name,
+					CreateMultipartUploadOptions{},
+				)
 				if err != nil {
 					t.Fatalf("CreateMultipartUpload failed: %v", err)
 				}
@@ -196,16 +220,31 @@ func TestObjectLockRetentionModeValidation(t *testing.T) {
 				upload.RetentionMode = tc.mode
 				upload.RetainUntilDate = date
 				// LegalHold empty keeps focus on retention validation.
-				part, err := b.UploadPart("lock-complete", "k-"+tc.name, upload.UploadId, 1, []byte("x"))
+				part, err := b.UploadPart(
+					"lock-complete",
+					"k-"+tc.name,
+					upload.UploadId,
+					1,
+					[]byte("x"),
+				)
 				if err != nil {
 					t.Fatalf("UploadPart failed: %v", err)
 				}
-				obj, err := b.CompleteMultipartUpload("lock-complete", "k-"+tc.name, upload.UploadId, []CompletePart{
-					{PartNumber: 1, ETag: part.ETag},
-				})
+				obj, err := b.CompleteMultipartUpload(
+					"lock-complete",
+					"k-"+tc.name,
+					upload.UploadId,
+					[]CompletePart{
+						{PartNumber: 1, ETag: part.ETag},
+					},
+				)
 				if tc.wantErr {
 					if !errors.Is(err, ErrInvalidRequest) {
-						t.Fatalf("CompleteMultipartUpload mode=%q = %v, want ErrInvalidRequest", tc.mode, err)
+						t.Fatalf(
+							"CompleteMultipartUpload mode=%q = %v, want ErrInvalidRequest",
+							tc.mode,
+							err,
+						)
 					}
 					return
 				}
