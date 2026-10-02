@@ -2,7 +2,6 @@ package backend
 
 import (
 	"errors"
-	"strings"
 	"testing"
 	"time"
 )
@@ -294,15 +293,17 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 		[]byte("abc"),
 	)
 	invalid := b.uploads[invalidETagUpload.UploadId]
-	invalid.Parts[1].ETag = "\"not-hex\""
+	invalid.Parts[1].ETag = "\"zzz\""
 	if _, err := b.CompleteMultipartUpload(
 		"complete-branch-bucket",
 		"invalid-etag",
 		invalidETagUpload.UploadId,
-		[]CompletePart{{PartNumber: 1, ETag: "\"not-hex\""}},
-	); err == nil ||
-		!strings.Contains(err.Error(), "invalid ETag format") {
-		t.Fatalf("expected invalid ETag format error, got %v", err)
+		[]CompletePart{{PartNumber: 1, ETag: "\"zzz\""}},
+	); !errors.Is(
+		err,
+		ErrInvalidPart,
+	) {
+		t.Fatalf("expected ErrInvalidPart for non-hex ETag, got %v", err)
 	}
 
 	if _, err := b.CompleteMultipartUpload(
