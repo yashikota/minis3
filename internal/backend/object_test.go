@@ -1296,6 +1296,10 @@ func TestListObjectVersionsStableSort(t *testing.T) {
 	// With equal LastModified the stable sort must preserve insertion
 	// (newest-first) order.
 	if !reflect.DeepEqual(ids1, want) {
-		t.Fatalf("expected insertion (newest-first) order preserved on LastModified tie:\nwant: %v\ngot:  %v", want, ids1)
+		t.Fatalf(
+			"expected insertion (newest-first) order preserved on LastModified tie:\nwant: %v\ngot:  %v",
+			want,
+			ids1,
+		)
 	}
 }

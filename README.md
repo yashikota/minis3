@@ -182,7 +182,7 @@ curl -i http://127.0.0.1:9191/health
 | --------- | ------------------------------------------------- |
 | `UploadPartCopy` | `CopySourceSSECustomerAlgorithm`, `CopySourceSSECustomerKey`, `CopySourceSSECustomerKeyMD5`, `SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5` |
 | `RestoreObject` | Restores complete instantly; `x-amz-restore` always reports `ongoing-request="false"` once restored |
-| `PutObject` / `CopyObject` with `aws:kms` | `x-amz-server-side-encryption-aws-kms-key-id` is required (no AWS default-key fallback) |
+| `PutObject` / `CopyObject` with `aws:kms` | `x-amz-server-side-encryption-aws-kms-key-id` is optional (omitted → default key is assumed, per AWS); headers are stored, no actual encryption |
 | `PutBucketPolicy` | Statements combining `NotPrincipal` with `Allow` are rejected |
 | SigV2 presigned URLs | Only `Expires` format/expiry is checked; the signature itself is not verified (mock only) |
 

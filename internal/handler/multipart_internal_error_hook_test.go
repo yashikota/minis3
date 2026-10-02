@@ -253,14 +253,14 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 			backend.ListPartsOptions,
 		) (*backend.ListPartsInternalResult, *backend.MultipartUpload, error) {
 			return &backend.ListPartsInternalResult{
-					Parts: []*backend.PartInfo{{
-						PartNumber: 1,
-						ETag:       "\"etag\"",
-						Size:       1,
-					}},
-				}, &backend.MultipartUpload{
-					StorageClass: "STANDARD",
-				}, nil
+				Parts: []*backend.PartInfo{{
+					PartNumber: 1,
+					ETag:       "\"etag\"",
+					Size:       1,
+				}},
+			}, &backend.MultipartUpload{
+				StorageClass: "STANDARD",
+			}, nil
 		}
 		req := newRequest(
 			http.MethodGet,

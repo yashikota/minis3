@@ -91,7 +91,12 @@ func TestListObjectVersionsKeyMarkerPaging(t *testing.T) {
 		}
 		for _, v := range page2.Versions {
 			if v.Key == page1.NextKeyMarker {
-				t.Fatalf("keyMarker alone did not advance: page2 still contains marker key %q (page1=%+v page2=%+v)", v.Key, flatten(page1), flatten(page2))
+				t.Fatalf(
+					"keyMarker alone did not advance: page2 still contains marker key %q (page1=%+v page2=%+v)",
+					v.Key,
+					flatten(page1),
+					flatten(page2),
+				)
 			}
 		}
 		if len(page2.Versions)+len(page2.DeleteMarkers) == 0 {
@@ -105,7 +110,11 @@ func TestListObjectVersionsKeyMarkerPaging(t *testing.T) {
 			first = page2.DeleteMarkers[0].Key
 		}
 		if first <= page1.NextKeyMarker {
-			t.Fatalf("expected page2 to start after marker %q, got first key %q", page1.NextKeyMarker, first)
+			t.Fatalf(
+				"expected page2 to start after marker %q, got first key %q",
+				page1.NextKeyMarker,
+				first,
+			)
 		}
 	})
 
@@ -154,7 +163,14 @@ func TestListObjectVersionsKeyMarkerPaging(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			b, bucket, _, _ := setup(t)
-			res, err := b.ListObjectVersions(bucket, "", "", tc.keyMarker, tc.versionIdMarker, tc.maxKeys)
+			res, err := b.ListObjectVersions(
+				bucket,
+				"",
+				"",
+				tc.keyMarker,
+				tc.versionIdMarker,
+				tc.maxKeys,
+			)
 			if err != nil {
 				t.Fatalf("ListObjectVersions failed: %v", err)
 			}
@@ -175,12 +191,21 @@ func TestListObjectVersionsKeyMarkerPaging(t *testing.T) {
 				first = res.DeleteMarkers[0].Key
 			}
 			if first != tc.wantFirstKey {
-				t.Fatalf("expected first key %q, got %q (%+v)", tc.wantFirstKey, first, flatten(res))
+				t.Fatalf(
+					"expected first key %q, got %q (%+v)",
+					tc.wantFirstKey,
+					first,
+					flatten(res),
+				)
 			}
 			if tc.wantNoKey != "" {
 				for _, v := range res.Versions {
 					if v.Key == tc.wantNoKey {
-						t.Fatalf("marker key %q must be skipped, got %+v", tc.wantNoKey, flatten(res))
+						t.Fatalf(
+							"marker key %q must be skipped, got %+v",
+							tc.wantNoKey,
+							flatten(res),
+						)
 					}
 				}
 			}
@@ -200,14 +225,24 @@ func TestListObjectVersionsKeyMarkerPaging(t *testing.T) {
 		got := flatten(res)
 		// Must resume with the older key-a version, not skip the whole key.
 		if len(got) == 0 || res.Versions[0].Key != "key-a" {
-			t.Fatalf("expected resume within key-a after newest version, got %+v (ordered=%v)", got, ordered)
+			t.Fatalf(
+				"expected resume within key-a after newest version, got %+v (ordered=%v)",
+				got,
+				ordered,
+			)
 		}
 		if res.Versions[0].VersionId == newestA {
 			t.Fatalf("exact marker version must be excluded, got %+v", got)
 		}
 		// Full suffix after the marker: remaining = total - 1.
 		if len(got) != len(ordered)-1 {
-			t.Fatalf("expected %d entries after exact marker, got %d (%+v, ordered=%v)", len(ordered)-1, len(got), got, ordered)
+			t.Fatalf(
+				"expected %d entries after exact marker, got %d (%+v, ordered=%v)",
+				len(ordered)-1,
+				len(got),
+				got,
+				ordered,
+			)
 		}
 	})
 }

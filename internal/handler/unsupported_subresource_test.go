@@ -30,7 +30,10 @@ func TestUnsupportedBucketSubresourcesReturn501(t *testing.T) {
 			t.Run(method+" bucket?"+q, func(t *testing.T) {
 				h, b := newTestHandler(t)
 				mustCreateBucket(t, b, "notimpl-bucket")
-				w := doRequest(h, newRequest(method, "http://example.test/notimpl-bucket?"+q, "", nil))
+				w := doRequest(
+					h,
+					newRequest(method, "http://example.test/notimpl-bucket?"+q, "", nil),
+				)
 				requireStatus(t, w, http.StatusNotImplemented)
 				requireS3ErrorCode(t, w, "NotImplemented")
 			})
@@ -49,9 +52,21 @@ func TestUnsupportedBucketSubresourcesWithValueReturn501(t *testing.T) {
 		{"GET analytics id", http.MethodGet, "http://example.test/notimpl-bucket?analytics&id=1"},
 		{"GET inventory id", http.MethodGet, "http://example.test/notimpl-bucket?inventory&id=1"},
 		{"GET metrics id", http.MethodGet, "http://example.test/notimpl-bucket?metrics&id=1"},
-		{"GET intelligent-tiering id", http.MethodGet, "http://example.test/notimpl-bucket?intelligent-tiering&id=1"},
-		{"POST select-type value", http.MethodPost, "http://example.test/notimpl-bucket?select-type=2"},
-		{"PUT notification empty", http.MethodPut, "http://example.test/notimpl-bucket?notification="},
+		{
+			"GET intelligent-tiering id",
+			http.MethodGet,
+			"http://example.test/notimpl-bucket?intelligent-tiering&id=1",
+		},
+		{
+			"POST select-type value",
+			http.MethodPost,
+			"http://example.test/notimpl-bucket?select-type=2",
+		},
+		{
+			"PUT notification empty",
+			http.MethodPut,
+			"http://example.test/notimpl-bucket?notification=",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -69,9 +84,11 @@ func TestUnsupportedObjectSubresourcesReturn501(t *testing.T) {
 		target string
 	}{
 		{"POST object select", http.MethodPost, "http://example.test/notimpl-bucket/k?select"},
-		{"POST object select-type", http.MethodPost, "http://example.test/notimpl-bucket/k?select&select-type=2"},
-		{"GET object torrent", http.MethodGet, "http://example.test/notimpl-bucket/k?torrent"},
-		{"GET object torrent with key", http.MethodGet, "http://example.test/notimpl-bucket/k?torrent=1"},
+		{
+			"POST object select-type",
+			http.MethodPost,
+			"http://example.test/notimpl-bucket/k?select&select-type=2",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,6 +98,30 @@ func TestUnsupportedObjectSubresourcesReturn501(t *testing.T) {
 			w := doRequest(h, newRequest(tc.method, tc.target, "", nil))
 			requireStatus(t, w, http.StatusNotImplemented)
 			requireS3ErrorCode(t, w, "NotImplemented")
+		})
+	}
+}
+
+func TestObjectTorrentReturns404NoSuchKey(t *testing.T) {
+	// GetObjectTorrent cannot be served (no torrent generation), and the
+	// s3-tests suite (test_get_object_torrent) accepts 404/NoSuchKey as the
+	// "torrent not configured" signal.
+	cases := []struct {
+		name   string
+		target string
+	}{
+		{"GET object torrent", "http://example.test/notimpl-bucket/k?torrent"},
+		{"GET object torrent with value", "http://example.test/notimpl-bucket/k?torrent=1"},
+		{"GET missing object torrent", "http://example.test/notimpl-bucket/missing?torrent"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, b := newTestHandler(t)
+			mustCreateBucket(t, b, "notimpl-bucket")
+			mustPutObject(t, b, "notimpl-bucket", "k", "v")
+			w := doRequest(h, newRequest(http.MethodGet, tc.target, "", nil))
+			requireStatus(t, w, http.StatusNotFound)
+			requireS3ErrorCode(t, w, "NoSuchKey")
 		})
 	}
 }
@@ -95,15 +136,29 @@ func TestSupportedBucketOperationsUnaffectedByNotImplementedGuard(t *testing.T) 
 		requireStatus(t, w, http.StatusOK)
 	})
 	t.Run("ListObjectsV2", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/notimpl-bucket?list-type=2", "", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/notimpl-bucket?list-type=2", "", nil),
+		)
 		requireStatus(t, w, http.StatusOK)
 	})
 	t.Run("ListObjectsV1 with prefix", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/notimpl-bucket?prefix=k&max-keys=10", "", nil))
+		w := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/notimpl-bucket?prefix=k&max-keys=10",
+				"",
+				nil,
+			),
+		)
 		requireStatus(t, w, http.StatusOK)
 	})
 	t.Run("GetObject still works", func(t *testing.T) {
-		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/notimpl-bucket/k", "", nil))
+		w := doRequest(
+			h,
+			newRequest(http.MethodGet, "http://example.test/notimpl-bucket/k", "", nil),
+		)
 		requireStatus(t, w, http.StatusOK)
 	})
 }

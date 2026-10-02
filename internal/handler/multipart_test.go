@@ -297,7 +297,7 @@ func TestMultipartHandlers(t *testing.T) {
 		requireS3ErrorCode(t, w, "EntityTooSmall")
 	})
 
-	t.Run("complete multipart duplicate part number is rejected", func(t *testing.T) {
+	t.Run("complete multipart duplicate part number uses last entry", func(t *testing.T) {
 		uploadID := createMultipartUpload(
 			t,
 			h,
@@ -348,8 +348,15 @@ func TestMultipartHandlers(t *testing.T) {
 				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
-		requireStatus(t, wComplete, http.StatusBadRequest)
-		requireS3ErrorCode(t, wComplete, "InvalidPart")
+		requireStatus(t, wComplete, http.StatusOK)
+
+		obj, err := b.GetObject("mp-bucket", "dupepart")
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+		if got := string(obj.Data); got != "AAAAAAAA" {
+			t.Fatalf("object data = %q, want %q", got, "AAAAAAAA")
+		}
 	})
 
 	t.Run("complete multipart success", func(t *testing.T) {
