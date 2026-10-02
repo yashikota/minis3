@@ -123,13 +123,23 @@ func verifyAuthorizationHeaderV4(r *http.Request, auth, secretKey string) error 
 	sort.Strings(params)
 	canonicalQueryString := strings.Join(params, "&")
 
-	signedHeaders := strings.Split(signedHeadersStr, ";")
-	canonicalHeaders := ""
+	// Build canonical headers (header names are case-insensitive per AWS spec).
+	// Normalize SignedHeaders to lowercase so mixed-case values like
+	// "Host;X-Amz-Date" verify the same as "host;x-amz-date".
+	signedHeaders := strings.Split(strings.ToLower(signedHeadersStr), ";")
+	for i, header := range signedHeaders {
+		signedHeaders[i] = strings.TrimSpace(header)
+	}
+	normalizedParts := make([]string, 0, len(signedHeaders))
 	for _, header := range signedHeaders {
-		header = strings.ToLower(strings.TrimSpace(header))
 		if header == "" {
 			continue
 		}
+		normalizedParts = append(normalizedParts, header)
+	}
+	normalizedSignedHeaders := strings.Join(normalizedParts, ";")
+	canonicalHeaders := ""
+	for _, header := range normalizedParts {
 		var value string
 		if header == "host" {
 			value = r.Host
@@ -160,7 +170,7 @@ func verifyAuthorizationHeaderV4(r *http.Request, auth, secretKey string) error 
 		canonicalURI,
 		canonicalQueryString,
 		canonicalHeaders,
-		signedHeadersStr,
+		normalizedSignedHeaders,
 		payloadHash,
 	}, "\n")
 
@@ -355,12 +365,24 @@ func calculatePresignedSignatureV4(
 	sort.Strings(params)
 	canonicalQueryString := strings.Join(params, "&")
 
-	// Build canonical headers
-	signedHeaders := strings.Split(signedHeadersStr, ";")
+	// Build canonical headers (header names are case-insensitive per AWS spec).
+	// Normalize SignedHeaders to lowercase so mixed-case values like
+	// "Host;X-Amz-Date" verify the same as "host;x-amz-date".
+	signedHeaders := strings.Split(strings.ToLower(signedHeadersStr), ";")
+	for i, header := range signedHeaders {
+		signedHeaders[i] = strings.TrimSpace(header)
+	}
 	sort.Strings(signedHeaders)
-	canonicalHeaders := ""
+	normalizedParts := make([]string, 0, len(signedHeaders))
 	for _, header := range signedHeaders {
-		header = strings.ToLower(strings.TrimSpace(header))
+		if header == "" {
+			continue
+		}
+		normalizedParts = append(normalizedParts, header)
+	}
+	normalizedSignedHeaders := strings.Join(normalizedParts, ";")
+	canonicalHeaders := ""
+	for _, header := range normalizedParts {
 		var value string
 		if header == "host" {
 			value = r.Host
@@ -379,7 +401,7 @@ func calculatePresignedSignatureV4(
 		canonicalURI,
 		canonicalQueryString,
 		canonicalHeaders,
-		signedHeadersStr,
+		normalizedSignedHeaders,
 		payloadHash,
 	}, "\n")
 
