@@ -248,6 +248,33 @@ func (b *Backend) PutObjectRetention(
 	return nil
 }
 
+// validateRetentionMode validates an Object Lock retention mode.
+// Empty mode is allowed (no retention). Only GOVERNANCE and COMPLIANCE are
+// accepted; any other value returns ErrInvalidRequest to keep the
+// Put/Copy/Multipart paths consistent with PutObjectRetention validation.
+func validateRetentionMode(mode string) error {
+	if mode == "" {
+		return nil
+	}
+	if mode != RetentionModeGovernance && mode != RetentionModeCompliance {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
+// validateObjectLockRetention validates a retention mode + retain-until-date pair.
+// Mode must be empty or GOVERNANCE/COMPLIANCE, and AWS requires a
+// retain-until-date whenever a mode is specified.
+func validateObjectLockRetention(mode string, retainUntil *time.Time) error {
+	if err := validateRetentionMode(mode); err != nil {
+		return err
+	}
+	if mode != "" && retainUntil == nil {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
 // GetObjectLegalHold returns the legal hold status for an object.
 func (b *Backend) GetObjectLegalHold(
 	bucketName, key, versionId string,

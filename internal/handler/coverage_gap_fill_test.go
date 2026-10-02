@@ -278,15 +278,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 					"x-amz-checksum-crc64nvme":     "c3",
 					"x-amz-checksum-sha1":          "c4",
 					"x-amz-checksum-sha256":        "c5",
-					"x-amz-object-lock-legal-hold": "ON",
 					"x-amz-storage-class":          "STANDARD_IA",
-					"x-amz-object-lock-mode":       backend.RetentionModeGovernance,
-					"x-amz-object-lock-retain-until-date": time.Now().
-						UTC().
-						Add(24 * time.Hour).
-						Format(
-							time.RFC3339,
-						),
 				},
 			),
 		)
@@ -559,8 +551,8 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 			h,
 			newRequest(http.MethodGet, "http://example.test/obj-gap/k?torrent", "", nil),
 		)
-		requireStatus(t, wTorrent, http.StatusNotFound)
-		requireS3ErrorCode(t, wTorrent, "NoSuchKey")
+		requireStatus(t, wTorrent, http.StatusNotImplemented)
+		requireS3ErrorCode(t, wTorrent, "NotImplemented")
 	})
 
 	t.Run("put object and copy acl branches", func(t *testing.T) {

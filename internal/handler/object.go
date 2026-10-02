@@ -404,9 +404,8 @@ func validateSSEHeaders(r *http.Request) (string, string) {
 	if sseKmsKeyId != "" && sse != "aws:kms" && sse != "aws:kms:dsse" {
 		return "InvalidArgument", "SSE-KMS key ID is not applicable without aws:kms encryption."
 	}
-	if (sse == "aws:kms" || sse == "aws:kms:dsse") && sseKmsKeyId == "" {
-		return "InvalidArgument", "SSE-KMS key ID must be specified."
-	}
+	// AWS allows omitting the KMS key ID when aws:kms/aws:kms:dsse is specified
+	// (the default KMS key is used), so an empty key ID is valid here.
 
 	// SSE-C header completeness: all or none
 	hasAlgo := sseCA != ""
@@ -809,6 +808,9 @@ func applyResponseOverrides(w http.ResponseWriter, r *http.Request) {
 // Supported formats: "bytes=start-end", "bytes=start-", "bytes=-suffix"
 // Returns start, end (inclusive), and error if invalid.
 func parseRangeHeader(rangeHeader string, size int64) (int64, int64, error) {
+	if size == 0 {
+		return 0, 0, backend.ErrInvalidRange
+	}
 	if !strings.HasPrefix(rangeHeader, "bytes=") {
 		return 0, 0, backend.ErrInvalidRange
 	}
@@ -876,13 +878,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		return
 	}
 
-	if r.URL.Query().Has("torrent") && r.Method == http.MethodGet {
-		backend.WriteError(
-			w,
-			http.StatusNotFound,
-			"NoSuchKey",
-			"The specified key does not exist.",
-		)
+	if r.URL.Query().Has("torrent") {
+		writeNotImplemented(w)
+		return
+	}
+	if r.Method == http.MethodPost &&
+		(r.URL.Query().Has("select") || r.URL.Query().Has("select-type")) {
+		writeNotImplemented(w)
 		return
 	}
 	// Handle Object Tagging operations
@@ -1108,10 +1110,17 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
 			t, err := backend.ParseRetainUntilDate(retainUntil)
-			if err == nil {
-				t = t.UTC().Truncate(time.Second)
-				opts.RetainUntilDate = &t
+			if err != nil {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Invalid x-amz-object-lock-retain-until-date header. Expected RFC3339 format.",
+				)
+				return
 			}
+			t = t.UTC().Truncate(time.Second)
+			opts.RetainUntilDate = &t
 		}
 		if legalHold := r.Header.Get("x-amz-object-lock-legal-hold"); legalHold != "" {
 			opts.LegalHoldStatus = legalHold
@@ -1373,6 +1382,8 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		// Archived objects require restore before GET.
+		// AWS returns 403 InvalidObjectState for GetObject on archived
+		// objects without a valid restore, regardless of read-through.
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
 			if backend.CloudAllowReadThrough() {
 				restoreDays := backend.CloudReadThroughRestoreDays()
@@ -1387,7 +1398,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 				)
 				backend.WriteError(
 					w,
-					http.StatusBadRequest,
+					http.StatusForbidden,
 					"InvalidObjectState",
 					"The operation is not valid for the object's storage class",
 				)
@@ -1615,6 +1626,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 					"NoSuchVersion",
 					"The specified version does not exist.",
 				)
+				return
+			}
+			// S3 DeleteObject is idempotent: deleting a specific version of a
+			// non-existent key succeeds with 204 (mirrors DeleteObjects
+			// behavior which returns success when the key does not exist).
+			if errors.Is(err, backend.ErrObjectNotFound) {
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 		}
@@ -2116,9 +2134,17 @@ func (h *Handler) handleCopyObject(
 	}
 	if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
 		t, err := backend.ParseRetainUntilDate(retainUntil)
-		if err == nil {
-			opts.RetainUntilDate = &t
+		if err != nil {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Invalid x-amz-object-lock-retain-until-date header. Expected RFC3339 format.",
+			)
+			return
 		}
+		t = t.UTC().Truncate(time.Second)
+		opts.RetainUntilDate = &t
 	}
 	if legalHold := r.Header.Get("x-amz-object-lock-legal-hold"); legalHold != "" {
 		opts.LegalHoldStatus = legalHold

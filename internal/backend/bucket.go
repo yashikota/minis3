@@ -257,7 +257,8 @@ func sortBucketsByName(buckets []*Bucket) {
 }
 
 // GetBucketUsage returns the number of visible objects and total bytes used in a bucket.
-// It counts only the latest non-delete-marker version for each key.
+// It counts only the current visible version for each key: keys whose latest
+// version is a delete marker are hidden and therefore not counted.
 func (b *Backend) GetBucketUsage(bucketName string) (int, int64, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -270,7 +271,7 @@ func (b *Backend) GetBucketUsage(bucketName string) (int, int64, error) {
 	var objectCount int
 	var bytesUsed int64
 	for _, versions := range bucket.Objects {
-		obj := versions.getLatestVersion()
+		obj := versions.getCurrentVisibleVersion()
 		if obj == nil {
 			continue
 		}

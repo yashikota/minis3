@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/yashikota/minis3/internal/backend"
 )
@@ -226,7 +227,7 @@ func (h *Handler) handlePutObjectRetention(
 	bucketName, key string,
 ) {
 	versionId := r.URL.Query().Get("versionId")
-	bypassGovernance := r.Header.Get("x-amz-bypass-governance-retention") == "true"
+	bypassGovernance := strings.EqualFold(r.Header.Get("x-amz-bypass-governance-retention"), "true")
 
 	body, err := readAllFn(r.Body)
 	if err != nil {

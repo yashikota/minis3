@@ -70,7 +70,10 @@ func (cr *chunkedReader) readChunk() ([]byte, error) {
 		for {
 			trailer, err := cr.readLine()
 			if err != nil {
-				return nil, nil
+				if err == io.EOF {
+					return nil, io.EOF
+				}
+				return nil, err
 			}
 			if strings.TrimSpace(trailer) == "" {
 				break

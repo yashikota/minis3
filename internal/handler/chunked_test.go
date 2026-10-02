@@ -45,6 +45,31 @@ func TestDecodeAWSChunkedBody(t *testing.T) {
 			t.Fatal("expected error")
 		}
 	})
+
+	t.Run("decode with trailers success", func(t *testing.T) {
+		body := "5\r\nhello\r\n0\r\nx-amz-checksum-crc32: abc\r\n\r\n"
+		got, err := decodeAWSChunkedBody(strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("decodeAWSChunkedBody returned error: %v", err)
+		}
+		if string(got) != "hello" {
+			t.Fatalf("decoded body = %q, want %q", string(got), "hello")
+		}
+	})
+
+	t.Run("trailer read error propagates", func(t *testing.T) {
+		r := &trailerErrReader{
+			data: []byte("5\r\nhello\r\n0\r\n"),
+			err:  errors.New("boom"),
+		}
+		_, err := decodeAWSChunkedBody(r)
+		if err == nil {
+			t.Fatal("expected trailer read error to propagate, got nil")
+		}
+		if !strings.Contains(err.Error(), "boom") {
+			t.Fatalf("expected boom error, got %v", err)
+		}
+	})
 }
 
 func TestChunkedHelpers(t *testing.T) {
@@ -109,12 +134,67 @@ func TestChunkedHelpers(t *testing.T) {
 			t.Fatalf("line = %q, want %q", line, "ab")
 		}
 	})
+
+	t.Run("readChunk truncated trailer signals EOF", func(t *testing.T) {
+		// "5\r\nhello\r\n0\r\n" then EOF: first chunk is data,
+		// second chunk header is zero-size with missing final CRLF.
+		// Must not be silently swallowed as (nil, nil).
+		cr := &chunkedReader{r: strings.NewReader("5\r\nhello\r\n0\r\n")}
+		chunk, err := cr.readChunk()
+		if err != nil {
+			t.Fatalf("first readChunk error: %v", err)
+		}
+		if string(chunk) != "hello" {
+			t.Fatalf("chunk = %q, want %q", string(chunk), "hello")
+		}
+		chunk, err = cr.readChunk()
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("truncated trailer err = %v, want EOF (must not be nil)", err)
+		}
+		if len(chunk) != 0 {
+			t.Fatalf("chunk len = %d, want 0", len(chunk))
+		}
+	})
+
+	t.Run("readChunk trailer error propagates", func(t *testing.T) {
+		cr := &chunkedReader{r: &trailerErrReader{
+			data: []byte("0\r\n"),
+			err:  errors.New("boom"),
+		}}
+		_, err := cr.readChunk()
+		if err == nil {
+			t.Fatal("expected trailer error, got nil")
+		}
+		if !strings.Contains(err.Error(), "boom") {
+			t.Fatalf("expected boom error, got %v", err)
+		}
+	})
 }
 
 type readResult struct {
 	b   []byte
 	n   int
 	err error
+}
+
+// trailerErrReader serves data one byte at a time, then fails with err.
+// Used to simulate a connection break during trailer read after size==0.
+type trailerErrReader struct {
+	data []byte
+	off  int
+	err  error
+}
+
+func (r *trailerErrReader) Read(p []byte) (int, error) {
+	if r.off >= len(r.data) {
+		if r.err != nil {
+			return 0, r.err
+		}
+		return 0, io.EOF
+	}
+	p[0] = r.data[r.off]
+	r.off++
+	return 1, nil
 }
 
 type zeroThenDataReader struct {

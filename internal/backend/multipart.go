@@ -56,6 +56,15 @@ func (b *Backend) CreateMultipartUpload(
 		return nil, ErrBucketNotFound
 	}
 
+	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
+		if err := validateObjectLockRetention(opts.RetentionMode, opts.RetainUntilDate); err != nil {
+			return nil, err
+		}
+		if !bucket.ObjectLockEnabled {
+			return nil, ErrInvalidRequest
+		}
+	}
+
 	uploadId := GenerateVersionId()
 	owner := opts.Owner
 	if owner == nil {
@@ -184,6 +193,13 @@ func (b *Backend) CompleteMultipartUpload(
 	if len(parts) == 0 {
 		return nil, ErrInvalidPart
 	}
+	seen := make(map[int]bool, len(parts))
+	for _, p := range parts {
+		if seen[p.PartNumber] {
+			return nil, ErrInvalidPart
+		}
+		seen[p.PartNumber] = true
+	}
 	normalizedParts := normalizeCompleteParts(parts)
 
 	// Validate parts are in ascending order and exist
@@ -225,7 +241,7 @@ func (b *Backend) CompleteMultipartUpload(
 	for _, etag := range partETags {
 		decoded, err := hex.DecodeString(etag)
 		if err != nil {
-			return nil, fmt.Errorf("invalid ETag format: %w", err)
+			return nil, ErrInvalidPart
 		}
 		md5Hash.Write(decoded)
 	}
@@ -356,6 +372,9 @@ func (b *Backend) CompleteMultipartUpload(
 
 	// Set Object Lock fields if provided
 	if upload.RetentionMode != "" || upload.LegalHoldStatus != "" {
+		if err := validateObjectLockRetention(upload.RetentionMode, upload.RetainUntilDate); err != nil {
+			return nil, err
+		}
 		if !bucket.ObjectLockEnabled {
 			return nil, ErrInvalidRequest
 		}
@@ -595,6 +614,11 @@ func (b *Backend) CopyPart(
 
 	if upload.Bucket != dstBucket || upload.Key != dstKey {
 		return nil, ErrNoSuchUpload
+	}
+
+	// Validate part number (1-10000)
+	if partNumber < 1 || partNumber > 10000 {
+		return nil, ErrInvalidRequest
 	}
 
 	// Get source object

@@ -340,6 +340,9 @@ func (b *Backend) PutObject(
 
 	// Set Object Lock fields if provided
 	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
+		if err := validateObjectLockRetention(opts.RetentionMode, opts.RetainUntilDate); err != nil {
+			return nil, err
+		}
 		if !bucket.ObjectLockEnabled {
 			return nil, ErrInvalidRequest
 		}
@@ -668,6 +671,9 @@ func (b *Backend) CopyObject(
 
 	// Handle Object Lock fields
 	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
+		if err := validateObjectLockRetention(opts.RetentionMode, opts.RetainUntilDate); err != nil {
+			return nil, "", err
+		}
 		// Explicit override: destination bucket must have Object Lock enabled
 		if !dstBkt.ObjectLockEnabled {
 			return nil, "", ErrInvalidRequest
@@ -1162,30 +1168,53 @@ func (b *Backend) ListObjectVersions(
 		}
 	}
 
-	// Sort by key, then by LastModified descending (newest first)
-	sort.Slice(allVersions, func(i, j int) bool {
+	// Sort by key, then by LastModified descending (newest first).
+	// The sort is stable so equal LastModified (same-millisecond puts,
+	// clock skew) falls back to insertion order, which is newest-first
+	// because addVersionToObject prepends new versions. This keeps the
+	// order deterministic across calls without depending on the
+	// VersionId format.
+	sort.SliceStable(allVersions, func(i, j int) bool {
 		if allVersions[i].key != allVersions[j].key {
 			return allVersions[i].key < allVersions[j].key
 		}
 		return allVersions[i].object.LastModified.After(allVersions[j].object.LastModified)
 	})
 
-	// Apply key-marker and version-id-marker
+	// Apply key-marker and version-id-marker.
+	// AWS spec (ListObjectVersions KeyMarker/VersionIdMarker):
+	// - keyMarker alone skips all versions of the marker key and starts
+	//   at the first entry with key greater than the marker.
+	// - keyMarker with versionIdMarker starts right after the exact
+	//   (key, version-id) entry; if the version id is unknown, start at
+	//   the first entry with a greater key.
 	startIdx := 0
 	if keyMarker != "" {
-		for i, ve := range allVersions {
-			if ve.key > keyMarker {
-				startIdx = i
-				break
+		if versionIdMarker == "" {
+			// Skip every entry of keyMarker; start at the first
+			// entry with a greater key.
+			startIdx = len(allVersions)
+			for i, ve := range allVersions {
+				if ve.key > keyMarker {
+					startIdx = i
+					break
+				}
 			}
-			if ve.key == keyMarker && versionIdMarker != "" && ve.versionId == versionIdMarker {
-				startIdx = i + 1
-				break
+		} else {
+			startIdx = len(allVersions)
+			for i, ve := range allVersions {
+				if ve.key == keyMarker && ve.versionId == versionIdMarker {
+					startIdx = i + 1
+					break
+				}
+				if ve.key > keyMarker {
+					startIdx = i
+					break
+				}
 			}
-			if ve.key == keyMarker && versionIdMarker == "" {
-				// Skip all versions of keyMarker
-				continue
-			}
+			// Exact (key, version-id) match at the tail yields
+			// startIdx == len(allVersions) via i+1; no extra guard needed
+			// beyond the tail check below.
 		}
 		// If marker is after all entries
 		if startIdx == 0 && len(allVersions) > 0 &&
