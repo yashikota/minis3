@@ -1162,12 +1162,18 @@ func (b *Backend) ListObjectVersions(
 		}
 	}
 
-	// Sort by key, then by LastModified descending (newest first)
+	// Sort by key, then by LastModified descending (newest first).
+	// VersionId descending is the deterministic tie-break for equal
+	// LastModified (same-millisecond puts, clock skew): VersionIds are
+	// unique, so the resulting order is total and stable across calls.
 	sort.Slice(allVersions, func(i, j int) bool {
 		if allVersions[i].key != allVersions[j].key {
 			return allVersions[i].key < allVersions[j].key
 		}
-		return allVersions[i].object.LastModified.After(allVersions[j].object.LastModified)
+		if !allVersions[i].object.LastModified.Equal(allVersions[j].object.LastModified) {
+			return allVersions[i].object.LastModified.After(allVersions[j].object.LastModified)
+		}
+		return allVersions[i].versionId > allVersions[j].versionId
 	})
 
 	// Apply key-marker and version-id-marker
