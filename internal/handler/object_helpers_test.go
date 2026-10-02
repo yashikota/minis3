@@ -282,12 +282,82 @@ func TestValidateSSEHeaders(t *testing.T) {
 	})
 
 	t.Run("kms algorithm without key id", func(t *testing.T) {
+		// AWS permits omitting the KMS key ID (default key is used).
 		r := req()
 		r.Header.Set("x-amz-server-side-encryption", "aws:kms")
-		if code, _ := validateSSEHeaders(r); code != "InvalidArgument" {
-			t.Fatalf("expected InvalidArgument, got %q", code)
+		if code, msg := validateSSEHeaders(r); code != "" || msg != "" {
+			t.Fatalf("expected valid headers, got code=%q msg=%q", code, msg)
 		}
 	})
+}
+
+func TestValidateSSEHeaders_SSEKMSKeyIdOptional(t *testing.T) {
+	tests := []struct {
+		name      string
+		sse       string
+		kmsKeyID  string
+		wantCode  string
+		wantValid bool
+	}{
+		{
+			name:      "aws:kms without KeyId succeeds with default key",
+			sse:       "aws:kms",
+			kmsKeyID:  "",
+			wantValid: true,
+		},
+		{
+			name:      "aws:kms with KeyId succeeds",
+			sse:       "aws:kms",
+			kmsKeyID:  "arn:aws:kms:us-east-1:123456789012:key/test-key-id",
+			wantValid: true,
+		},
+		{
+			name:      "aws:kms:dsse without KeyId succeeds with default key",
+			sse:       "aws:kms:dsse",
+			kmsKeyID:  "",
+			wantValid: true,
+		},
+		{
+			name:      "aws:kms:dsse with KeyId succeeds",
+			sse:       "aws:kms:dsse",
+			kmsKeyID:  "test-key-id",
+			wantValid: true,
+		},
+		{
+			name:     "invalid SSEAlgorithm stays 400",
+			sse:      "invalid-algorithm",
+			kmsKeyID: "",
+			wantCode: "InvalidArgument",
+		},
+		{
+			name:     "KMS KeyId without aws:kms stays 400",
+			sse:      "AES256",
+			kmsKeyID: "test-key-id",
+			wantCode: "InvalidArgument",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPut, "http://example.test/bucket/key", nil)
+			if tt.sse != "" {
+				r.Header.Set("x-amz-server-side-encryption", tt.sse)
+			}
+			if tt.kmsKeyID != "" {
+				r.Header.Set("x-amz-server-side-encryption-aws-kms-key-id", tt.kmsKeyID)
+			}
+			code, _ := validateSSEHeaders(r)
+			if tt.wantValid {
+				if code != "" {
+					t.Fatalf("expected valid headers, got code=%q", code)
+				}
+				return
+			}
+			if code != tt.wantCode {
+				t.Fatalf("expected code %q, got %q", tt.wantCode, code)
+			}
+		})
+	}
 }
 
 func TestValidateSSECAccess(t *testing.T) {
