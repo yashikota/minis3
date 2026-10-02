@@ -278,15 +278,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 					"x-amz-checksum-crc64nvme":     "c3",
 					"x-amz-checksum-sha1":          "c4",
 					"x-amz-checksum-sha256":        "c5",
-					"x-amz-object-lock-legal-hold": "ON",
 					"x-amz-storage-class":          "STANDARD_IA",
-					"x-amz-object-lock-mode":       backend.RetentionModeGovernance,
-					"x-amz-object-lock-retain-until-date": time.Now().
-						UTC().
-						Add(24 * time.Hour).
-						Format(
-							time.RFC3339,
-						),
 				},
 			),
 		)

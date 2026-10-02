@@ -349,9 +349,17 @@ func (h *Handler) handleCreateMultipartUpload(
 	}
 	if retainUntil := r.Header.Get("x-amz-object-lock-retain-until-date"); retainUntil != "" {
 		t, parseErr := time.Parse(time.RFC3339, retainUntil)
-		if parseErr == nil {
-			opts.RetainUntilDate = &t
+		if parseErr != nil {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidArgument",
+				"Invalid x-amz-object-lock-retain-until-date header. Expected RFC3339 format.",
+			)
+			return
 		}
+		t = t.UTC().Truncate(time.Second)
+		opts.RetainUntilDate = &t
 	}
 	if legalHold := r.Header.Get("x-amz-object-lock-legal-hold"); legalHold != "" {
 		opts.LegalHoldStatus = legalHold
@@ -393,6 +401,13 @@ func (h *Handler) handleCreateMultipartUpload(
 				http.StatusNotFound,
 				"NoSuchBucket",
 				"The specified bucket does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrInvalidRequest) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"Bucket is missing Object Lock Configuration",
 			)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())

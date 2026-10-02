@@ -56,6 +56,15 @@ func (b *Backend) CreateMultipartUpload(
 		return nil, ErrBucketNotFound
 	}
 
+	if opts.RetentionMode != "" || opts.LegalHoldStatus != "" {
+		if err := validateObjectLockRetention(opts.RetentionMode, opts.RetainUntilDate); err != nil {
+			return nil, err
+		}
+		if !bucket.ObjectLockEnabled {
+			return nil, ErrInvalidRequest
+		}
+	}
+
 	uploadId := GenerateVersionId()
 	owner := opts.Owner
 	if owner == nil {
@@ -363,6 +372,9 @@ func (b *Backend) CompleteMultipartUpload(
 
 	// Set Object Lock fields if provided
 	if upload.RetentionMode != "" || upload.LegalHoldStatus != "" {
+		if err := validateObjectLockRetention(upload.RetentionMode, upload.RetainUntilDate); err != nil {
+			return nil, err
+		}
 		if !bucket.ObjectLockEnabled {
 			return nil, ErrInvalidRequest
 		}
