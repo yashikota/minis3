@@ -876,13 +876,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		return
 	}
 
-	if r.URL.Query().Has("torrent") && r.Method == http.MethodGet {
-		backend.WriteError(
-			w,
-			http.StatusNotFound,
-			"NoSuchKey",
-			"The specified key does not exist.",
-		)
+	if r.URL.Query().Has("torrent") {
+		writeNotImplemented(w)
+		return
+	}
+	if r.Method == http.MethodPost &&
+		(r.URL.Query().Has("select") || r.URL.Query().Has("select-type")) {
+		writeNotImplemented(w)
 		return
 	}
 	// Handle Object Tagging operations

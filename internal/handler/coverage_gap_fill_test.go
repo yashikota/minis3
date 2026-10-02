@@ -559,8 +559,8 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 			h,
 			newRequest(http.MethodGet, "http://example.test/obj-gap/k?torrent", "", nil),
 		)
-		requireStatus(t, wTorrent, http.StatusNotFound)
-		requireS3ErrorCode(t, wTorrent, "NoSuchKey")
+		requireStatus(t, wTorrent, http.StatusNotImplemented)
+		requireS3ErrorCode(t, wTorrent, "NotImplemented")
 	})
 
 	t.Run("put object and copy acl branches", func(t *testing.T) {
