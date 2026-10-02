@@ -164,6 +164,12 @@ jobs:
               });
             }
 
+      - name: Fail on s3-test failures
+        if: steps.summary.outputs.has_results == 'true' && (steps.summary.outputs.failed != '0' || steps.summary.outputs.errors != '0')
+        run: |
+          echo "::error::s3-tests failed: ${{ steps.summary.outputs.failed }} failed, ${{ steps.summary.outputs.errors }} errors (passed ${{ steps.summary.outputs.passed }}, skipped ${{ steps.summary.outputs.skipped }})"
+          exit 1
+
   publish-badge:
     needs: s3-tests
     if: needs.s3-tests.outputs.has_results == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
