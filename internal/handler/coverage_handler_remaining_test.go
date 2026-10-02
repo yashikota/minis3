@@ -999,6 +999,77 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 		requireStatus(t, w, http.StatusNotFound)
 		requireS3ErrorCode(t, w, "NoSuchKey")
 	})
+
+	t.Run("copyPart invalid request mapping", func(t *testing.T) {
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"dst-remain",
+			"invalid-request-mapping",
+			map[string]string{"Authorization": authHeader("dst-owner")},
+		)
+		origCopyPart := copyPartFn
+		copyPartFn = func(
+			*Handler,
+			string,
+			string,
+			string,
+			string,
+			string,
+			string,
+			int,
+			int64,
+			int64,
+		) (*backend.PartInfo, error) {
+			return nil, backend.ErrInvalidRequest
+		}
+		t.Cleanup(func() {
+			copyPartFn = origCopyPart
+		})
+
+		w := doRequest(
+			h,
+			newRequest(
+				http.MethodPut,
+				"http://example.test/dst-remain/invalid-request-mapping?uploadId="+
+					url.QueryEscape(uploadID)+"&partNumber=1",
+				"",
+				map[string]string{
+					"Authorization":     authHeader("dst-owner"),
+					"x-amz-copy-source": "/src-remain/src",
+				},
+			),
+		)
+		requireStatus(t, w, http.StatusBadRequest)
+		requireS3ErrorCode(t, w, "InvalidRequest")
+	})
+
+	t.Run("part number boundaries", func(t *testing.T) {
+		uploadID := createMultipartUpload(
+			t,
+			h,
+			"dst-remain",
+			"part-number-boundaries",
+			map[string]string{"Authorization": authHeader("dst-owner")},
+		)
+		for _, partNumber := range []string{"0", "10001"} {
+			w := doRequest(
+				h,
+				newRequest(
+					http.MethodPut,
+					"http://example.test/dst-remain/part-number-boundaries?uploadId="+
+						url.QueryEscape(uploadID)+"&partNumber="+partNumber,
+					"",
+					map[string]string{
+						"Authorization":     authHeader("dst-owner"),
+						"x-amz-copy-source": "/src-remain/src",
+					},
+				),
+			)
+			requireStatus(t, w, http.StatusBadRequest)
+			requireS3ErrorCode(t, w, "InvalidArgument")
+		}
+	})
 }
 
 func TestObjectRemainingBranches(t *testing.T) {

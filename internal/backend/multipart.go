@@ -616,6 +616,11 @@ func (b *Backend) CopyPart(
 		return nil, ErrNoSuchUpload
 	}
 
+	// Validate part number (1-10000)
+	if partNumber < 1 || partNumber > 10000 {
+		return nil, ErrInvalidRequest
+	}
+
 	// Get source object
 	srcBkt, ok := b.buckets[srcBucket]
 	if !ok {

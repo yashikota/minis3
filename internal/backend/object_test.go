@@ -265,6 +265,46 @@ func TestCopyPart(t *testing.T) {
 			t.Errorf("expected ErrNoSuchUpload, got %v", err)
 		}
 	})
+
+	t.Run("part number validation", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			partNumber int
+			wantErr    error
+		}{
+			{"part number 0 is invalid", 0, ErrInvalidRequest},
+			{"part number 1 is valid", 1, nil},
+			{"part number 10000 is valid", 10000, nil},
+			{"part number 10001 is invalid", 10001, ErrInvalidRequest},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				part, err := b.CopyPart(
+					"src-bucket",
+					"src-key",
+					"",
+					"dst-bucket",
+					"dst-key",
+					upload.UploadId,
+					tt.partNumber,
+					-1,
+					-1,
+				)
+				if tt.wantErr != nil {
+					if !errors.Is(err, tt.wantErr) {
+						t.Fatalf("expected %v, got %v", tt.wantErr, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("CopyPart failed: %v", err)
+				}
+				if part.PartNumber != tt.partNumber {
+					t.Errorf("expected part number %d, got %d", tt.partNumber, part.PartNumber)
+				}
+			})
+		}
+	})
 }
 
 func TestPutObjectWithTags(t *testing.T) {
