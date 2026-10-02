@@ -184,6 +184,13 @@ func (b *Backend) CompleteMultipartUpload(
 	if len(parts) == 0 {
 		return nil, ErrInvalidPart
 	}
+	seen := make(map[int]bool, len(parts))
+	for _, p := range parts {
+		if seen[p.PartNumber] {
+			return nil, ErrInvalidPart
+		}
+		seen[p.PartNumber] = true
+	}
 	normalizedParts := normalizeCompleteParts(parts)
 
 	// Validate parts are in ascending order and exist
