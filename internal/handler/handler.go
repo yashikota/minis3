@@ -254,9 +254,15 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 		h.setCORSHeadersForRequest(w, bucketName, origin, corsMethod, "")
 	}
 	expectedBucketOwner := r.Header.Get("x-amz-expected-bucket-owner")
-	if expectedBucketOwner != "" && expectedBucketOwner != backend.DefaultOwner().ID {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
+	if expectedBucketOwner != "" {
+		wantID := backend.DefaultOwner().ID
+		if owner := h.bucketOwner(bucketName); owner != nil {
+			wantID = owner.ID
+		}
+		if expectedBucketOwner != wantID {
+			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+			return
+		}
 	}
 
 	if key == "" {
