@@ -1373,6 +1373,8 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		// Archived objects require restore before GET.
+		// AWS returns 403 InvalidObjectState for GetObject on archived
+		// objects without a valid restore, regardless of read-through.
 		if isArchivedStorageClass(obj.StorageClass) && !isObjectRestored(obj) {
 			if backend.CloudAllowReadThrough() {
 				restoreDays := backend.CloudReadThroughRestoreDays()
@@ -1387,7 +1389,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 				)
 				backend.WriteError(
 					w,
-					http.StatusBadRequest,
+					http.StatusForbidden,
 					"InvalidObjectState",
 					"The operation is not valid for the object's storage class",
 				)

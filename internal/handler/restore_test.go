@@ -114,7 +114,7 @@ func TestGetObjectGlacierAutoRestore(t *testing.T) {
 	t.Run("GET un-restored GLACIER object triggers read-through restore", func(t *testing.T) {
 		req := newRequest(http.MethodGet, "/bucket/glacier-key", "", nil)
 		w := doRequest(h, req)
-		requireStatus(t, w, http.StatusBadRequest)
+		requireStatus(t, w, http.StatusForbidden)
 		requireS3ErrorCode(t, w, "InvalidObjectState")
 	})
 
@@ -139,6 +139,40 @@ func TestGetObjectGlacierAutoRestore(t *testing.T) {
 			t.Fatal("expected x-amz-restore header")
 		}
 	})
+}
+
+func TestGetObjectArchivedReturnsForbidden(t *testing.T) {
+	// AWS returns 403 InvalidObjectState for GetObject on archived
+	// objects without a valid restore, regardless of read-through.
+	tests := []struct {
+		name         string
+		storageClass string
+		readThrough  string
+	}{
+		{"GLACIER with read-through ON", "GLACIER", "true"},
+		{"GLACIER with read-through OFF", "GLACIER", "false"},
+		{"DEEP_ARCHIVE with read-through ON", "DEEP_ARCHIVE", "true"},
+		{"DEEP_ARCHIVE with read-through OFF", "DEEP_ARCHIVE", "false"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MINIS3_CLOUD_ALLOW_READ_THROUGH", tt.readThrough)
+			h, b := newTestHandler(t)
+			mustCreateBucket(t, b, "bucket")
+			if _, err := b.PutObject(
+				"bucket",
+				"cold-key",
+				[]byte("data"),
+				backend.PutObjectOptions{StorageClass: tt.storageClass},
+			); err != nil {
+				t.Fatalf("PutObject: %v", err)
+			}
+			req := newRequest(http.MethodGet, "/bucket/cold-key", "", nil)
+			w := doRequest(h, req)
+			requireStatus(t, w, http.StatusForbidden)
+			requireS3ErrorCode(t, w, "InvalidObjectState")
+		})
+	}
 }
 
 func TestRestoreObjectVersionNotFound(t *testing.T) {
