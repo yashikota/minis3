@@ -809,6 +809,9 @@ func applyResponseOverrides(w http.ResponseWriter, r *http.Request) {
 // Supported formats: "bytes=start-end", "bytes=start-", "bytes=-suffix"
 // Returns start, end (inclusive), and error if invalid.
 func parseRangeHeader(rangeHeader string, size int64) (int64, int64, error) {
+	if size == 0 {
+		return 0, 0, backend.ErrInvalidRange
+	}
 	if !strings.HasPrefix(rangeHeader, "bytes=") {
 		return 0, 0, backend.ErrInvalidRange
 	}
@@ -1615,6 +1618,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 					"NoSuchVersion",
 					"The specified version does not exist.",
 				)
+				return
+			}
+			// S3 DeleteObject is idempotent: deleting a specific version of a
+			// non-existent key succeeds with 204 (mirrors DeleteObjects
+			// behavior which returns success when the key does not exist).
+			if errors.Is(err, backend.ErrObjectNotFound) {
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 		}
