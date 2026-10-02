@@ -141,24 +141,24 @@ curl -i http://127.0.0.1:9191/health
 
 | Area | Status | Implemented APIs |
 | ---- | ------ | ---------------- |
-| Bucket operations | ✅ Full support | 32 |
-| Object operations | ✅ Full support | 15 |
+| Bucket operations | ✅ Full support | 41 |
+| Object operations | ✅ Full support | 17 |
 | Object Lock operations | ✅ Full support | 6 |
 | Multipart upload operations | ✅ Full support | 7 |
 
 ### Operation List (by category)
 
 <details>
-<summary>🪣 Bucket operations (32)</summary>
+<summary>🪣 Bucket operations (41)</summary>
 
-`ListBuckets`, `CreateBucket`, `DeleteBucket`, `HeadBucket`, `GetBucketLocation`, `GetBucketVersioning`, `PutBucketVersioning`, `GetBucketTagging`, `PutBucketTagging`, `DeleteBucketTagging`, `GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`, `GetBucketAcl`, `PutBucketAcl`, `GetObjectLockConfiguration`, `PutObjectLockConfiguration`, `GetBucketLifecycleConfiguration`, `PutBucketLifecycleConfiguration`, `DeleteBucketLifecycle`, `GetBucketEncryption`, `PutBucketEncryption`, `DeleteBucketEncryption`, `GetBucketCors`, `PutBucketCors`, `DeleteBucketCors`, `GetBucketWebsite`, `PutBucketWebsite`, `DeleteBucketWebsite`, `GetPublicAccessBlock`, `PutPublicAccessBlock`, `DeletePublicAccessBlock`
+`ListBuckets`, `CreateBucket`, `DeleteBucket`, `HeadBucket`, `GetBucketLocation`, `GetBucketVersioning`, `PutBucketVersioning`, `GetBucketTagging`, `PutBucketTagging`, `DeleteBucketTagging`, `GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`, `GetBucketPolicyStatus`, `GetBucketAcl`, `PutBucketAcl`, `GetBucketOwnershipControls`, `PutBucketOwnershipControls`, `DeleteBucketOwnershipControls`, `GetBucketRequestPayment`, `PutBucketRequestPayment`, `GetBucketLogging`, `PutBucketLogging`, `DeleteBucketLogging`, `GetObjectLockConfiguration`, `PutObjectLockConfiguration`, `GetBucketLifecycleConfiguration`, `PutBucketLifecycleConfiguration`, `DeleteBucketLifecycle`, `GetBucketEncryption`, `PutBucketEncryption`, `DeleteBucketEncryption`, `GetBucketCors`, `PutBucketCors`, `DeleteBucketCors`, `GetBucketWebsite`, `PutBucketWebsite`, `DeleteBucketWebsite`, `GetPublicAccessBlock`, `PutPublicAccessBlock`, `DeletePublicAccessBlock`
 
 </details>
 
 <details>
-<summary>📦 Object operations (15)</summary>
+<summary>📦 Object operations (17)</summary>
 
-`PutObject`, `GetObject`, `DeleteObject`, `DeleteObjects`, `CopyObject`, `HeadObject`, `ListObjects`, `ListObjectsV2`, `ListObjectVersions`, `GetObjectAcl`, `PutObjectAcl`, `GetObjectAttributes`, `GetObjectTagging`, `PutObjectTagging`, `DeleteObjectTagging`
+`PutObject`, `GetObject`, `DeleteObject`, `DeleteObjects`, `CopyObject`, `HeadObject`, `ListObjects`, `ListObjectsV2`, `ListObjectVersions`, `GetObjectAcl`, `PutObjectAcl`, `GetObjectAttributes`, `GetObjectTagging`, `PutObjectTagging`, `DeleteObjectTagging`, `RestoreObject`, `PostObject` (browser-based multipart form upload)
 
 </details>
 
@@ -178,14 +178,18 @@ curl -i http://127.0.0.1:9191/health
 
 ### API-Specific Limitations
 
-| Operation | Unsupported optional fields |
-| --------- | --------------------------- |
+| Operation | Unsupported optional fields / simplified behavior |
+| --------- | ------------------------------------------------- |
 | `UploadPartCopy` | `CopySourceSSECustomerAlgorithm`, `CopySourceSSECustomerKey`, `CopySourceSSECustomerKeyMD5`, `SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5` |
+| `RestoreObject` | Restores complete instantly; `x-amz-restore` always reports `ongoing-request="false"` once restored |
+| `PutObject` / `CopyObject` with `aws:kms` | `x-amz-server-side-encryption-aws-kms-key-id` is required (no AWS default-key fallback) |
+| `PutBucketPolicy` | Statements combining `NotPrincipal` with `Allow` are rejected |
+| SigV2 presigned URLs | Only `Expires` format/expiry is checked; the signature itself is not verified (mock only) |
 
 ### Additional Features
 
 - **Conditional Headers:** If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since (for GetObject/HeadObject)
-- **Presigned URLs:** SigV4 and SigV2 presigned URL verification
+- **Presigned URLs:** SigV4 presigned URL verification; SigV2 presigned URLs only check `Expires` format/expiry (signature is not verified, mock only)
 - **AWS Chunked Encoding:** Transparent decoding of `aws-chunked` transfer encoding
 - **Response Header Overrides:** GetObject query parameters (`response-content-type`, `response-content-disposition`, etc.)
 - **Copy Source Conditionals:** `x-amz-copy-source-if-match`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-unmodified-since`
@@ -195,6 +199,10 @@ curl -i http://127.0.0.1:9191/health
 - **Request IDs:** `x-amz-request-id` and `x-amz-id-2` headers on every response
 - **Metadata/Tagging Directives:** `x-amz-metadata-directive` and `x-amz-tagging-directive` for CopyObject
 - **Content-Type Default:** Defaults to `application/octet-stream` when not specified
+- **POST Object (browser upload):** `POST /{bucket}` with `multipart/form-data` (`key`, `file` fields, optional POST policy/signature validation, tagging, checksum, and metadata fields)
+- **Bucket logging flush (test extension):** `POST /{bucket}?logging` force-flushes pending server-access-log batches for the bucket
+- **CreateBucket idempotency:** Re-creating an already-owned bucket returns success (`200`) instead of an error
+- **Admin ForceDeleteBucket (test extension):** `DELETE /_minis3/buckets/{bucket}` removes a bucket and all its objects unconditionally
 
 ## 🧪 Development & Testing
 

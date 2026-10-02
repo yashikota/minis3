@@ -142,24 +142,24 @@ curl -i http://127.0.0.1:9191/health
 
 | 領域 | 状態 | 実装済み API 数 |
 | ---- | ---- | --------------- |
-| バケット操作 | ✅ フルサポート | 32 |
-| オブジェクト操作 | ✅ フルサポート | 15 |
+| バケット操作 | ✅ フルサポート | 41 |
+| オブジェクト操作 | ✅ フルサポート | 17 |
 | Object Lock 操作 | ✅ フルサポート | 6 |
 | マルチパートアップロード操作 | ✅ フルサポート | 7 |
 
 ### カテゴリ別 API 一覧
 
 <details>
-<summary>🪣 バケット操作 (32)</summary>
+<summary>🪣 バケット操作 (41)</summary>
 
-`ListBuckets`, `CreateBucket`, `DeleteBucket`, `HeadBucket`, `GetBucketLocation`, `GetBucketVersioning`, `PutBucketVersioning`, `GetBucketTagging`, `PutBucketTagging`, `DeleteBucketTagging`, `GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`, `GetBucketAcl`, `PutBucketAcl`, `GetObjectLockConfiguration`, `PutObjectLockConfiguration`, `GetBucketLifecycleConfiguration`, `PutBucketLifecycleConfiguration`, `DeleteBucketLifecycle`, `GetBucketEncryption`, `PutBucketEncryption`, `DeleteBucketEncryption`, `GetBucketCors`, `PutBucketCors`, `DeleteBucketCors`, `GetBucketWebsite`, `PutBucketWebsite`, `DeleteBucketWebsite`, `GetPublicAccessBlock`, `PutPublicAccessBlock`, `DeletePublicAccessBlock`
+`ListBuckets`, `CreateBucket`, `DeleteBucket`, `HeadBucket`, `GetBucketLocation`, `GetBucketVersioning`, `PutBucketVersioning`, `GetBucketTagging`, `PutBucketTagging`, `DeleteBucketTagging`, `GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`, `GetBucketPolicyStatus`, `GetBucketAcl`, `PutBucketAcl`, `GetBucketOwnershipControls`, `PutBucketOwnershipControls`, `DeleteBucketOwnershipControls`, `GetBucketRequestPayment`, `PutBucketRequestPayment`, `GetBucketLogging`, `PutBucketLogging`, `DeleteBucketLogging`, `GetObjectLockConfiguration`, `PutObjectLockConfiguration`, `GetBucketLifecycleConfiguration`, `PutBucketLifecycleConfiguration`, `DeleteBucketLifecycle`, `GetBucketEncryption`, `PutBucketEncryption`, `DeleteBucketEncryption`, `GetBucketCors`, `PutBucketCors`, `DeleteBucketCors`, `GetBucketWebsite`, `PutBucketWebsite`, `DeleteBucketWebsite`, `GetPublicAccessBlock`, `PutPublicAccessBlock`, `DeletePublicAccessBlock`
 
 </details>
 
 <details>
-<summary>📦 オブジェクト操作 (15)</summary>
+<summary>📦 オブジェクト操作 (17)</summary>
 
-`PutObject`, `GetObject`, `DeleteObject`, `DeleteObjects`, `CopyObject`, `HeadObject`, `ListObjects`, `ListObjectsV2`, `ListObjectVersions`, `GetObjectAcl`, `PutObjectAcl`, `GetObjectAttributes`, `GetObjectTagging`, `PutObjectTagging`, `DeleteObjectTagging`
+`PutObject`, `GetObject`, `DeleteObject`, `DeleteObjects`, `CopyObject`, `HeadObject`, `ListObjects`, `ListObjectsV2`, `ListObjectVersions`, `GetObjectAcl`, `PutObjectAcl`, `GetObjectAttributes`, `GetObjectTagging`, `PutObjectTagging`, `DeleteObjectTagging`, `RestoreObject`, `PostObject`（ブラウザベースの multipart form アップロード）
 
 </details>
 
@@ -179,14 +179,18 @@ curl -i http://127.0.0.1:9191/health
 
 ### API 固有の制限
 
-| 操作 | 未対応のオプションフィールド |
-| ---- | ---------------------------- |
+| 操作 | 未対応のオプションフィールド / 簡易化された挙動 |
+| ---- | ---------------------------------------------- |
 | `UploadPartCopy` | `CopySourceSSECustomerAlgorithm`, `CopySourceSSECustomerKey`, `CopySourceSSECustomerKeyMD5`, `SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5` |
+| `RestoreObject` | リストアは即時完了。`x-amz-restore` は常に `ongoing-request="false"` を返す |
+| `aws:kms` 指定の `PutObject` / `CopyObject` | `x-amz-server-side-encryption-aws-kms-key-id` が必須（AWS のデフォルトキー省略は未対応） |
+| `PutBucketPolicy` | `NotPrincipal` と `Allow` を組み合わせたステートメントは拒否される |
+| SigV2 署名付き URL | `Expires` の形式・期限のみ検証し、署名自体は検証しない（モック用途） |
 
 ### 追加機能
 
 - **条件付きヘッダー:** GetObject/HeadObject で `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since`
-- **署名付き URL:** SigV4 / SigV2 の presigned URL 検証
+- **署名付き URL:** SigV4 presigned URL の検証。SigV2 は `Expires` の形式・期限のみ検証し、署名自体は検証しない（モック用途）
 - **AWS Chunked Encoding:** `aws-chunked` 転送エンコーディングの透過デコード
 - **レスポンスヘッダー上書き:** GetObject の `response-content-type`, `response-content-disposition` など
 - **コピー元条件ヘッダー:** `x-amz-copy-source-if-match`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-unmodified-since`
@@ -196,6 +200,10 @@ curl -i http://127.0.0.1:9191/health
 - **リクエスト ID:** 全レスポンスに `x-amz-request-id`, `x-amz-id-2` を付与
 - **Metadata/Tagging Directive:** CopyObject で `x-amz-metadata-directive`, `x-amz-tagging-directive`
 - **Content-Type 既定値:** 未指定時は `application/octet-stream`
+- **POST Object（ブラウザアップロード）:** `POST /{bucket}` で `multipart/form-data`（`key`・`file` フィールド、POST ポリシー/署名検証、tagging・checksum・metadata に対応）
+- **バケット logging フラッシュ（テスト用拡張）:** `POST /{bucket}?logging` で保留中のサーバーアクセスログバッチを強制フラッシュ
+- **CreateBucket の冪等性:** 既に所有するバケットの再作成はエラーではなく成功（`200`）として扱う
+- **管理用 ForceDeleteBucket（テスト用拡張）:** `DELETE /_minis3/buckets/{bucket}` でバケットと全オブジェクトを無条件に削除
 
 ## 🧪 開発・テスト
 
