@@ -1162,8 +1162,13 @@ func (b *Backend) ListObjectVersions(
 		}
 	}
 
-	// Sort by key, then by LastModified descending (newest first)
-	sort.Slice(allVersions, func(i, j int) bool {
+	// Sort by key, then by LastModified descending (newest first).
+	// The sort is stable so equal LastModified (same-millisecond puts,
+	// clock skew) falls back to insertion order, which is newest-first
+	// because addVersionToObject prepends new versions. This keeps the
+	// order deterministic across calls without depending on the
+	// VersionId format.
+	sort.SliceStable(allVersions, func(i, j int) bool {
 		if allVersions[i].key != allVersions[j].key {
 			return allVersions[i].key < allVersions[j].key
 		}

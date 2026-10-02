@@ -1179,3 +1179,83 @@ func TestListObjectsV2EdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestListObjectVersionsStableSort(t *testing.T) {
+	b := New()
+	if err := b.CreateBucket("versions-stable-sort"); err != nil {
+		t.Fatalf("CreateBucket failed: %v", err)
+	}
+	if err := b.SetBucketVersioning(
+		"versions-stable-sort",
+		VersioningEnabled,
+		MFADeleteDisabled,
+	); err != nil {
+		t.Fatalf("SetBucketVersioning failed: %v", err)
+	}
+
+	const key = "same-key"
+	const n = 5
+	for i := 0; i < n; i++ {
+		if _, err := b.PutObject(
+			"versions-stable-sort",
+			key,
+			[]byte{byte(i)},
+			PutObjectOptions{},
+		); err != nil {
+			t.Fatalf("PutObject %d failed: %v", i, err)
+		}
+	}
+
+	// Simulate same-millisecond puts / clock skew: force identical
+	// LastModified on all versions of the key. Capture the pre-force
+	// (newest-first) order first: the stable sort must preserve it.
+	idsOf := func(res *ListObjectVersionsResult) []string {
+		ids := make([]string, 0, len(res.Versions)+len(res.DeleteMarkers))
+		for _, v := range res.Versions {
+			ids = append(ids, v.VersionId)
+		}
+		for _, v := range res.DeleteMarkers {
+			ids = append(ids, v.VersionId)
+		}
+		return ids
+	}
+	pre, err := b.ListObjectVersions("versions-stable-sort", "", "", "", "", 100)
+	if err != nil {
+		t.Fatalf("ListObjectVersions (pre) failed: %v", err)
+	}
+	want := idsOf(pre)
+	if len(want) != n {
+		t.Fatalf("expected %d versions, got %d (%v)", n, len(want), want)
+	}
+	b.mu.Lock()
+	fixed := time.Now().UTC()
+	for _, v := range b.buckets["versions-stable-sort"].Objects[key].Versions {
+		v.LastModified = fixed
+	}
+	b.mu.Unlock()
+
+	versionIDs := idsOf
+
+	res1, err := b.ListObjectVersions("versions-stable-sort", "", "", "", "", 100)
+	if err != nil {
+		t.Fatalf("ListObjectVersions (1st) failed: %v", err)
+	}
+	res2, err := b.ListObjectVersions("versions-stable-sort", "", "", "", "", 100)
+	if err != nil {
+		t.Fatalf("ListObjectVersions (2nd) failed: %v", err)
+	}
+
+	ids1 := versionIDs(res1)
+	ids2 := versionIDs(res2)
+	if len(ids1) != n {
+		t.Fatalf("expected %d versions, got %d (%v)", n, len(ids1), ids1)
+	}
+	if !reflect.DeepEqual(ids1, ids2) {
+		t.Fatalf("ListObjectVersions order not stable across calls:\n1st: %v\n2nd: %v", ids1, ids2)
+	}
+	// With equal LastModified the stable sort must preserve insertion
+	// (newest-first) order.
+	if !reflect.DeepEqual(ids1, want) {
+		t.Fatalf("expected insertion (newest-first) order preserved on LastModified tie:\nwant: %v\ngot:  %v", want, ids1)
+	}
+}
