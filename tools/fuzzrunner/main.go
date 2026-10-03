@@ -19,23 +19,42 @@ type fuzzTarget struct {
 	name string
 }
 
+// Function variables for subprocess orchestration, so run can be
+// unit-tested without executing real (minutes-long) fuzz runs.
+var (
+	discoverFuzzTargetsFn = discoverFuzzTargets
+	runFuzzTargetFn       = runFuzzTarget
+	goTestListFuzzFn      = goTestListFuzz
+)
+
 func main() {
-	fuzzTime := flag.String("fuzztime", "3m", "value for go test -fuzztime")
-	parallel := flag.Int(
+	os.Exit(runMain(os.Args[1:], os.Stderr))
+}
+
+// runMain wires flag parsing to run and maps outcomes to exit codes so the
+// CLI contract is unit-testable without spawning subprocesses.
+func runMain(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("fuzzrunner", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fuzzTime := fs.String("fuzztime", "3m", "value for go test -fuzztime")
+	parallel := fs.Int(
 		"parallel",
 		0,
 		"number of fuzz targets to run concurrently; 0 uses runtime.NumCPU",
 	)
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 
 	if err := run(context.Background(), *fuzzTime, normalizeParallel(*parallel)); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
 	}
+	return 0
 }
 
 func run(ctx context.Context, fuzzTime string, parallel int) error {
-	targets, err := discoverFuzzTargets(ctx)
+	targets, err := discoverFuzzTargetsFn(ctx)
 	if err != nil {
 		return err
 	}
@@ -62,7 +81,7 @@ func run(ctx context.Context, fuzzTime string, parallel int) error {
 		go func() {
 			defer wg.Done()
 			for target := range jobs {
-				if err := runFuzzTarget(ctx, target, fuzzTime); err != nil {
+				if err := runFuzzTargetFn(ctx, target, fuzzTime); err != nil {
 					errs <- err
 				}
 			}
@@ -108,7 +127,7 @@ func discoverFuzzTargets(ctx context.Context) ([]fuzzTarget, error) {
 
 	var targets []fuzzTarget
 	for _, pkg := range packages {
-		names, err := goTestListFuzz(ctx, pkg)
+		names, err := goTestListFuzzFn(ctx, pkg)
 		if err != nil {
 			return nil, err
 		}
