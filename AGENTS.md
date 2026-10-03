@@ -14,6 +14,8 @@
 - `task lint`: run lint + formatting (`golangci-lint run --fix`, formatter pass).
 - `task unit-test`: run unit tests with race detection and shuffled order.
 - `task sdk-test`: run integration tests in `integration/sdk`.
+- `task tobari`: measure scoped coverage with tobari (outputs `./tobari/tobari.json`).
+- `task tobari-html`: generate an HTML coverage report from `tobari/tobari.json`.
 - `task test`: run unit + SDK suites.
 - `task s3-test`: run Ceph `s3-tests` via Docker (slow, optional locally).
 - `go test ./... -coverprofile=coverage.txt`: reproduce coverage job locally.

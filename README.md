@@ -211,6 +211,8 @@ curl -i http://127.0.0.1:9191/health
 - `task sdk-test`: Run integration tests in `integration/sdk`.
 - `task s3-test`: Run Ceph `s3-tests` in Docker.
 - `task test`: Run `unit-test`, `sdk-test`, and `s3-test`.
+- `task tobari`: Measure scoped coverage with tobari (outputs `./tobari/tobari.json`).
+- `task tobari-html`: Generate an HTML coverage report from `tobari/tobari.json`.
 
 ### `task s3-test` marker policy
 

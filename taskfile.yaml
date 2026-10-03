@@ -30,6 +30,19 @@ tasks:
     cmds:
       - richgo test -v -shuffle=on -race ./...
 
+  tobari:
+    desc: "Measure scoped coverage with tobari (outputs ./tobari/tobari.json)"
+    cmds:
+      - rm -rf ./tobari
+      - GOFLAGS="$(tobari flags)" go test -count=1 ./...
+      - tobari merge json -o tobari/tobari.json $(find . -name tobari.json -path "*/tobari/tobari.json" -not -path "./tobari/*" -not -path "./integration/s3-test/s3-tests/*" | sort)
+      - rm -f tobari/tobari.toon
+
+  tobari-html:
+    desc: "Generate HTML coverage report from tobari.json"
+    cmds:
+      - tobari html -o coverage.html tobari/tobari.json
+
   fuzz:
     desc: "Run all fuzz tests in parallel (auto-detects CPU count)"
     vars:
