@@ -76,6 +76,16 @@ func requireS3ErrorCode(t *testing.T, w *httptest.ResponseRecorder, wantCode str
 	if err := xml.Unmarshal(w.Body.Bytes(), &er); err != nil {
 		t.Fatalf("failed to decode S3 error response: %v body=%s", err, w.Body.String())
 	}
+	if er.Code == "" {
+		// IAM Query-protocol errors nest the code inside <ErrorResponse><Error>.
+		var envelope struct {
+			Error s3ErrorResponse `xml:"Error"`
+		}
+		if err := xml.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("failed to decode error response: %v body=%s", err, w.Body.String())
+		}
+		er = envelope.Error
+	}
 	if er.Code != wantCode {
 		t.Fatalf("error code = %q, want %q, body=%s", er.Code, wantCode, w.Body.String())
 	}

@@ -1056,6 +1056,21 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 		defer func() { _ = r.Body.Close() }()
 
+		// AWS validates the Content-MD5 header when present: malformed
+		// values fail with 400 InvalidDigest, mismatches with 400 BadDigest.
+		// Presence (even with an empty value) is significant, so the header
+		// map is consulted directly instead of Header.Get.
+		if values, present := r.Header["Content-Md5"]; present {
+			headerValue := ""
+			if len(values) > 0 {
+				headerValue = values[0]
+			}
+			if code, msg := validateContentMD5(headerValue, data); code != "" {
+				backend.WriteError(w, http.StatusBadRequest, code, msg)
+				return
+			}
+		}
+
 		// Strip aws-chunked from content encoding (it's a transfer encoding, not content encoding)
 		storedContentEncoding := contentEncoding
 		if isAWSChunkedEncoding(contentEncoding) {
@@ -1249,6 +1264,15 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if headerACL != nil {
 			requestedACL = headerACL
 		} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+			if !backend.IsValidCannedACL(cannedACL) {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Invalid canned ACL.",
+				)
+				return
+			}
 			requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, aclOwner, bucketOwner)
 		}
 		config := h.getBucketPublicAccessBlock(bucketName)
@@ -2232,6 +2256,10 @@ func (h *Handler) handleCopyObject(
 	if headerACL != nil {
 		requestedACL = headerACL
 	} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+		if !backend.IsValidCannedACL(cannedACL) {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid canned ACL.")
+			return
+		}
 		requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, aclOwner, bucketOwner)
 	}
 	config := h.getBucketPublicAccessBlock(dstBucket)
@@ -2401,6 +2429,10 @@ func (h *Handler) handlePutObjectACL(
 	// Check for canned ACL header first
 	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
+		if !backend.IsValidCannedACL(cannedACL) {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid canned ACL.")
+			return
+		}
 		requestOwner := requesterOwner(r)
 		bucketOwner := h.bucketOwner(bucketName)
 		acl := backend.CannedACLToPolicyForOwner(cannedACL, requestOwner, bucketOwner)

@@ -3,6 +3,8 @@ package handler
 import (
 	"encoding/xml"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -121,7 +123,6 @@ func TestIAMStubActions(t *testing.T) {
 		action   string
 		contains string
 	}{
-		{"ListUserPolicies", "ListUserPoliciesResponse"},
 		{"ListAttachedUserPolicies", "ListAttachedUserPoliciesResponse"},
 		{"ListGroups", "ListGroupsResponse"},
 		{"ListRoles", "ListRolesResponse"},
@@ -355,4 +356,134 @@ func TestIsBucketPolicyAction(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIAMUserPolicyHandlers(t *testing.T) {
+	h, b := newTestHandler(t)
+	if _, err := b.CreateIAMUser("poluser", "/"); err != nil {
+		t.Fatalf("CreateIAMUser failed: %v", err)
+	}
+
+	rootHeaders := map[string]string{"Authorization": authHeader("root-access-key")}
+	doc := `{"Version":"2012-10-17","Statement":{"Effect":"Allow","Action":"*","Resource":"*"}}`
+
+	postAction := func(t *testing.T, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		headers := map[string]string{
+			"Authorization": authHeader("root-access-key"),
+			"Content-Type":  "application/x-www-form-urlencoded",
+		}
+		return doRequest(h, newRequest(http.MethodPost, "http://example.test/", body, headers))
+	}
+
+	t.Run("put get delete round trip", func(t *testing.T) {
+		wPut := postAction(
+			t,
+			"Action=PutUserPolicy&UserName=poluser&PolicyName=p1&PolicyDocument="+url.QueryEscape(
+				doc,
+			),
+		)
+		requireStatus(t, wPut, http.StatusOK)
+
+		wGet := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/?Action=GetUserPolicy&UserName=poluser&PolicyName=p1",
+				"",
+				rootHeaders,
+			),
+		)
+		requireStatus(t, wGet, http.StatusOK)
+		if !strings.Contains(wGet.Body.String(), "p1") {
+			t.Fatalf("expected policy name in body: %s", wGet.Body.String())
+		}
+
+		wList := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/?Action=ListUserPolicies&UserName=poluser",
+				"",
+				rootHeaders,
+			),
+		)
+		requireStatus(t, wList, http.StatusOK)
+		if !strings.Contains(wList.Body.String(), "p1") {
+			t.Fatalf("expected policy name in list body: %s", wList.Body.String())
+		}
+
+		wDel := postAction(t, "Action=DeleteUserPolicy&UserName=poluser&PolicyName=p1")
+		requireStatus(t, wDel, http.StatusOK)
+
+		wGetMissing := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/?Action=GetUserPolicy&UserName=poluser&PolicyName=p1",
+				"",
+				rootHeaders,
+			),
+		)
+		requireStatus(t, wGetMissing, http.StatusNotFound)
+		requireS3ErrorCode(t, wGetMissing, "NoSuchEntity")
+	})
+
+	t.Run("missing user and policy", func(t *testing.T) {
+		wPut := postAction(
+			t,
+			"Action=PutUserPolicy&UserName=ghost&PolicyName=p&PolicyDocument="+url.QueryEscape(doc),
+		)
+		requireStatus(t, wPut, http.StatusNotFound)
+		requireS3ErrorCode(t, wPut, "NoSuchEntity")
+
+		wGet := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/?Action=GetUserPolicy&UserName=ghost&PolicyName=p",
+				"",
+				rootHeaders,
+			),
+		)
+		requireStatus(t, wGet, http.StatusNotFound)
+		requireS3ErrorCode(t, wGet, "NoSuchEntity")
+
+		wDel := postAction(t, "Action=DeleteUserPolicy&UserName=ghost&PolicyName=p")
+		requireStatus(t, wDel, http.StatusNotFound)
+		requireS3ErrorCode(t, wDel, "NoSuchEntity")
+
+		wList := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/?Action=ListUserPolicies&UserName=ghost",
+				"",
+				rootHeaders,
+			),
+		)
+		requireStatus(t, wList, http.StatusNotFound)
+		requireS3ErrorCode(t, wList, "NoSuchEntity")
+	})
+
+	t.Run("invalid name and document", func(t *testing.T) {
+		wName := postAction(
+			t,
+			"Action=PutUserPolicy&UserName=poluser&PolicyName=bad/name&PolicyDocument="+url.QueryEscape(
+				doc,
+			),
+		)
+		requireStatus(t, wName, http.StatusBadRequest)
+		requireS3ErrorCode(t, wName, "ValidationError")
+
+		badDoc := `{"Version":"2010-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}`
+		wDoc := postAction(
+			t,
+			"Action=PutUserPolicy&UserName=poluser&PolicyName=p&PolicyDocument="+url.QueryEscape(
+				badDoc,
+			),
+		)
+		requireStatus(t, wDoc, http.StatusBadRequest)
+		requireS3ErrorCode(t, wDoc, "MalformedPolicyDocument")
+	})
 }

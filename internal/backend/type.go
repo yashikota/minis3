@@ -394,7 +394,27 @@ const (
 	ACLAuthenticatedRead CannedACL = "authenticated-read"
 	ACLBucketOwnerRead   CannedACL = "bucket-owner-read"
 	ACLBucketOwnerFull   CannedACL = "bucket-owner-full-control"
+	ACLExecRead          CannedACL = "aws-exec-read"
+	ACLLogDeliveryWrite  CannedACL = "log-delivery-write"
 )
+
+// IsValidCannedACL reports whether value is an AWS-defined canned ACL.
+// Unknown values (e.g. "public-ready") are rejected by S3 with 400
+// InvalidArgument.
+func IsValidCannedACL(value string) bool {
+	switch CannedACL(value) {
+	case ACLPrivate,
+		ACLPublicRead,
+		ACLPublicReadWrite,
+		ACLAuthenticatedRead,
+		ACLBucketOwnerRead,
+		ACLBucketOwnerFull,
+		ACLExecRead,
+		ACLLogDeliveryWrite:
+		return true
+	}
+	return false
+}
 
 // ACL permission constants.
 const (

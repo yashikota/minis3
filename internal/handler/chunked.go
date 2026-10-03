@@ -2,6 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/md5"
+	"encoding/base64"
 	"errors"
 	"io"
 	"strconv"
@@ -121,4 +124,20 @@ func (cr *chunkedReader) readLine() (string, error) {
 // isAWSChunkedEncoding checks if the request uses AWS chunked encoding.
 func isAWSChunkedEncoding(contentEncoding string) bool {
 	return strings.Contains(contentEncoding, "aws-chunked")
+}
+
+// validateContentMD5 checks a Content-MD5 header value against the request
+// body. It returns an error code and message when the value is malformed
+// (not base64 encoding 16 bytes: InvalidDigest) or does not match the body
+// (BadDigest), and empty strings when valid.
+func validateContentMD5(headerValue string, body []byte) (string, string) {
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(headerValue))
+	if err != nil || len(decoded) != md5.Size {
+		return "InvalidDigest", "The Content-MD5 you specified was invalid."
+	}
+	sum := md5.Sum(body)
+	if !hmac.Equal(decoded, sum[:]) {
+		return "BadDigest", "The Content-MD5 you specified did not match what we received."
+	}
+	return "", ""
 }

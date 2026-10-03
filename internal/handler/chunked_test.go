@@ -1,8 +1,12 @@
 package handler
 
 import (
+	"crypto/md5"
+	"encoding/base64"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -229,4 +233,85 @@ func (r *zeroThenDataReader) Read(p []byte) (int, error) {
 		return part.n, part.err
 	}
 	return 0, part.err
+}
+
+func TestValidateContentMD5(t *testing.T) {
+	body := []byte("bar")
+	sum := md5.Sum(body)
+	valid := base64.StdEncoding.EncodeToString(sum[:])
+
+	if code, _ := validateContentMD5(valid, body); code != "" {
+		t.Fatalf("valid header code = %q, want empty", code)
+	}
+	for name, value := range map[string]string{
+		"empty":          "",
+		"short base64":   "YWJyYWNhZGFicmE=",
+		"not base64":     "@@not-base64@@",
+		"wrong length":   base64.StdEncoding.EncodeToString([]byte("short")),
+		"padded garbage": "!!!!",
+	} {
+		if code, _ := validateContentMD5(value, body); code != "InvalidDigest" {
+			t.Fatalf("%s: code = %q, want InvalidDigest", name, code)
+		}
+	}
+	wrongSum := md5.Sum([]byte("other"))
+	wrong := base64.StdEncoding.EncodeToString(wrongSum[:])
+	if code, _ := validateContentMD5(wrong, body); code != "BadDigest" {
+		t.Fatalf("mismatch code = %q, want BadDigest", code)
+	}
+}
+
+func TestPutObjectContentMD5Validation(t *testing.T) {
+	h, b := newTestHandler(t)
+	mustCreateBucket(t, b, "md5-bucket")
+
+	putWithMD5 := func(t *testing.T, key, md5Value string) *httptest.ResponseRecorder {
+		t.Helper()
+		headers := map[string]string{}
+		if md5Value != "" {
+			headers["Content-MD5"] = md5Value
+		}
+		return doRequest(
+			h,
+			newRequest(http.MethodPut, "http://example.test/md5-bucket/"+key, "bar", headers),
+		)
+	}
+
+	t.Run("garbage md5 rejected", func(t *testing.T) {
+		w := putWithMD5(t, "k1", "@@not-base64@@")
+		requireStatus(t, w, http.StatusBadRequest)
+		requireS3ErrorCode(t, w, "InvalidDigest")
+	})
+
+	t.Run("short md5 rejected", func(t *testing.T) {
+		w := putWithMD5(t, "k2", "YWJyYWNhZGFicmE=")
+		requireStatus(t, w, http.StatusBadRequest)
+		requireS3ErrorCode(t, w, "InvalidDigest")
+	})
+
+	t.Run("empty md5 rejected", func(t *testing.T) {
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"http://example.test/md5-bucket/k-empty",
+			strings.NewReader("bar"),
+		)
+		req.Header["Content-Md5"] = []string{""}
+		w := doRequest(h, req)
+		requireStatus(t, w, http.StatusBadRequest)
+		requireS3ErrorCode(t, w, "InvalidDigest")
+	})
+
+	t.Run("mismatched md5 rejected", func(t *testing.T) {
+		wrongSum := md5.Sum([]byte("other"))
+		wrong := base64.StdEncoding.EncodeToString(wrongSum[:])
+		w := putWithMD5(t, "k3", wrong)
+		requireStatus(t, w, http.StatusBadRequest)
+		requireS3ErrorCode(t, w, "BadDigest")
+	})
+
+	t.Run("matching md5 accepted", func(t *testing.T) {
+		sum := md5.Sum([]byte("bar"))
+		w := putWithMD5(t, "k4", base64.StdEncoding.EncodeToString(sum[:]))
+		requireStatus(t, w, http.StatusOK)
+	})
 }

@@ -978,6 +978,15 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 		if headerACL != nil {
 			requestedACL = headerACL
 		} else if cannedACL := r.Header.Get("x-amz-acl"); cannedACL != "" {
+			if !backend.IsValidCannedACL(cannedACL) {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidArgument",
+					"Invalid canned ACL.",
+				)
+				return
+			}
 			requestedACL = backend.CannedACLToPolicyForOwner(cannedACL, owner, owner)
 		}
 		if requestedOwnership != backend.ObjectOwnershipBucketOwnerEnforced {
@@ -2274,6 +2283,10 @@ func (h *Handler) handlePutBucketACL(
 	// Check for canned ACL header first
 	cannedACL := r.Header.Get("x-amz-acl")
 	if cannedACL != "" {
+		if !backend.IsValidCannedACL(cannedACL) {
+			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid canned ACL.")
+			return
+		}
 		bucketOwner := h.bucketOwner(bucketName)
 		acl := backend.CannedACLToPolicyForOwner(cannedACL, bucketOwner, bucketOwner)
 		if config != nil && config.BlockPublicAcls && isPublicACL(acl) {
