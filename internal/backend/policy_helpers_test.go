@@ -93,6 +93,15 @@ func TestPolicyMatcherHelpers(t *testing.T) {
 		if wildcardMatch("abc", "ab") {
 			t.Fatal("expected final length mismatch")
 		}
+		if !wildcardMatch("ab*", "ab") {
+			t.Fatal("expected trailing star to match empty suffix")
+		}
+		if !wildcardMatch("a*b*", "ab") {
+			t.Fatal("expected trailing star after backtrack to match")
+		}
+		if wildcardMatch("ab*c", "ab") {
+			t.Fatal("expected non-star tail to mismatch short string")
+		}
 	})
 }
 

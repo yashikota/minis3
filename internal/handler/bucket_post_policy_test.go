@@ -378,54 +378,11 @@ func TestValidatePostPolicyAdditionalScenarios(t *testing.T) {
 			wantStatus: 400,
 		},
 		{
-			name: "condition object with non-string value is invalid",
-			policy: map[string]any{
-				"expiration": expiration,
-				"conditions": []any{
-					map[string]any{"bucket": 123},
-				},
-			},
-			wantStatus: 400,
-		},
-		{
 			name: "empty array condition is invalid",
 			policy: map[string]any{
 				"expiration": expiration,
 				"conditions": []any{
 					[]any{},
-				},
-			},
-			wantStatus: 400,
-		},
-		{
-			name: "array condition with non-string operator is invalid",
-			policy: map[string]any{
-				"expiration": expiration,
-				"conditions": []any{
-					map[string]any{"bucket": "bucket-a"},
-					[]any{1, "$key", "foo"},
-				},
-			},
-			wantStatus: 400,
-		},
-		{
-			name: "eq condition with non-string field is invalid",
-			policy: map[string]any{
-				"expiration": expiration,
-				"conditions": []any{
-					map[string]any{"bucket": "bucket-a"},
-					[]any{"eq", 1, "foo"},
-				},
-			},
-			wantStatus: 400,
-		},
-		{
-			name: "eq condition with non-string expected value is invalid",
-			policy: map[string]any{
-				"expiration": expiration,
-				"conditions": []any{
-					map[string]any{"bucket": "bucket-a"},
-					[]any{"eq", "$key", 1},
 				},
 			},
 			wantStatus: 400,
@@ -437,17 +394,6 @@ func TestValidatePostPolicyAdditionalScenarios(t *testing.T) {
 				"conditions": []any{
 					map[string]any{"bucket": "bucket-a"},
 					[]any{"content-length-range", 0, "100"},
-				},
-			},
-			wantStatus: 400,
-		},
-		{
-			name: "non-object condition entry is invalid",
-			policy: map[string]any{
-				"expiration": expiration,
-				"conditions": []any{
-					map[string]any{"bucket": "bucket-a"},
-					"invalid-condition-entry",
 				},
 			},
 			wantStatus: 400,

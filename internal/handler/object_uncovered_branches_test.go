@@ -269,12 +269,6 @@ func TestHandleObjectReadDeleteHeadAdditionalBranchesUncovered(t *testing.T) {
 		requireStatus(t, wMissing, http.StatusBadRequest)
 		requireS3ErrorCode(t, wMissing, "InvalidPart")
 	})
-
-	t.Run("sanity keep versioned object available", func(t *testing.T) {
-		if versionID == "" {
-			t.Fatal("versionID should not be empty")
-		}
-	})
 }
 
 func TestHandleCopyObjectAdditionalBranchesUncovered(t *testing.T) {

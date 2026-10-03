@@ -329,3 +329,37 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		}
 	})
 }
+
+// TestCompleteMultipartUploadObjectLockMapping covers the CompleteMultipartUpload
+// mapping of backend.ErrInvalidRequest (retention set on an upload whose bucket
+// has no Object Lock configuration) to 400 InvalidRequest.
+func TestCompleteMultipartUploadObjectLockMapping(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	restoreComplete := completeMultipartUploadFn
+	t.Cleanup(func() {
+		completeMultipartUploadFn = restoreComplete
+	})
+	completeMultipartUploadFn = func(
+		*Handler,
+		string,
+		string,
+		string,
+		[]backend.CompletePart,
+	) (*backend.Object, error) {
+		return nil, backend.ErrInvalidRequest
+	}
+
+	body := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"x"</ETag></Part></CompleteMultipartUpload>`
+	w := doRequest(
+		h,
+		newRequest(
+			http.MethodPost,
+			"http://example.test/mp-hook/no-lock-complete?uploadId=u",
+			body,
+			nil,
+		),
+	)
+	requireStatus(t, w, http.StatusBadRequest)
+	requireS3ErrorCode(t, w, "InvalidRequest")
+}

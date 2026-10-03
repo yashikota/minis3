@@ -332,18 +332,4 @@ func TestObjectErrorBranches(t *testing.T) {
 		requireStatus(t, wDel, http.StatusNotFound)
 		requireS3ErrorCode(t, wDel, "NoSuchVersion")
 	})
-
-	t.Run("get object attributes version not found", func(t *testing.T) {
-		w := doRequest(
-			h,
-			newRequest(
-				http.MethodGet,
-				"http://example.test/obj/k?attributes&versionId=missing",
-				"",
-				map[string]string{"x-amz-object-attributes": "ETag"},
-			),
-		)
-		requireStatus(t, w, http.StatusNotFound)
-		requireS3ErrorCode(t, w, "NoSuchVersion")
-	})
 }

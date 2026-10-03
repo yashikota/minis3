@@ -22,9 +22,6 @@ func decodeAWSChunkedBody(body io.Reader) ([]byte, error) {
 			}
 			return nil, err
 		}
-		if len(chunk) == 0 {
-			break
-		}
 		result.Write(chunk)
 	}
 

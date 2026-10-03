@@ -258,3 +258,90 @@ func TestObjectLockRetentionModeValidation(t *testing.T) {
 		}
 	})
 }
+
+// TestRetentionRequiresObjectLockEnabled covers the Object Lock guards on
+// buckets without Object Lock enabled: PutObject, CopyObject (explicit
+// retention override), and CompleteMultipartUpload must reject retention
+// settings with ErrInvalidRequest instead of silently storing them.
+func TestRetentionRequiresObjectLockEnabled(t *testing.T) {
+	future := time.Now().UTC().Add(24 * time.Hour)
+
+	setupPlainBucket := func(t *testing.T, name string) *Backend {
+		t.Helper()
+		b := New()
+		if err := b.CreateBucket(name); err != nil {
+			t.Fatalf("CreateBucket failed: %v", err)
+		}
+		if _, err := b.PutObject(name, "seed", []byte("data"), PutObjectOptions{}); err != nil {
+			t.Fatalf("seed PutObject failed: %v", err)
+		}
+		return b
+	}
+
+	t.Run("PutObject with retention on plain bucket", func(t *testing.T) {
+		b := setupPlainBucket(t, "plain-put")
+		date := future
+		_, err := b.PutObject("plain-put", "k", []byte("data"), PutObjectOptions{
+			RetentionMode:   RetentionModeGovernance,
+			RetainUntilDate: &date,
+		})
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("PutObject with retention on plain bucket = %v, want ErrInvalidRequest", err)
+		}
+	})
+
+	t.Run("CopyObject with retention override to plain bucket", func(t *testing.T) {
+		b := setupPlainBucket(t, "plain-copy")
+		date := future
+		_, _, err := b.CopyObject(
+			"plain-copy",
+			"seed",
+			"",
+			"plain-copy",
+			"dst",
+			CopyObjectOptions{
+				RetentionMode:   RetentionModeGovernance,
+				RetainUntilDate: &date,
+			},
+		)
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("CopyObject with retention to plain bucket = %v, want ErrInvalidRequest", err)
+		}
+	})
+
+	t.Run("CompleteMultipartUpload with retention on plain bucket", func(t *testing.T) {
+		b := setupPlainBucket(t, "plain-complete")
+		upload, err := b.CreateMultipartUpload(
+			"plain-complete",
+			"k",
+			CreateMultipartUploadOptions{},
+		)
+		if err != nil {
+			t.Fatalf("CreateMultipartUpload failed: %v", err)
+		}
+		// Inject retention directly: Create on a plain bucket would
+		// reject it, but Complete must still guard uploads that carry
+		// retention (e.g. recreated buckets) instead of storing it.
+		date := future
+		upload.RetentionMode = RetentionModeGovernance
+		upload.RetainUntilDate = &date
+		part, err := b.UploadPart("plain-complete", "k", upload.UploadId, 1, []byte("x"))
+		if err != nil {
+			t.Fatalf("UploadPart failed: %v", err)
+		}
+		_, err = b.CompleteMultipartUpload(
+			"plain-complete",
+			"k",
+			upload.UploadId,
+			[]CompletePart{
+				{PartNumber: 1, ETag: part.ETag},
+			},
+		)
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf(
+				"CompleteMultipartUpload with retention on plain bucket = %v, want ErrInvalidRequest",
+				err,
+			)
+		}
+	})
+}

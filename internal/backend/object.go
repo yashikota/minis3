@@ -1219,13 +1219,9 @@ func (b *Backend) ListObjectVersions(
 				}
 			}
 			// Exact (key, version-id) match at the tail yields
-			// startIdx == len(allVersions) via i+1; no extra guard needed
-			// beyond the tail check below.
-		}
-		// If marker is after all entries
-		if startIdx == 0 && len(allVersions) > 0 &&
-			allVersions[len(allVersions)-1].key <= keyMarker {
-			startIdx = len(allVersions)
+			// startIdx == len(allVersions) via i+1. A marker after all
+			// entries leaves startIdx at len(allVersions) because no
+			// entry satisfies the greater-key condition.
 		}
 	}
 

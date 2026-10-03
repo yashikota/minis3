@@ -78,3 +78,44 @@ func TestVerifyPresignedURLV4MixedCaseSignedHeaders(t *testing.T) {
 		t.Fatalf("mixed-case presigned SignedHeaders should verify, got %v", err)
 	}
 }
+
+func TestVerifyPresignedURLV4EmptySignedHeaderSegment(t *testing.T) {
+	requestTime := time.Now().UTC().Add(-1 * time.Minute)
+	dateStamp := requestTime.Format("20060102")
+	amzDate := requestTime.Format("20060102T150405Z")
+	credential := "minis3-access-key/" + dateStamp + "/us-east-1/s3/aws4_request"
+
+	// Empty segments (e.g. from "host;;x-amz-date") must be skipped when
+	// building the canonical request instead of breaking verification.
+	const signedHeaders = "host;;x-amz-date"
+
+	query := url.Values{}
+	query.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	query.Set("X-Amz-Credential", credential)
+	query.Set("X-Amz-Date", amzDate)
+	query.Set("X-Amz-Expires", strconv.FormatInt(300, 10))
+	query.Set("X-Amz-SignedHeaders", signedHeaders)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"http://example.test/bucket/key?"+query.Encode(),
+		nil,
+	)
+	req.Host = "example.test"
+
+	secretKey := DefaultCredentials()["minis3-access-key"]
+	signature := calculatePresignedSignatureV4(
+		req,
+		secretKey,
+		dateStamp,
+		"us-east-1",
+		"s3",
+		signedHeaders,
+	)
+	query.Set("X-Amz-Signature", signature)
+	req.URL.RawQuery = query.Encode()
+
+	if err := verifyPresignedURL(req); err != nil {
+		t.Fatalf("presigned SignedHeaders with empty segment should verify, got %v", err)
+	}
+}
