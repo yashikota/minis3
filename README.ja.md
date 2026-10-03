@@ -212,6 +212,8 @@ curl -i http://127.0.0.1:9191/health
 - `task sdk-test`: `integration/sdk` の統合テスト
 - `task s3-test`: Docker で Ceph `s3-tests` を実行
 - `task test`: `unit-test`, `sdk-test`, `s3-test` を順に実行
+- `task tobari`: tobari でスコープ別カバレッジを測定（`./tobari/tobari.json` に出力）
+- `task tobari-html`: `tobari/tobari.json` から HTML カバレッジレポートを生成
 
 ### `task s3-test` のマーカーポリシー
 
