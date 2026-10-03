@@ -166,6 +166,7 @@ func TestIAMCreateUserConflict(t *testing.T) {
 		},
 	))
 	requireStatus(t, w, http.StatusConflict)
+	requireS3ErrorCode(t, w, "EntityAlreadyExists")
 }
 
 func TestIAMCreateAccessKeyUserNotFound(t *testing.T) {
@@ -180,6 +181,7 @@ func TestIAMCreateAccessKeyUserNotFound(t *testing.T) {
 		},
 	))
 	requireStatus(t, w, http.StatusNotFound)
+	requireS3ErrorCode(t, w, "NoSuchEntity")
 }
 
 func TestBucketPolicyDenySelfE2E(t *testing.T) {

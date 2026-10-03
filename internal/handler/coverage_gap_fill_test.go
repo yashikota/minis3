@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -1027,7 +1028,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		}
 
 		// flush partitioned object key path
-		if _, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
+		partitionedKey, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
 			TargetBucket: "dst-h2",
 			TargetPrefix: "logs/",
 			ObjectKeyFormat: &backend.TargetObjectKeyFormat{
@@ -1037,8 +1038,12 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 				SourceBucket: "src-h2",
 				Line:         "line",
 			}},
-		}, time.Now().UTC()); err != nil {
+		}, time.Now().UTC())
+		if err != nil {
 			t.Fatalf("flushServerAccessLogBatch partitioned failed: %v", err)
+		}
+		if !strings.Contains(partitionedKey, "/default/") {
+			t.Fatalf("partitioned log key = %q, want /default/ layout", partitionedKey)
 		}
 
 		reqPutObj := newRequest(http.MethodPut, "http://example.test/src-h2/k", "", nil)
