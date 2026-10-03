@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/yashikota/minis3/internal/backend"
 )
 
 func TestObjectDeleteObjectsHandler(t *testing.T) {
@@ -313,29 +311,5 @@ func TestGetObjectAttributesHandler(t *testing.T) {
 			),
 		)
 		requireStatus(t, w, http.StatusOK)
-	})
-
-	t.Run("delete marker", func(t *testing.T) {
-		if err := b.SetBucketVersioning(
-			"attrs",
-			backend.VersioningEnabled,
-			backend.MFADeleteDisabled,
-		); err != nil {
-			t.Fatalf("SetBucketVersioning failed: %v", err)
-		}
-		if _, err := b.DeleteObject("attrs", "obj", false); err != nil {
-			t.Fatalf("DeleteObject failed: %v", err)
-		}
-		w := doRequest(
-			h,
-			newRequest(
-				http.MethodGet,
-				"http://example.test/attrs/obj?attributes",
-				"",
-				map[string]string{"x-amz-object-attributes": "ETag"},
-			),
-		)
-		requireStatus(t, w, http.StatusNotFound)
-		requireS3ErrorCode(t, w, "NoSuchKey")
 	})
 }

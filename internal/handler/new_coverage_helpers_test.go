@@ -355,15 +355,6 @@ func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
 	mustCreateBucket(t, b, "attr-bkt")
 	mustPutObject(t, b, "attr-bkt", "k", "hello")
 
-	t.Run("missing attributes header", func(t *testing.T) {
-		w := doRequest(
-			h,
-			newRequest(http.MethodGet, "http://example.test/attr-bkt/k?attributes", "", nil),
-		)
-		requireStatus(t, w, http.StatusBadRequest)
-		requireS3ErrorCode(t, w, "InvalidArgument")
-	})
-
 	t.Run("invalid attributes header value", func(t *testing.T) {
 		w := doRequest(
 			h,

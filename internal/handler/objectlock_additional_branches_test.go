@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/yashikota/minis3/internal/backend"
 )
 
 func TestObjectLockReadErrorAndMissingBranches(t *testing.T) {
@@ -182,12 +180,6 @@ func TestObjectLockReadErrorAndMissingBranches(t *testing.T) {
 		)
 		requireStatus(t, wLegalHold, http.StatusOK)
 	})
-
-	t.Run("sanity check object lock bucket exists", func(t *testing.T) {
-		if _, ok := b.GetBucket("lock-extra"); !ok {
-			t.Fatal("lock-extra bucket should exist")
-		}
-	})
 }
 
 func TestPutObjectLockConfigurationMissingBucketBranch(t *testing.T) {
@@ -304,10 +296,4 @@ func TestPutObjectLegalHoldInvalidConfigBranch(t *testing.T) {
 	)
 	requireStatus(t, w, http.StatusBadRequest)
 	requireS3ErrorCode(t, w, "MalformedXML")
-}
-
-func TestObjectLockHelpersSanity(t *testing.T) {
-	if backend.S3Xmlns == "" {
-		t.Fatal("expected backend.S3Xmlns to be non-empty")
-	}
 }

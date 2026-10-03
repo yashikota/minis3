@@ -32,6 +32,16 @@ func TestDecodeAWSChunkedBody(t *testing.T) {
 		}
 	})
 
+	t.Run("chunk size exceeds maximum", func(t *testing.T) {
+		_, err := decodeAWSChunkedBody(strings.NewReader("4000001;chunk-signature=abc\r\n"))
+		if err == nil {
+			t.Fatal("expected error for chunk size exceeding maximum")
+		}
+		if !strings.Contains(err.Error(), "exceeds maximum") {
+			t.Fatalf("expected exceeds-maximum error, got %v", err)
+		}
+	})
+
 	t.Run("unexpected eof", func(t *testing.T) {
 		_, err := decodeAWSChunkedBody(strings.NewReader("5\r\nab"))
 		if !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
