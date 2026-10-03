@@ -584,5 +584,11 @@ func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
 		if !strings.Contains(wAttr.Body.String(), "<ObjectParts>") {
 			t.Fatalf("expected ObjectParts in response body: %s", wAttr.Body.String())
 		}
+		if !strings.Contains(wAttr.Body.String(), "<PartNumber>1</PartNumber>") {
+			t.Fatalf("expected PartNumber 1 in response body: %s", wAttr.Body.String())
+		}
+		if !strings.Contains(wAttr.Body.String(), "<Size>9</Size>") {
+			t.Fatalf("expected Size 9 in response body: %s", wAttr.Body.String())
+		}
 	})
 }

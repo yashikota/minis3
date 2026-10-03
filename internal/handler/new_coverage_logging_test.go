@@ -833,6 +833,19 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		if len(list.Objects) == 0 {
 			t.Fatal("expected at least one access-log object in target bucket")
 		}
+
+		// The flushed content must carry the emitted request fields.
+		logObj, err := b.GetObject("dst-access-log", list.Objects[0].Key)
+		if err != nil {
+			t.Fatalf("GetObject(%q) failed: %v", list.Objects[0].Key, err)
+		}
+		content := string(logObj.Data)
+		if !strings.Contains(content, "req-id") {
+			t.Fatalf("flushed log missing request ID req-id: %q", content)
+		}
+		if !strings.Contains(content, "REST.GET.OBJECT") {
+			t.Fatalf("flushed log missing operation REST.GET.OBJECT: %q", content)
+		}
 	})
 
 	t.Run("flushServerAccessLogBatch branches", func(t *testing.T) {
