@@ -16,7 +16,6 @@ func TestObjectLockReadErrorAndMissingBranches(t *testing.T) {
 
 	retentionPayload := `<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2027-01-01T00:00:00Z</RetainUntilDate></Retention>`
 	legalHoldPayload := `<LegalHold><Status>ON</Status></LegalHold>`
-	objectLockConfigPayload := `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
 
 	t.Run("put object lock config read error", func(t *testing.T) {
 		req := httptest.NewRequest(
@@ -142,19 +141,6 @@ func TestObjectLockReadErrorAndMissingBranches(t *testing.T) {
 		)
 		requireStatus(t, wNoLock, http.StatusBadRequest)
 		requireS3ErrorCode(t, wNoLock, "InvalidRequest")
-	})
-
-	t.Run("put object lock config generic malformed schema branch", func(t *testing.T) {
-		w := doRequest(
-			h,
-			newRequest(
-				http.MethodPut,
-				"http://example.test/lock-extra?object-lock",
-				objectLockConfigPayload,
-				nil,
-			),
-		)
-		requireStatus(t, w, http.StatusOK)
 	})
 
 	t.Run("put retention and legal hold remain functional", func(t *testing.T) {

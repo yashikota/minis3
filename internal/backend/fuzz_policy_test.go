@@ -26,7 +26,19 @@ func FuzzWildcardMatch(f *testing.F) {
 	f.Add("*.*.*", "a.b.c")
 
 	f.Fuzz(func(t *testing.T, pattern, s string) {
-		_ = wildcardMatch(pattern, s)
+		got := wildcardMatch(pattern, s)
+		// Patterns without wildcards behave like string equality.
+		if !strings.ContainsAny(pattern, "*?") && got != (pattern == s) {
+			t.Fatalf("wildcardMatch(%q, %q) = %v, want %v", pattern, s, got, pattern == s)
+		}
+		// A lone star matches everything, including the empty string.
+		if pattern == "*" && !got {
+			t.Fatalf("wildcardMatch(%q, %q) = false, want true", pattern, s)
+		}
+		// An empty pattern matches only the empty string.
+		if pattern == "" && got != (s == "") {
+			t.Fatalf("wildcardMatch(%q, %q) = %v, want %v", pattern, s, got, s == "")
+		}
 	})
 }
 

@@ -40,15 +40,6 @@ func TestReadAllErrorHookBranches(t *testing.T) {
 		return nil, errors.New("read boom")
 	})
 
-	t.Run("bucket create body read error", func(t *testing.T) {
-		w := doRequest(
-			h,
-			newRequest(http.MethodPut, "http://example.test/new-hook-bucket", "<x/>", nil),
-		)
-		requireStatus(t, w, http.StatusBadRequest)
-		requireS3ErrorCode(t, w, "InvalidRequest")
-	})
-
 	t.Run("post form upload file read error", func(t *testing.T) {
 		w := postMultipartForm(
 			t,

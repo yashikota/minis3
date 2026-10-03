@@ -168,6 +168,21 @@ func TestHandleObjectPutAdditionalBranches(t *testing.T) {
 			Get("x-amz-server-side-encryption-aws-kms-key-id"); got != "kms-key-1" {
 			t.Fatalf("unexpected kms key id header: %q", got)
 		}
+		// The trailer header must infer the checksum algorithm and the
+		// redirect location must be stored on the object.
+		obj, err := b.GetObject("put-branches", "kms")
+		if err != nil {
+			t.Fatalf("GetObject failed: %v", err)
+		}
+		if obj.ChecksumAlgorithm != "CRC32C" {
+			t.Fatalf("expected inferred ChecksumAlgorithm CRC32C, got %q", obj.ChecksumAlgorithm)
+		}
+		if obj.WebsiteRedirectLocation != "/landing.html" {
+			t.Fatalf(
+				"expected WebsiteRedirectLocation /landing.html, got %q",
+				obj.WebsiteRedirectLocation,
+			)
+		}
 	})
 }
 

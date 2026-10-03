@@ -27,7 +27,9 @@ var knownOwnersByAccessKey = map[string]Owner{
 	},
 }
 
-var knownOwnersByCanonicalID = func() map[string]Owner {
+var knownOwnersByCanonicalID = buildOwnersByCanonicalID()
+
+func buildOwnersByCanonicalID() map[string]Owner {
 	owners := make(map[string]Owner, len(knownOwnersByAccessKey)+1)
 	for _, owner := range knownOwnersByAccessKey {
 		owners[owner.ID] = owner
@@ -35,7 +37,7 @@ var knownOwnersByCanonicalID = func() map[string]Owner {
 	def := DefaultOwner()
 	owners[def.ID] = *def
 	return owners
-}()
+}
 
 var knownOwnersByEmail = map[string]Owner{
 	"minis3@example.com": {

@@ -201,6 +201,20 @@ func TestCompleteMultipartUploadAdditionalBranches(t *testing.T) {
 		if got := w.Header().Get("x-amz-version-id"); got == "" {
 			t.Fatal("expected x-amz-version-id on successful complete multipart upload")
 		}
+		// The completed object must contain the uploaded part data.
+		wGet := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/mp-complete/ok-versioned",
+				"",
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
+			),
+		)
+		requireStatus(t, wGet, http.StatusOK)
+		if got := wGet.Body.String(); got != "single" {
+			t.Fatalf("completed object body = %q, want %q", got, "single")
+		}
 	})
 }
 
