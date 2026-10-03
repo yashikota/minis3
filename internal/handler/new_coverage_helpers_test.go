@@ -321,8 +321,48 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 	})
 
 	t.Run("computePartChecksums all algorithms", func(t *testing.T) {
-		for _, algo := range []string{"CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256", "UNKNOWN"} {
-			_ = computePartChecksums([]byte("hello"), algo)
+		cases := []struct {
+			algorithm string
+			field     string
+		}{
+			{"CRC32", "ChecksumCRC32"},
+			{"CRC32C", "ChecksumCRC32C"},
+			{"CRC64NVME", "ChecksumCRC64NVME"},
+			{"SHA1", "ChecksumSHA1"},
+			{"SHA256", "ChecksumSHA256"},
+		}
+		for _, tc := range cases {
+			item := computePartChecksums([]byte("hello"), tc.algorithm)
+			values := map[string]string{
+				"ChecksumCRC32":     item.ChecksumCRC32,
+				"ChecksumCRC32C":    item.ChecksumCRC32C,
+				"ChecksumCRC64NVME": item.ChecksumCRC64NVME,
+				"ChecksumSHA1":      item.ChecksumSHA1,
+				"ChecksumSHA256":    item.ChecksumSHA256,
+			}
+			for field, value := range values {
+				if field == tc.field && value == "" {
+					t.Fatalf(
+						"computePartChecksums(%q).%s is empty, want checksum",
+						tc.algorithm,
+						field,
+					)
+				}
+				if field != tc.field && value != "" {
+					t.Fatalf(
+						"computePartChecksums(%q).%s = %q, want empty",
+						tc.algorithm,
+						field,
+						value,
+					)
+				}
+			}
+		}
+		if got := computePartChecksums(
+			[]byte("hello"),
+			"UNKNOWN",
+		); got != (backend.GetObjectAttributesPartItem{}) {
+			t.Fatalf("computePartChecksums(UNKNOWN) = %+v, want empty item", got)
 		}
 	})
 

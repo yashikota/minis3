@@ -24,6 +24,21 @@ func TestNormalizeParallel(t *testing.T) {
 	}
 }
 
+func TestNormalizeParallelNumCPUFallback(t *testing.T) {
+	restore := numCPU
+	t.Cleanup(func() {
+		numCPU = restore
+	})
+	numCPU = func() int { return 8 }
+	if got := normalizeParallel(0); got != 8 {
+		t.Fatalf("normalizeParallel(0) = %d, want 8", got)
+	}
+	numCPU = func() int { return 0 }
+	if got := normalizeParallel(0); got != 1 {
+		t.Fatalf("normalizeParallel(0) with NumCPU()=0 = %d, want 1", got)
+	}
+}
+
 func TestIsDeadlineOnly(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -197,13 +212,18 @@ func TestGoListContextCanceled(t *testing.T) {
 }
 
 func TestGoTestListFuzz(t *testing.T) {
-	names, err := goTestListFuzz(context.Background(), ".")
-	if err != nil {
-		t.Fatalf("goTestListFuzz() = %v, want nil", err)
-	}
-	for _, name := range names {
-		if !strings.HasPrefix(name, "Fuzz") {
-			t.Fatalf("listed fuzz target %q does not start with Fuzz", name)
+	for _, pkg := range []string{".", "github.com/yashikota/minis3/internal/backend"} {
+		names, err := goTestListFuzz(context.Background(), pkg)
+		if err != nil {
+			t.Fatalf("goTestListFuzz(%q) = %v, want nil", pkg, err)
+		}
+		if len(names) == 0 {
+			t.Fatalf("goTestListFuzz(%q) found no fuzz targets", pkg)
+		}
+		for _, name := range names {
+			if !strings.HasPrefix(name, "Fuzz") {
+				t.Fatalf("listed fuzz target %q does not start with Fuzz", name)
+			}
 		}
 	}
 }
@@ -213,24 +233,6 @@ func TestGoTestListFuzzContextCanceled(t *testing.T) {
 	cancel()
 	if _, err := goTestListFuzz(ctx, "."); err == nil {
 		t.Fatal("goTestListFuzz() with canceled context = nil, want error")
-	}
-}
-
-func TestGoTestListFuzzFindsRealTargets(t *testing.T) {
-	names, err := goTestListFuzz(
-		context.Background(),
-		"github.com/yashikota/minis3/internal/backend",
-	)
-	if err != nil {
-		t.Fatalf("goTestListFuzz() = %v, want nil", err)
-	}
-	if len(names) == 0 {
-		t.Fatal("goTestListFuzz() found no fuzz targets in internal/backend")
-	}
-	for _, name := range names {
-		if !strings.HasPrefix(name, "Fuzz") {
-			t.Fatalf("listed fuzz target %q does not start with Fuzz", name)
-		}
 	}
 }
 

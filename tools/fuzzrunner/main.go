@@ -25,6 +25,7 @@ var (
 	discoverFuzzTargetsFn = discoverFuzzTargets
 	runFuzzTargetFn       = runFuzzTarget
 	goTestListFuzzFn      = goTestListFuzz
+	numCPU                = runtime.NumCPU
 )
 
 func main() {
@@ -113,7 +114,7 @@ func normalizeParallel(parallel int) int {
 	if parallel > 0 {
 		return parallel
 	}
-	if n := runtime.NumCPU(); n > 0 {
+	if n := numCPU(); n > 0 {
 		return n
 	}
 	return 1

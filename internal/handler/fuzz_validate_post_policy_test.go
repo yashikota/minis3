@@ -43,7 +43,14 @@ func FuzzValidatePostPolicy(f *testing.F) {
 			"key":          key,
 			"content-type": contentType,
 		}
-		_, _ = validatePostPolicy(policyB64, bucket, key, contentType, formFields, size)
+		status, ok := validatePostPolicy(policyB64, bucket, key, contentType, formFields, size)
+		// Contract: success reports status 0; failure reports 400 or 403.
+		if ok && status != 0 {
+			t.Fatalf("validatePostPolicy ok=true with status=%d, want 0", status)
+		}
+		if !ok && status != http.StatusBadRequest && status != http.StatusForbidden {
+			t.Fatalf("validatePostPolicy ok=false with status=%d, want 400 or 403", status)
+		}
 	})
 }
 
