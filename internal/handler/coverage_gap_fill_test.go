@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -820,7 +821,21 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 			),
 		)
 		requireStatus(t, wAttrsMarkerLoop, http.StatusOK)
+		if bytes.Contains(wAttrsMarkerLoop.Body.Bytes(), []byte("<PartNumber>")) {
+			t.Fatalf(
+				"expected no parts after part-number-marker=1, got: %s",
+				wAttrsMarkerLoop.Body.String(),
+			)
+		}
 	})
+}
+
+// pendingBatchCount returns the number of buffered server access log
+// batches, for asserting emit/flush effects in branch tests.
+func pendingBatchCount(h *Handler) int {
+	h.loggingMu.Lock()
+	defer h.loggingMu.Unlock()
+	return len(h.pendingLogBatches)
 }
 
 func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
@@ -919,6 +934,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		reqMissingSrc := newRequest(http.MethodGet, "http://example.test/src-h2/k", "", nil)
 		h.emitServerAccessLog(reqMissingSrc, http.StatusOK, 1, "r", "h")
 		getBucketForLoggingFn = origGetBucketForLogging
+		if got := pendingBatchCount(h); got != 0 {
+			t.Fatalf("missing source bucket buffered %d batches, want 0", got)
+		}
 
 		getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 			return &backend.BucketLoggingStatus{
@@ -930,6 +948,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		}
 		reqEmptyTarget := newRequest(http.MethodGet, "http://example.test/src-h2/k", "", nil)
 		h.emitServerAccessLog(reqEmptyTarget, http.StatusOK, 1, "r", "h")
+		if got := pendingBatchCount(h); got != 0 {
+			t.Fatalf("empty target bucket buffered %d batches, want 0", got)
+		}
 
 		getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 			return &backend.BucketLoggingStatus{
@@ -949,6 +970,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		reqEmit.RemoteAddr = ""
 		h.emitServerAccessLog(reqEmit, http.StatusOK, 1, "r", "h")
 		requestURIForLoggingFn = origRequestURI
+		if got := pendingBatchCount(h); got != 1 {
+			t.Fatalf("empty request URI buffered %d batches, want 1", got)
+		}
 
 		getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 			return &backend.BucketLoggingStatus{
@@ -967,6 +991,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		reqPartitioned.RemoteAddr = ""
 		h.emitServerAccessLog(reqPartitioned, http.StatusOK, 1, "r", "h")
 		getBucketLoggingFn = origGetBucketLogging
+		if got := pendingBatchCount(h); got != 2 {
+			t.Fatalf("partitioned prefix buffered %d batches total, want 2", got)
+		}
 
 		// not-due branch
 		h.loggingMu.Lock()
@@ -1001,7 +1028,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		}
 
 		// flush partitioned object key path
-		if _, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
+		partitionedKey, err := h.flushServerAccessLogBatch(&serverAccessLogBatch{
 			TargetBucket: "dst-h2",
 			TargetPrefix: "logs/",
 			ObjectKeyFormat: &backend.TargetObjectKeyFormat{
@@ -1011,8 +1038,12 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 				SourceBucket: "src-h2",
 				Line:         "line",
 			}},
-		}, time.Now().UTC()); err != nil {
+		}, time.Now().UTC())
+		if err != nil {
 			t.Fatalf("flushServerAccessLogBatch partitioned failed: %v", err)
+		}
+		if !strings.Contains(partitionedKey, "/default/") {
+			t.Fatalf("partitioned log key = %q, want /default/ layout", partitionedKey)
 		}
 
 		reqPutObj := newRequest(http.MethodPut, "http://example.test/src-h2/k", "", nil)

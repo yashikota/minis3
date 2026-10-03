@@ -68,6 +68,41 @@ func TestPostBucketLoggingFlush(t *testing.T) {
 		if !strings.HasPrefix(result.FlushedLoggingObject, "log/") {
 			t.Fatalf("expected key to start with 'log/', got %q", result.FlushedLoggingObject)
 		}
+
+		// The flushed batch must exist as an object in the target bucket.
+		logObj, err := b.GetObject("tgt-log", result.FlushedLoggingObject)
+		if err != nil {
+			t.Fatalf("flushed log object not found in tgt-log: %v", err)
+		}
+		if len(logObj.Data) == 0 {
+			t.Fatal("flushed log object is empty")
+		}
+		if !strings.Contains(string(logObj.Data), "testobj") {
+			t.Fatalf("flushed log object missing testobj entry: %q", logObj.Data)
+		}
+
+		// The first batch was consumed: a second flush only contains the
+		// first POST's own log entry, so the flushed key must advance.
+		wSecond := doRequest(h, newRequest(
+			http.MethodPost,
+			"http://example.test/src-log?logging",
+			"",
+			ownerHeaders,
+		))
+		requireStatus(t, wSecond, http.StatusOK)
+		var second backend.PostBucketLoggingResult
+		if err := xml.Unmarshal(wSecond.Body.Bytes(), &second); err != nil {
+			t.Fatalf("failed to decode second response: %v", err)
+		}
+		if second.FlushedLoggingObject == "" {
+			t.Fatal("expected second flush to report the first POST's log entry")
+		}
+		if second.FlushedLoggingObject == result.FlushedLoggingObject {
+			t.Fatalf(
+				"second flush re-reported consumed batch %q",
+				second.FlushedLoggingObject,
+			)
+		}
 	})
 
 	t.Run("flush with empty batch on unconfigured bucket", func(t *testing.T) {

@@ -44,7 +44,14 @@ jobs:
       - name: Run tests with tobari
         run: |
           GOFLAGS="$(tobari flags)" go test -count=1 ./...
-          tobari merge json -o tobari/tobari.json $(find . -name tobari.json -path "*/tobari/tobari.json" -not -path "./tobari/*" -not -path "./integration/s3-test/s3-tests/*" | sort)
+          inputs=$(find . -name tobari.json -path "*/tobari/tobari.json" -not -path "./tobari/*" -not -path "./integration/s3-test/s3-tests/*" | sort)
+          # The root package reports to ./tobari/tobari.json (its own directory),
+          # so merge it as well via a temp file to avoid clobbering the input.
+          if [ -f ./tobari/tobari.json ]; then
+            inputs="$inputs ./tobari/tobari.json"
+          fi
+          tobari merge json -o tobari/merged.json $inputs
+          mv tobari/merged.json tobari/tobari.json
           rm -f tobari/tobari.toon
 
       - name: Report coverage

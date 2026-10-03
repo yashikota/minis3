@@ -24,6 +24,20 @@ func TestVerifyAuthorizationHeaderV4MixedCaseSignedHeaders(t *testing.T) {
 	}
 }
 
+func TestVerifyAuthorizationHeaderV4EmptySignedHeaderSegment(t *testing.T) {
+	req := newV4AuthHeaderRequest(t, "minis3-access-key", time.Now().UTC())
+	auth := req.Header.Get("Authorization")
+	const lower = "SignedHeaders=host;x-amz-content-sha256;x-amz-date"
+	const emptied = "SignedHeaders=host;;x-amz-content-sha256;x-amz-date"
+	if !strings.Contains(auth, lower) {
+		t.Fatalf("expected Authorization to contain %q, got %q", lower, auth)
+	}
+	req.Header.Set("Authorization", strings.Replace(auth, lower, emptied, 1))
+	if err := verifyAuthorizationHeader(req); err != nil {
+		t.Fatalf("SignedHeaders with empty segment should verify, got %v", err)
+	}
+}
+
 func TestCalculatePresignedSignatureV4MixedCaseSignedHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket/key?x=1", nil)
 	req.Host = "example.test"

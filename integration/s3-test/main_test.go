@@ -13,9 +13,22 @@ import (
 )
 
 func TestRunParseError(t *testing.T) {
+	restore := patchGlobals()
+	defer restore()
+
+	// The parse failure must surface before any listener is created, so a
+	// bug that ignores it cannot bind a real port or hang the suite.
+	listenFn = func(_, _ string) (net.Listener, error) {
+		t.Error("listenFn must not be called for invalid flags")
+		return nil, errors.New("listen must not be called")
+	}
+
 	err := run([]string{"-unknown-flag"})
 	if err == nil {
 		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("expected flag parse error, got: %v", err)
 	}
 }
 

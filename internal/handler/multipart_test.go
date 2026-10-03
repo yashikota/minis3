@@ -395,6 +395,20 @@ func TestMultipartHandlers(t *testing.T) {
 		if got := w.Header().Get("x-amz-server-side-encryption"); got != "AES256" {
 			t.Fatalf("x-amz-server-side-encryption = %q, want AES256", got)
 		}
+		// The completed object must contain the concatenated part data.
+		wGet := doRequest(
+			h,
+			newRequest(
+				http.MethodGet,
+				"http://example.test/mp-bucket/ok",
+				"",
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
+			),
+		)
+		requireStatus(t, wGet, http.StatusOK)
+		if got := wGet.Body.String(); got != "single-part" {
+			t.Fatalf("completed object body = %q, want %q", got, "single-part")
+		}
 	})
 
 	t.Run("abort multipart no such upload", func(t *testing.T) {
