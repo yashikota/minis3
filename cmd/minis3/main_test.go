@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/yashikota/minis3"
 )
@@ -28,9 +29,33 @@ func resetMainHooks() {
 	fatalfFn = defaultFatalfFn
 }
 
+// runWithTimeout executes run and reports a hang instead of blocking the
+// suite: run waits for an OS signal, so any bug before signal delivery
+// (e.g. ignoring a parse error) would otherwise hang until the go test
+// timeout. Callers must stub notifyFn to deliver a signal promptly.
+func runWithTimeout(
+	t *testing.T,
+	args []string,
+	sigCh chan os.Signal,
+) (error, bool) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- run(args, sigCh) }()
+	select {
+	case err := <-done:
+		return err, true
+	case <-time.After(10 * time.Second):
+		return nil, false
+	}
+}
+
 func TestRunParseError(t *testing.T) {
 	resetMainHooks()
-	if err := run([]string{"-port=not-a-number"}, make(chan os.Signal, 1)); err == nil {
+	err, ok := runWithTimeout(t, []string{"-port=not-a-number"}, make(chan os.Signal, 1))
+	if !ok {
+		t.Fatal("run() hung for invalid port")
+	}
+	if err == nil {
 		t.Fatal("run() should fail for invalid port")
 	}
 }
@@ -41,7 +66,10 @@ func TestRunStartError(t *testing.T) {
 	runAddrFn = func(string) (*minis3.Minis3, error) {
 		return nil, wantErr
 	}
-	err := run([]string{"-port=9191"}, make(chan os.Signal, 1))
+	err, ok := runWithTimeout(t, []string{"-port=9191"}, make(chan os.Signal, 1))
+	if !ok {
+		t.Fatal("run() hung for start error")
+	}
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("run() error = %v, want %v", err, wantErr)
 	}
@@ -59,7 +87,10 @@ func TestRunStopError(t *testing.T) {
 	wantErr := errors.New("stop boom")
 	closeFn = func(*minis3.Minis3) error { return wantErr }
 
-	err := run([]string{"-port=9191"}, make(chan os.Signal, 1))
+	err, ok := runWithTimeout(t, []string{"-port=9191"}, make(chan os.Signal, 1))
+	if !ok {
+		t.Fatal("run() hung for stop error")
+	}
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("run() error = %v, want %v", err, wantErr)
 	}
@@ -78,7 +109,11 @@ func TestRunSuccess(t *testing.T) {
 	stopFn = func(chan<- os.Signal) { stopped = true }
 	closeFn = func(*minis3.Minis3) error { return nil }
 
-	if err := run([]string{"-port=9191"}, make(chan os.Signal, 1)); err != nil {
+	err, ok := runWithTimeout(t, []string{"-port=9191"}, make(chan os.Signal, 1))
+	if !ok {
+		t.Fatal("run() hung for success case")
+	}
+	if err != nil {
 		t.Fatalf("run() failed: %v", err)
 	}
 	if !stopped {
@@ -97,8 +132,27 @@ func TestRunSuccessWithNilSignalChannel(t *testing.T) {
 	stopFn = func(chan<- os.Signal) {}
 	printfFn = func(string, ...any) {}
 
-	if err := run([]string{"-port=9191"}, nil); err != nil {
+	err, ok := runWithTimeout(t, []string{"-port=9191"}, nil)
+	if !ok {
+		t.Fatal("run() hung for nil signal channel")
+	}
+	if err != nil {
 		t.Fatalf("run() with nil signal channel failed: %v", err)
+	}
+
+	// The created channel must be the one passed to stopFn, proving run()
+	// replaced the nil channel instead of using it.
+	var stoppedCh chan<- os.Signal = make(chan os.Signal, 1)
+	stopFn = func(c chan<- os.Signal) { stoppedCh = c }
+	err, ok = runWithTimeout(t, []string{"-port=9191"}, nil)
+	if !ok {
+		t.Fatal("run() hung for nil signal channel on second run")
+	}
+	if err != nil {
+		t.Fatalf("run() with nil signal channel failed: %v", err)
+	}
+	if stoppedCh == nil {
+		t.Fatal("expected stopFn to receive the created non-nil channel")
 	}
 }
 
@@ -112,7 +166,18 @@ func TestMainCallsFatalOnError(t *testing.T) {
 
 	called := false
 	fatalfFn = func(string, ...any) { called = true }
-	main()
+	// main blocks on signals after a successful start, so run it in a
+	// goroutine: a hang means the parse error was ignored.
+	done := make(chan struct{})
+	go func() {
+		main()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("main() hung for invalid port")
+	}
 	if !called {
 		t.Fatal("expected main() to call fatalfFn on run error")
 	}
