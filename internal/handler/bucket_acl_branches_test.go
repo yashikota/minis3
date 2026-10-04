@@ -38,6 +38,23 @@ func TestHandlePutBucketACLBranches(t *testing.T) {
 		requireStatus(t, w, http.StatusOK)
 	})
 
+	t.Run("invalid canned acl rejected", func(t *testing.T) {
+		w := doRequest(
+			h,
+			newRequest(
+				http.MethodPut,
+				"http://example.test/acl-bucket?acl",
+				"",
+				map[string]string{
+					"Authorization": "AWS minis3-access-key:sig",
+					"x-amz-acl":     "public-ready",
+				},
+			),
+		)
+		requireStatus(t, w, http.StatusBadRequest)
+		requireS3ErrorCode(t, w, "InvalidArgument")
+	})
+
 	t.Run("canned acl no such bucket", func(t *testing.T) {
 		w := doRequest(
 			h,

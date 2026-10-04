@@ -36,3 +36,32 @@ def _force_nuke_bucket(client, bucket):
 
 
 _s3func.nuke_bucket = _force_nuke_bucket
+
+# ---------------------------------------------------------------------------
+# Drop stale fails_on_rgw markers for tests minis3 now passes.
+#
+# Each entry below was verified against a minis3 build containing the
+# corresponding fix. The markers are upstream RGW observations; minis3
+# implements the AWS behavior these tests assert.
+# ---------------------------------------------------------------------------
+
+_UNMARKED_RGW_TESTS = {
+    # SigV4 accepts the HTTP Date header when X-Amz-Date is absent
+    # (x-amz-date takes precedence when both are present).
+    "s3tests/functional/test_headers.py::test_object_create_date_and_amz_date",
+    "s3tests/functional/test_headers.py::test_object_create_amz_date_and_no_date",
+    # IAM user-policy CRUD with document/name validation.
+    "s3tests/functional/test_iam.py::test_put_user_policy_invalid_element",
+    "s3tests/functional/test_iam.py::test_get_user_policy_invalid_policy_name",
+    "s3tests/functional/test_iam.py::test_get_deleted_user_policy",
+}
+
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        if item.nodeid in _UNMARKED_RGW_TESTS:
+            item.own_markers = [
+                marker
+                for marker in item.own_markers
+                if marker.name != "fails_on_rgw"
+            ]

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -153,6 +154,12 @@ func (h *Handler) handleIAMAction(w http.ResponseWriter, r *http.Request, action
 		h.handleIAMListAccessKeys(w, r)
 	case "ListUserPolicies":
 		h.handleIAMListUserPolicies(w, r)
+	case "PutUserPolicy":
+		h.handleIAMPutUserPolicy(w, r)
+	case "GetUserPolicy":
+		h.handleIAMGetUserPolicy(w, r)
+	case "DeleteUserPolicy":
+		h.handleIAMDeleteUserPolicy(w, r)
 	case "ListAttachedUserPolicies":
 		h.handleIAMListAttachedUserPolicies(w, r)
 	case "ListGroups":
@@ -162,7 +169,7 @@ func (h *Handler) handleIAMAction(w http.ResponseWriter, r *http.Request, action
 	case "ListOpenIDConnectProviders":
 		h.handleIAMListOpenIDConnectProviders(w, r)
 	default:
-		backend.WriteError(w, http.StatusBadRequest, "Unknown", "Unknown")
+		writeIAMError(w, http.StatusBadRequest, "Unknown", "Unknown")
 	}
 }
 
@@ -234,7 +241,7 @@ func (h *Handler) writeIAMResponse(w http.ResponseWriter, v any) {
 	_, _ = w.Write([]byte(xml.Header))
 	output, err := xmlMarshalFn(v)
 	if err != nil {
-		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		writeIAMError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	_, _ = w.Write(output)
@@ -246,6 +253,28 @@ func iamFormValue(r *http.Request, key string) string {
 		return v
 	}
 	return r.URL.Query().Get(key)
+}
+
+// writeIAMError writes an IAM Query-protocol error response. Unlike S3 REST
+// errors (bare <Error>), IAM errors nest inside <ErrorResponse> with a Type
+// element; SDKs cannot extract the Code otherwise.
+func writeIAMError(w http.ResponseWriter, status int, code, message string) {
+	errorType := "Sender"
+	if status >= 500 {
+		errorType = "Receiver"
+	}
+	w.Header().Set("Content-Type", "text/xml")
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(
+		w,
+		`<?xml version="1.0" encoding="UTF-8"?>`+
+			`<ErrorResponse><Error><Type>%s</Type><Code>%s</Code><Message>%s</Message></Error>`+
+			`<RequestId>%s</RequestId></ErrorResponse>`,
+		errorType,
+		code,
+		message,
+		generateRequestId(),
+	)
 }
 
 // --- CreateUser ---
@@ -270,7 +299,7 @@ func (h *Handler) handleIAMCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.backend.CreateIAMUser(userName, path)
 	if err != nil {
-		backend.WriteError(w, http.StatusConflict, "EntityAlreadyExists",
+		writeIAMError(w, http.StatusConflict, "EntityAlreadyExists",
 			"User with name "+userName+" already exists.")
 		return
 	}
@@ -318,7 +347,7 @@ func (h *Handler) handleIAMCreateAccessKey(w http.ResponseWriter, r *http.Reques
 
 	key, err := h.backend.CreateIAMAccessKey(userName)
 	if err != nil {
-		backend.WriteError(w, http.StatusNotFound, "NoSuchEntity",
+		writeIAMError(w, http.StatusNotFound, "NoSuchEntity",
 			"The user with name "+userName+" cannot be found.")
 		return
 	}
@@ -375,6 +404,105 @@ func (h *Handler) handleIAMDeleteUser(w http.ResponseWriter, r *http.Request) {
 	_ = h.backend.DeleteIAMUser(userName)
 
 	resp := iamDeleteUserResponse{
+		Xmlns:            iamXmlns,
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+// --- PutUserPolicy ---
+
+type iamPutUserPolicyResponse struct {
+	XMLName          xml.Name            `xml:"PutUserPolicyResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+func (h *Handler) handleIAMPutUserPolicy(w http.ResponseWriter, r *http.Request) {
+	userName := iamFormValue(r, "UserName")
+	policyName := iamFormValue(r, "PolicyName")
+	document := iamFormValue(r, "PolicyDocument")
+
+	if !backend.IsValidIAMPolicyName(policyName) {
+		writeIAMError(w, http.StatusBadRequest, "ValidationError",
+			"Policy name "+policyName+" is not valid.")
+		return
+	}
+	if err := backend.ValidateIAMUserPolicyDocument(document); err != nil {
+		writeIAMError(w, http.StatusBadRequest, "MalformedPolicyDocument",
+			"The policy document is malformed.")
+		return
+	}
+	if err := h.backend.PutIAMUserPolicy(userName, policyName, document); err != nil {
+		writeIAMError(w, http.StatusNotFound, "NoSuchEntity",
+			"The user with name "+userName+" cannot be found.")
+		return
+	}
+
+	resp := iamPutUserPolicyResponse{
+		Xmlns:            iamXmlns,
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+// --- GetUserPolicy ---
+
+type iamGetUserPolicyResponse struct {
+	XMLName             xml.Name               `xml:"GetUserPolicyResponse"`
+	Xmlns               string                 `xml:"xmlns,attr,omitempty"`
+	GetUserPolicyResult iamGetUserPolicyResult `xml:"GetUserPolicyResult"`
+	ResponseMetadata    iamResponseMetadata    `xml:"ResponseMetadata"`
+}
+
+type iamGetUserPolicyResult struct {
+	UserName       string `xml:"UserName"`
+	PolicyName     string `xml:"PolicyName"`
+	PolicyDocument string `xml:"PolicyDocument"`
+}
+
+func (h *Handler) handleIAMGetUserPolicy(w http.ResponseWriter, r *http.Request) {
+	userName := iamFormValue(r, "UserName")
+	policyName := iamFormValue(r, "PolicyName")
+
+	document, err := h.backend.GetIAMUserPolicy(userName, policyName)
+	if err != nil {
+		writeIAMError(w, http.StatusNotFound, "NoSuchEntity",
+			"The user policy with name "+policyName+" cannot be found.")
+		return
+	}
+
+	resp := iamGetUserPolicyResponse{
+		Xmlns: iamXmlns,
+		GetUserPolicyResult: iamGetUserPolicyResult{
+			UserName:       userName,
+			PolicyName:     policyName,
+			PolicyDocument: document,
+		},
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
+	}
+	h.writeIAMResponse(w, resp)
+}
+
+// --- DeleteUserPolicy ---
+
+type iamDeleteUserPolicyResponse struct {
+	XMLName          xml.Name            `xml:"DeleteUserPolicyResponse"`
+	Xmlns            string              `xml:"xmlns,attr,omitempty"`
+	ResponseMetadata iamResponseMetadata `xml:"ResponseMetadata"`
+}
+
+func (h *Handler) handleIAMDeleteUserPolicy(w http.ResponseWriter, r *http.Request) {
+	userName := iamFormValue(r, "UserName")
+	policyName := iamFormValue(r, "PolicyName")
+
+	if err := h.backend.DeleteIAMUserPolicy(userName, policyName); err != nil {
+		writeIAMError(w, http.StatusNotFound, "NoSuchEntity",
+			"The user policy with name "+policyName+" cannot be found.")
+		return
+	}
+
+	resp := iamDeleteUserPolicyResponse{
 		Xmlns:            iamXmlns,
 		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
 	}
@@ -484,10 +612,21 @@ type iamListUserPoliciesResult struct {
 }
 
 func (h *Handler) handleIAMListUserPolicies(w http.ResponseWriter, r *http.Request) {
+	names, err := h.backend.ListIAMUserPolicies(iamFormValue(r, "UserName"))
+	if err != nil {
+		writeIAMError(w, http.StatusNotFound, "NoSuchEntity",
+			"The user with the requested name cannot be found.")
+		return
+	}
+	members := make([]string, 0, len(names))
+	members = append(members, names...)
 	resp := iamListUserPoliciesResponse{
-		Xmlns:                  iamXmlns,
-		ListUserPoliciesResult: iamListUserPoliciesResult{IsTruncated: false},
-		ResponseMetadata:       iamResponseMetadata{RequestID: generateRequestId()},
+		Xmlns: iamXmlns,
+		ListUserPoliciesResult: iamListUserPoliciesResult{
+			PolicyNames: members,
+			IsTruncated: false,
+		},
+		ResponseMetadata: iamResponseMetadata{RequestID: generateRequestId()},
 	}
 	h.writeIAMResponse(w, resp)
 }

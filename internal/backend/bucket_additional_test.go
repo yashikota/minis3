@@ -361,6 +361,37 @@ func TestACLAndPublicAccessHelpers(t *testing.T) {
 	}
 }
 
+func TestIsValidCannedACL(t *testing.T) {
+	valid := []string{
+		"private",
+		"public-read",
+		"public-read-write",
+		"authenticated-read",
+		"bucket-owner-read",
+		"bucket-owner-full-control",
+		"aws-exec-read",
+		"log-delivery-write",
+	}
+	for _, value := range valid {
+		if !IsValidCannedACL(value) {
+			t.Fatalf("IsValidCannedACL(%q) = false, want true", value)
+		}
+	}
+	invalid := []string{
+		"",
+		"public-ready",
+		"Public-Read",
+		"public_read",
+		"private ",
+		" authenticated-read",
+	}
+	for _, value := range invalid {
+		if IsValidCannedACL(value) {
+			t.Fatalf("IsValidCannedACL(%q) = true, want false", value)
+		}
+	}
+}
+
 func TestPutBucketLifecycleConfigurationAssignsRuleIDWhenMissing(t *testing.T) {
 	b := New()
 	if err := b.CreateBucket("lifecycle-id-bucket"); err != nil {

@@ -1,19 +1,90 @@
 package backend
 
 import (
+	"bytes"
 	"encoding/json"
 	"path"
+	"regexp"
 	"strings"
 )
 
 // BucketPolicy represents a parsed S3 bucket policy.
 type BucketPolicy struct {
-	Version   string            `json:"Version"`
-	Statement []PolicyStatement `json:"Statement"`
+	Version   string              `json:"Version"`
+	Statement PolicyStatementList `json:"Statement"`
+}
+
+// PolicyStatementList is a list of policy statements that unmarshals from
+// either a JSON array or a single statement object. AWS IAM policy grammar
+// accepts both forms.
+type PolicyStatementList []PolicyStatement
+
+func (l *PolicyStatementList) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var single PolicyStatement
+		if err := json.Unmarshal(data, &single); err != nil {
+			return err
+		}
+		*l = PolicyStatementList{single}
+		return nil
+	}
+	var multi []PolicyStatement
+	if err := json.Unmarshal(data, &multi); err != nil {
+		return err
+	}
+	*l = multi
+	return nil
+}
+
+var iamPolicyNamePattern = regexp.MustCompile(`^[\w+=,.@-]+$`)
+
+// IsValidIAMPolicyName reports whether name is a valid IAM policy name:
+// 1-128 characters of word characters and +=,.@- (per AWS IAM quotas).
+func IsValidIAMPolicyName(name string) bool {
+	return len(name) >= 1 && len(name) <= 128 && iamPolicyNamePattern.MatchString(name)
+}
+
+// ValidateIAMUserPolicyDocument checks IAM user policy grammar: the document
+// must be a JSON object with a supported Version and a non-empty Statement
+// (object or array), Sids must be unique, identity policies must not carry
+// a Principal element, and effects must be Allow or Deny.
+func ValidateIAMUserPolicyDocument(document string) error {
+	var raw struct {
+		Version   string              `json:"Version"`
+		Statement PolicyStatementList `json:"Statement"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(document))
+	if err := decoder.Decode(&raw); err != nil {
+		return ErrMalformedPolicyDocument
+	}
+	if raw.Version != "2012-10-17" && raw.Version != "2008-10-17" {
+		return ErrMalformedPolicyDocument
+	}
+	if len(raw.Statement) == 0 {
+		return ErrMalformedPolicyDocument
+	}
+	seenSids := make(map[string]struct{}, len(raw.Statement))
+	for _, stmt := range raw.Statement {
+		if stmt.Sid != "" {
+			if _, dup := seenSids[stmt.Sid]; dup {
+				return ErrMalformedPolicyDocument
+			}
+			seenSids[stmt.Sid] = struct{}{}
+		}
+		if stmt.Principal != nil {
+			return ErrMalformedPolicyDocument
+		}
+		if stmt.Effect != "Allow" && stmt.Effect != "Deny" {
+			return ErrMalformedPolicyDocument
+		}
+	}
+	return nil
 }
 
 // PolicyStatement represents a single statement in a bucket policy.
 type PolicyStatement struct {
+	Sid       string                       `json:"Sid,omitempty"`
 	Effect    string                       `json:"Effect"`
 	Action    PolicyStringOrSlice          `json:"Action"`
 	Resource  PolicyStringOrSlice          `json:"Resource"`

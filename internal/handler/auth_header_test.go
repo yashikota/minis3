@@ -97,6 +97,28 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 		}
 	})
 
+	t.Run("v2 bad x-amz-date values", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			date    string
+			wantErr string
+		}{
+			{"unparseable", "Bad Date", "AccessDenied"},
+			{"empty", "", "AccessDenied"},
+			{"pre-epoch", "Tue, 07 Jul 1950 21:53:04 GMT", "AccessDenied"},
+			{"old", "Tue, 07 Jul 2010 21:53:04 GMT", "RequestTimeTooSkewed"},
+			{"future", "Tue, 07 Jul 9999 21:53:04 GMT", "RequestTimeTooSkewed"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
+				req.Header.Set("Authorization", "AWS minis3-access-key:sig")
+				req.Header["X-Amz-Date"] = []string{tc.date}
+				requirePresignedErrCode(t, verifyAuthorizationHeader(req), tc.wantErr)
+			})
+		}
+	})
+
 	t.Run("v4 missing fields", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
 		req.Header.Set(

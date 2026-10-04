@@ -191,3 +191,140 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 		}
 	})
 }
+
+func TestIAMUserPolicyCRUD(t *testing.T) {
+	b := New()
+	if _, err := b.CreateIAMUser("poluser", "/"); err != nil {
+		t.Fatalf("CreateIAMUser failed: %v", err)
+	}
+	doc := `{"Version":"2012-10-17","Statement":{"Effect":"Allow","Action":"*","Resource":"*"}}`
+
+	t.Run("put and get round trip", func(t *testing.T) {
+		if err := b.PutIAMUserPolicy("poluser", "p1", doc); err != nil {
+			t.Fatalf("PutIAMUserPolicy failed: %v", err)
+		}
+		got, err := b.GetIAMUserPolicy("poluser", "p1")
+		if err != nil {
+			t.Fatalf("GetIAMUserPolicy failed: %v", err)
+		}
+		if got != doc {
+			t.Fatalf("GetIAMUserPolicy = %q, want %q", got, doc)
+		}
+	})
+
+	t.Run("overwrite existing", func(t *testing.T) {
+		doc2 := `{"Version":"2012-10-17","Statement":[]}`
+		if err := b.PutIAMUserPolicy("poluser", "p1", doc2); err != nil {
+			t.Fatalf("PutIAMUserPolicy overwrite failed: %v", err)
+		}
+		got, err := b.GetIAMUserPolicy("poluser", "p1")
+		if err != nil {
+			t.Fatalf("GetIAMUserPolicy failed: %v", err)
+		}
+		if got != doc2 {
+			t.Fatalf("GetIAMUserPolicy = %q, want overwritten %q", got, doc2)
+		}
+	})
+
+	t.Run("list names sorted", func(t *testing.T) {
+		if err := b.PutIAMUserPolicy("poluser", "b-policy", doc); err != nil {
+			t.Fatalf("PutIAMUserPolicy failed: %v", err)
+		}
+		if err := b.PutIAMUserPolicy("poluser", "a-policy", doc); err != nil {
+			t.Fatalf("PutIAMUserPolicy failed: %v", err)
+		}
+		names, err := b.ListIAMUserPolicies("poluser")
+		if err != nil {
+			t.Fatalf("ListIAMUserPolicies failed: %v", err)
+		}
+		if len(names) != 3 || names[0] != "a-policy" || names[1] != "b-policy" || names[2] != "p1" {
+			t.Fatalf("ListIAMUserPolicies = %q, want sorted [a-policy b-policy p1]", names)
+		}
+	})
+
+	t.Run("delete removes policy", func(t *testing.T) {
+		if err := b.DeleteIAMUserPolicy("poluser", "p1"); err != nil {
+			t.Fatalf("DeleteIAMUserPolicy failed: %v", err)
+		}
+		if _, err := b.GetIAMUserPolicy("poluser", "p1"); !errors.Is(err, ErrIAMPolicyNotFound) {
+			t.Fatalf("expected ErrIAMPolicyNotFound, got %v", err)
+		}
+		if err := b.DeleteIAMUserPolicy("poluser", "p1"); !errors.Is(err, ErrIAMPolicyNotFound) {
+			t.Fatalf("expected ErrIAMPolicyNotFound on second delete, got %v", err)
+		}
+	})
+
+	t.Run("missing user and policy errors", func(t *testing.T) {
+		if err := b.PutIAMUserPolicy("ghost", "p", doc); !errors.Is(err, ErrIAMUserNotFound) {
+			t.Fatalf("expected ErrIAMUserNotFound, got %v", err)
+		}
+		if _, err := b.GetIAMUserPolicy("ghost", "p"); !errors.Is(err, ErrIAMUserNotFound) {
+			t.Fatalf("expected ErrIAMUserNotFound, got %v", err)
+		}
+		if _, err := b.GetIAMUserPolicy(
+			"poluser",
+			"missing",
+		); !errors.Is(
+			err,
+			ErrIAMPolicyNotFound,
+		) {
+			t.Fatalf("expected ErrIAMPolicyNotFound, got %v", err)
+		}
+		if err := b.DeleteIAMUserPolicy("ghost", "p"); !errors.Is(err, ErrIAMUserNotFound) {
+			t.Fatalf("expected ErrIAMUserNotFound, got %v", err)
+		}
+		if _, err := b.ListIAMUserPolicies("ghost"); err == nil {
+			t.Fatal("expected error for missing user")
+		}
+	})
+
+	t.Run("delete user cleans policies", func(t *testing.T) {
+		if err := b.DeleteIAMUser("poluser"); err != nil {
+			t.Fatalf("DeleteIAMUser failed: %v", err)
+		}
+		if _, err := b.ListIAMUserPolicies("poluser"); !errors.Is(err, ErrIAMUserNotFound) {
+			t.Fatalf("expected ErrIAMUserNotFound after user delete, got %v", err)
+		}
+	})
+}
+
+func TestValidateIAMUserPolicyDocument(t *testing.T) {
+	valid := []string{
+		`{"Version":"2012-10-17","Statement":{"Effect":"Allow","Action":"*","Resource":"*"}}`,
+		`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:GetObject","Resource":"*"}]}`,
+		`{"Version":"2008-10-17","Statement":[{"Sid":"s1","Effect":"Allow","Action":"*","Resource":"*"}]}`,
+	}
+	for _, doc := range valid {
+		if err := ValidateIAMUserPolicyDocument(doc); err != nil {
+			t.Fatalf("ValidateIAMUserPolicyDocument(%s) = %v, want nil", doc, err)
+		}
+	}
+	invalid := []string{
+		``,
+		`not-json`,
+		`{"Version":"2010-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}`,
+		`{"Version":"2012-10-17"}`,
+		`{"Version":"2012-10-17","Statement":[]}`,
+		`{"Version":"2012-10-17","Statement":[{"Sid":"dup","Effect":"Allow","Action":"*","Resource":"*"},{"Sid":"dup","Effect":"Deny","Action":"*","Resource":"*"}]}`,
+		`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*","Principal":"*"}]}`,
+		`{"Version":"2012-10-17","Statement":[{"Effect":"Maybe","Action":"*","Resource":"*"}]}`,
+	}
+	for _, doc := range invalid {
+		if err := ValidateIAMUserPolicyDocument(doc); err == nil {
+			t.Fatalf("ValidateIAMUserPolicyDocument(%s) = nil, want error", doc)
+		}
+	}
+}
+
+func TestIsValidIAMPolicyName(t *testing.T) {
+	for _, name := range []string{"AllAccessPolicy", "a", "a+b=c,d.e@f-g_h", strings.Repeat("x", 128)} {
+		if !IsValidIAMPolicyName(name) {
+			t.Fatalf("IsValidIAMPolicyName(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"", strings.Repeat("x", 129), "has space", "bad/slash", "bad:colon"} {
+		if IsValidIAMPolicyName(name) {
+			t.Fatalf("IsValidIAMPolicyName(%q) = true, want false", name)
+		}
+	}
+}

@@ -74,6 +74,23 @@ func verifyAuthorizationHeader(r *http.Request) error {
 	return &presignedError{code: "AccessDenied", message: "Access Denied"}
 }
 
+// iso8601FromHTTPDateHeader converts an HTTP Date header value to the SigV4
+// yyyyMMddTHHmmssZ format, accepting RFC 1123 and its numeric-zone variants
+// (e.g. "Sat, 03 Oct 2026 17:56:02 GMT" and "... -0000" as emitted by AWS
+// SDKs). It returns "" when the value cannot be parsed.
+func iso8601FromHTTPDateHeader(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	for _, layout := range []string{time.RFC1123, time.RFC1123Z, time.RFC850, time.ANSIC} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC().Format("20060102T150405Z")
+		}
+	}
+	return ""
+}
+
 func verifyAuthorizationHeaderV4(r *http.Request, auth, secretKey string) error {
 	const prefix = "AWS4-HMAC-SHA256 "
 	kvStr := strings.TrimSpace(strings.TrimPrefix(auth, prefix))
@@ -103,6 +120,12 @@ func verifyAuthorizationHeaderV4(r *http.Request, auth, secretKey string) error 
 	service := credParts[3]
 
 	dateTime := r.Header.Get("x-amz-date")
+	if dateTime == "" {
+		// Fall back to the HTTP Date header. Per AWS SigV4 documentation
+		// the request date may be carried by either header, with x-amz-date
+		// taking precedence when both are present.
+		dateTime = iso8601FromHTTPDateHeader(r.Header.Get("Date"))
+	}
 	if dateTime == "" {
 		return &presignedError{code: "AccessDenied", message: "Access Denied"}
 	}
@@ -193,12 +216,65 @@ func verifyAuthorizationHeaderV4(r *http.Request, auth, secretKey string) error 
 	return nil
 }
 
-func verifyAuthorizationHeaderV2(_ *http.Request, auth string) error {
+func verifyAuthorizationHeaderV2(r *http.Request, auth string) error {
 	parts := strings.SplitN(strings.TrimPrefix(auth, "AWS "), ":", 2)
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 		return &presignedError{code: "AccessDenied", message: "Access Denied"}
 	}
+	// AWS validates the x-amz-date header when present on SigV2 requests.
+	// boto never sends it for SigV2, so only tampered requests reach here.
+	if values, present := r.Header["X-Amz-Date"]; present {
+		dateHeader := ""
+		if len(values) > 0 {
+			dateHeader = values[0]
+		}
+		if err := checkSigV2RequestDate(dateHeader); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// checkSigV2RequestDate validates an x-amz-date header value on SigV2
+// requests. Unparseable and pre-epoch values yield AccessDenied, while dates
+// outside the 15-minute skew window yield RequestTimeTooSkewed.
+func checkSigV2RequestDate(value string) error {
+	parsed, ok := parseLenientHTTPDate(value)
+	if !ok || parsed.Unix() < 0 {
+		return &presignedError{code: "AccessDenied", message: "Access Denied"}
+	}
+	if skew := time.Since(parsed); skew > 15*time.Minute || skew < -15*time.Minute {
+		return &presignedError{
+			code:    "RequestTimeTooSkewed",
+			message: "The difference between the request time and the current time is too large.",
+		}
+	}
+	return nil
+}
+
+// parseLenientHTTPDate parses HTTP date headers while ignoring weekday
+// mismatch: AWS evaluates dates (e.g. for skew) even when the weekday label
+// is inconsistent with the calendar date.
+func parseLenientHTTPDate(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	if idx := strings.Index(value, ","); idx != -1 {
+		candidate := strings.TrimSpace(value[idx+1:])
+		for _, layout := range []string{"02 Jan 2006 15:04:05 MST", "02 Jan 2006 15:04:05 -0700"} {
+			if parsed, err := time.Parse(layout, candidate); err == nil {
+				return parsed, true
+			}
+		}
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC1123, time.RFC1123Z, time.RFC850, time.ANSIC} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // verifyPresignedURL verifies a presigned URL request.

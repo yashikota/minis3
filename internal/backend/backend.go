@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,9 +39,10 @@ type Backend struct {
 	uploads map[string]*MultipartUpload // key: uploadId
 
 	// IAM state
-	iamUsers      map[string]*IAMUser      // key: userName
-	iamAccessKeys map[string]*IAMAccessKey // key: accessKeyId
-	iamKeysByUser map[string][]string      // userName -> []accessKeyId
+	iamUsers        map[string]*IAMUser          // key: userName
+	iamAccessKeys   map[string]*IAMAccessKey     // key: accessKeyId
+	iamKeysByUser   map[string][]string          // userName -> []accessKeyId
+	iamUserPolicies map[string]map[string]string // userName -> policyName -> document
 }
 
 var (
@@ -187,6 +189,7 @@ var (
 	ErrNoSuchTagSet              = errors.New("the TagSet does not exist")
 	ErrNoSuchBucketPolicy        = errors.New("the bucket policy does not exist")
 	ErrMalformedPolicy           = errors.New("malformed policy document")
+	ErrMalformedPolicyDocument   = errors.New("malformed IAM policy document")
 	ErrInvalidRequest            = errors.New("invalid request")
 	ErrNoSuchUpload              = errors.New("the specified upload does not exist")
 	ErrInvalidPart               = errors.New(
@@ -250,11 +253,12 @@ var (
 
 func New() *Backend {
 	return &Backend{
-		buckets:       make(map[string]*Bucket),
-		uploads:       make(map[string]*MultipartUpload),
-		iamUsers:      make(map[string]*IAMUser),
-		iamAccessKeys: make(map[string]*IAMAccessKey),
-		iamKeysByUser: make(map[string][]string),
+		buckets:         make(map[string]*Bucket),
+		uploads:         make(map[string]*MultipartUpload),
+		iamUsers:        make(map[string]*IAMUser),
+		iamAccessKeys:   make(map[string]*IAMAccessKey),
+		iamKeysByUser:   make(map[string][]string),
+		iamUserPolicies: make(map[string]map[string]string),
 	}
 }
 
@@ -264,6 +268,7 @@ var (
 	ErrIAMUserAlreadyExists = errors.New("IAM user already exists")
 	ErrIAMUserNotFound      = errors.New("IAM user not found")
 	ErrIAMAccessKeyNotFound = errors.New("IAM access key not found")
+	ErrIAMPolicyNotFound    = errors.New("IAM policy not found")
 )
 
 func generateRandomID(n int) string {
@@ -356,9 +361,99 @@ func (b *Backend) DeleteIAMUser(userName string) error {
 		delete(b.iamAccessKeys, kid)
 	}
 	delete(b.iamKeysByUser, userName)
+	delete(b.iamUserPolicies, userName)
 	delete(b.iamUsers, userName)
 
 	return nil
+}
+
+// iamPolicyUser returns the IAM user for user-policy operations,
+// materializing well-known identities addressed by canonical ID. S3 test
+// suites address static identities (e.g. the alt user) by canonical ID the
+// way RGW addresses users by UID. Unknown identities yield
+// ErrIAMUserNotFound. Callers must hold b.mu for writing.
+func (b *Backend) iamPolicyUser(userName string) (*IAMUser, error) {
+	if user, exists := b.iamUsers[userName]; exists {
+		return user, nil
+	}
+	owner := OwnerForCanonicalID(userName)
+	if owner == nil {
+		return nil, ErrIAMUserNotFound
+	}
+	user := &IAMUser{
+		UserName:   userName,
+		Path:       "/",
+		UserID:     owner.ID,
+		Arn:        fmt.Sprintf("arn:aws:iam::123456789012:user/%s", owner.DisplayName),
+		CreateDate: time.Now().UTC(),
+	}
+	b.iamUsers[userName] = user
+	return user, nil
+}
+
+// PutIAMUserPolicy stores an inline policy for an IAM user, overwriting any
+// policy with the same name.
+func (b *Backend) PutIAMUserPolicy(userName, policyName, document string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, err := b.iamPolicyUser(userName); err != nil {
+		return err
+	}
+
+	policies, exists := b.iamUserPolicies[userName]
+	if !exists {
+		policies = make(map[string]string)
+		b.iamUserPolicies[userName] = policies
+	}
+	policies[policyName] = document
+	return nil
+}
+
+// GetIAMUserPolicy returns a stored inline policy for an IAM user.
+func (b *Backend) GetIAMUserPolicy(userName, policyName string) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, err := b.iamPolicyUser(userName); err != nil {
+		return "", err
+	}
+	document, exists := b.iamUserPolicies[userName][policyName]
+	if !exists {
+		return "", ErrIAMPolicyNotFound
+	}
+	return document, nil
+}
+
+// DeleteIAMUserPolicy removes an inline policy from an IAM user.
+func (b *Backend) DeleteIAMUserPolicy(userName, policyName string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, err := b.iamPolicyUser(userName); err != nil {
+		return err
+	}
+	if _, exists := b.iamUserPolicies[userName][policyName]; !exists {
+		return ErrIAMPolicyNotFound
+	}
+	delete(b.iamUserPolicies[userName], policyName)
+	return nil
+}
+
+// ListIAMUserPolicies returns the names of stored inline policies for an IAM user.
+func (b *Backend) ListIAMUserPolicies(userName string) ([]string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if _, err := b.iamPolicyUser(userName); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(b.iamUserPolicies[userName]))
+	for name := range b.iamUserPolicies[userName] {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // ListIAMUsers returns IAM users optionally filtered by path prefix.
