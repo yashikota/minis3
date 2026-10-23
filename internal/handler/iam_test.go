@@ -63,7 +63,7 @@ func TestIAMCreateUserAndAccessKey(t *testing.T) {
 
 	// The newly created access key should be usable for auth
 	// (we verify the credential lookup works)
-	secret, ok := credentialLookupFn(akr.Result.AccessKey.AccessKeyId)
+	secret, ok := h.lookupCredential(akr.Result.AccessKey.AccessKeyId)
 	if !ok {
 		t.Fatal("newly created access key should be found in credential lookup")
 	}

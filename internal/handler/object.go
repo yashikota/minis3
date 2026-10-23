@@ -598,81 +598,75 @@ type ConditionalResult struct {
 // Returns whether the request should return early and with what status code.
 // Evaluation order follows S3 spec: If-Match, If-Unmodified-Since, If-None-Match, If-Modified-Since.
 func evaluateConditionalHeaders(r *http.Request, obj *backend.Object) ConditionalResult {
-	// 1. If-Match: return 412 if ETag doesn't match
-	ifMatch := r.Header.Get("If-Match")
-	if ifMatch != "" {
-		if !matchesETag(ifMatch, obj.ETag) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
-		}
+	failed, status := evaluatePreconditions(
+		obj,
+		r.Header.Get("If-Match"),
+		r.Header.Get("If-Unmodified-Since"),
+		r.Header.Get("If-None-Match"),
+		r.Header.Get("If-Modified-Since"),
+	)
+	if !failed {
+		return ConditionalResult{false, 0}
 	}
-
-	// 2. If-Unmodified-Since: return 412 if modified after the given date
-	ifUnmodifiedSince := r.Header.Get("If-Unmodified-Since")
-	if ifUnmodifiedSince != "" {
-		t, err := time.Parse(http.TimeFormat, ifUnmodifiedSince)
-		if err == nil && obj.LastModified.After(t) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
-		}
-	}
-
-	// 3. If-None-Match: return 304 if ETag matches
-	ifNoneMatch := r.Header.Get("If-None-Match")
-	if ifNoneMatch != "" {
-		if matchesETag(ifNoneMatch, obj.ETag) {
-			return ConditionalResult{true, http.StatusNotModified}
-		}
-	}
-
-	// 4. If-Modified-Since: return 304 if not modified after the given date
-	ifModifiedSince := r.Header.Get("If-Modified-Since")
-	if ifModifiedSince != "" {
-		t, err := time.Parse(http.TimeFormat, ifModifiedSince)
-		if err == nil && !obj.LastModified.After(t) {
-			return ConditionalResult{true, http.StatusNotModified}
-		}
-	}
-
-	return ConditionalResult{false, 0}
+	return ConditionalResult{true, status}
 }
 
 // evaluateCopySourceConditionals evaluates copy source conditional headers.
 // Unlike GET/HEAD, CopyObject returns 412 Precondition Failed for all failures (never 304).
 func evaluateCopySourceConditionals(r *http.Request, srcObj *backend.Object) ConditionalResult {
-	// x-amz-copy-source-if-match: 412 if ETag doesn't match
-	ifMatch := r.Header.Get("x-amz-copy-source-if-match")
+	failed, _ := evaluatePreconditions(
+		srcObj,
+		r.Header.Get("x-amz-copy-source-if-match"),
+		r.Header.Get("x-amz-copy-source-if-unmodified-since"),
+		r.Header.Get("x-amz-copy-source-if-none-match"),
+		r.Header.Get("x-amz-copy-source-if-modified-since"),
+	)
+	if !failed {
+		return ConditionalResult{false, 0}
+	}
+	return ConditionalResult{true, http.StatusPreconditionFailed}
+}
+
+// evaluatePreconditions applies RFC 9110 section 13.2.2 precedence, which
+// AWS documents for GetObject, HeadObject and CopyObject:
+//   - If-Match is evaluated first; when present, If-Unmodified-Since is
+//     ignored (If-Match true + If-Unmodified-Since false returns 200).
+//   - If-None-Match is evaluated next; when present, If-Modified-Since is
+//     ignored (If-None-Match true + If-Modified-Since false returns 200).
+//
+// Dates are compared at the one-second resolution of HTTP dates, so the
+// Last-Modified value returned for an object satisfies its own
+// If-Unmodified-Since and If-Modified-Since round trips. It reports whether
+// a precondition failed and the GET/HEAD status for that failure (412 or 304).
+func evaluatePreconditions(
+	obj *backend.Object,
+	ifMatch, ifUnmodifiedSince, ifNoneMatch, ifModifiedSince string,
+) (bool, int) {
+	lastModified := obj.LastModified.Truncate(time.Second)
+
 	if ifMatch != "" {
-		if !matchesETag(ifMatch, srcObj.ETag) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
+		if !matchesETag(ifMatch, obj.ETag) {
+			return true, http.StatusPreconditionFailed
 		}
-	}
-
-	// x-amz-copy-source-if-unmodified-since: 412 if modified after the given date
-	ifUnmodifiedSince := r.Header.Get("x-amz-copy-source-if-unmodified-since")
-	if ifUnmodifiedSince != "" {
+	} else if ifUnmodifiedSince != "" {
 		t, err := time.Parse(http.TimeFormat, ifUnmodifiedSince)
-		if err == nil && srcObj.LastModified.After(t) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
+		if err == nil && lastModified.After(t) {
+			return true, http.StatusPreconditionFailed
 		}
 	}
 
-	// x-amz-copy-source-if-none-match: 412 if ETag matches (not 304 for CopyObject)
-	ifNoneMatch := r.Header.Get("x-amz-copy-source-if-none-match")
 	if ifNoneMatch != "" {
-		if matchesETag(ifNoneMatch, srcObj.ETag) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
+		if matchesETag(ifNoneMatch, obj.ETag) {
+			return true, http.StatusNotModified
 		}
-	}
-
-	// x-amz-copy-source-if-modified-since: 412 if not modified (not 304 for CopyObject)
-	ifModifiedSince := r.Header.Get("x-amz-copy-source-if-modified-since")
-	if ifModifiedSince != "" {
+	} else if ifModifiedSince != "" {
 		t, err := time.Parse(http.TimeFormat, ifModifiedSince)
-		if err == nil && !srcObj.LastModified.After(t) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
+		if err == nil && !lastModified.After(t) {
+			return true, http.StatusNotModified
 		}
 	}
 
-	return ConditionalResult{false, 0}
+	return false, 0
 }
 
 func parseTimestampFlexible(value string) (*time.Time, error) {
@@ -1405,6 +1399,18 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			if obj.VersionId != backend.NullVersionId {
 				w.Header().Set("x-amz-version-id", obj.VersionId)
 			}
+			if versionId != "" {
+				// AWS: addressing a delete marker by version ID is 405
+				// MethodNotAllowed with its Last-Modified time.
+				w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+				backend.WriteError(
+					w,
+					http.StatusMethodNotAllowed,
+					"MethodNotAllowed",
+					"The specified method is not allowed against this resource.",
+				)
+				return
+			}
 			// Return 404 NoSuchKey when latest version is a delete marker
 			backend.WriteError(
 				w,
@@ -1448,6 +1454,11 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		// Check PartNumber validity before SSE-C access (invalid part takes priority)
 		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
+			if r.Header.Get("Range") != "" {
+				backend.WriteError(w, http.StatusBadRequest, "InvalidRequest",
+					"Cannot specify both Range header and partNumber query parameter.")
+				return
+			}
 			partNumber, parseErr := strconv.Atoi(partNumberStr)
 			if parseErr != nil || partNumber < 1 {
 				backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
@@ -1591,30 +1602,20 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		}
 
 		versionId := r.URL.Query().Get("versionId")
+		if versionId != "" && !h.mfaDeleteSatisfied(r, bucketName) {
+			backend.WriteError(
+				w,
+				http.StatusForbidden,
+				"AccessDenied",
+				"Mfa Authentication must be used for this request",
+			)
+			return
+		}
 		var conditionalObj *backend.Object
 		if versionId != "" {
 			conditionalObj, _ = h.backend.GetObjectVersion(bucketName, key, versionId)
 		} else {
-			conditionalObj, _ = h.backend.GetObject(bucketName, key)
-			if conditionalObj != nil && conditionalObj.IsDeleteMarker {
-				if bucket, ok := h.backend.GetBucket(bucketName); ok {
-					if versions, exists := bucket.Objects[key]; exists {
-						hasLiveVersion := false
-						for i, version := range versions.Versions {
-							if i == 0 {
-								continue
-							}
-							if !version.IsDeleteMarker {
-								hasLiveVersion = true
-								break
-							}
-						}
-						if !hasLiveVersion {
-							conditionalObj = nil
-						}
-					}
-				}
-			}
+			conditionalObj = h.backend.DeletePreconditionTarget(bucketName, key)
 		}
 		if status, code, msg := evaluateDeletePreconditions(r, conditionalObj); status != 0 {
 			backend.WriteError(w, status, code, msg)
@@ -1721,6 +1722,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.Header().Set("x-amz-delete-marker", "true")
 			if obj.VersionId != backend.NullVersionId {
 				w.Header().Set("x-amz-version-id", obj.VersionId)
+			}
+			if versionId != "" {
+				// AWS: HEAD on a delete marker version is 405.
+				w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
 			}
 			// Return 404 when latest version is a delete marker
 			w.WriteHeader(http.StatusNotFound)
@@ -1880,6 +1887,17 @@ func (h *Handler) existingObjectTagsForPolicy(
 	return tags
 }
 
+// mfaDeleteSatisfied reports whether a version-deleting request may proceed
+// under the bucket's MFA Delete setting: when MFA Delete is enabled, AWS
+// requires a well-formed x-amz-mfa header (minis3 checks the format only).
+func (h *Handler) mfaDeleteSatisfied(r *http.Request, bucketName string) bool {
+	_, mfaDelete, err := h.backend.GetBucketVersioning(bucketName)
+	if err != nil || mfaDelete != backend.MFADeleteEnabled {
+		return true
+	}
+	return validateMFAHeader(r.Header.Get("x-amz-mfa")) == nil
+}
+
 // handleDeleteObjects handles batch delete operations.
 func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucketName string) {
 	body, err := readAllFn(r.Body)
@@ -1935,6 +1953,21 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		*r = *r.WithContext(ctx)
 	}
 
+	// With MFA Delete enabled, deleting specific versions requires a valid
+	// x-amz-mfa header; such entries fail individually with AccessDenied.
+	var mfaDenied []backend.ObjectIdentifier
+	if !h.mfaDeleteSatisfied(r, bucketName) {
+		allowed := deleteReq.Objects[:0:0]
+		for _, obj := range deleteReq.Objects {
+			if obj.VersionId != "" {
+				mfaDenied = append(mfaDenied, obj)
+			} else {
+				allowed = append(allowed, obj)
+			}
+		}
+		deleteReq.Objects = allowed
+	}
+
 	bypassGovernance := strings.EqualFold(r.Header.Get("x-amz-bypass-governance-retention"), "true")
 	results, err := h.backend.DeleteObjects(bucketName, deleteReq.Objects, bypassGovernance)
 	if err != nil {
@@ -1949,6 +1982,14 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 
 	resp := backend.DeleteResult{
 		Xmlns: backend.S3Xmlns,
+	}
+	for _, obj := range mfaDenied {
+		resp.Errors = append(resp.Errors, backend.DeleteError{
+			Key:       obj.Key,
+			VersionId: obj.VersionId,
+			Code:      "AccessDenied",
+			Message:   "Mfa Authentication must be used for this request",
+		})
 	}
 
 	for _, result := range results {
@@ -1998,6 +2039,19 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		return
 	}
 	_, _ = w.Write(output)
+}
+
+// isNoncurrentVersion reports whether versionId names an existing version of
+// key that is not the current version.
+func (h *Handler) isNoncurrentVersion(bucketName, key, versionId string) bool {
+	if versionId == "" {
+		return false
+	}
+	current, err := h.backend.GetObject(bucketName, key)
+	if err != nil {
+		return false
+	}
+	return current.VersionId != versionId
 }
 
 // handleCopyObject handles copy object operations.
@@ -2056,6 +2110,11 @@ func (h *Handler) handleCopyObject(
 	if metadataDirective == "" {
 		metadataDirective = "COPY"
 	}
+	if metadataDirective != "COPY" && metadataDirective != "REPLACE" {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
+			"Unknown metadata directive.")
+		return
+	}
 
 	// Evaluate copy source conditional headers if any are present
 	if r.Header.Get("x-amz-copy-source-if-match") != "" ||
@@ -2095,6 +2154,15 @@ func (h *Handler) handleCopyObject(
 			return
 		}
 		if srcObj.IsDeleteMarker {
+			if srcVersionId != "" {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidRequest",
+					"The source of a copy request may not specifically refer to a delete marker by version id.",
+				)
+				return
+			}
 			backend.WriteError(
 				w,
 				http.StatusNotFound,
@@ -2119,8 +2187,11 @@ func (h *Handler) handleCopyObject(
 	// Extract Website Redirect Location header for copy
 	websiteRedirect := r.Header.Get("x-amz-website-redirect-location")
 
-	// Check for self-copy without REPLACE
+	// Check for self-copy without REPLACE. Copying an older version onto
+	// its own key is AWS's documented way to restore a previous version,
+	// so a copy source that names a non-current version is allowed.
 	if srcBucket == dstBucket && srcKey == dstKey && metadataDirective != "REPLACE" &&
+		!h.isNoncurrentVersion(srcBucket, srcKey, srcVersionId) &&
 		websiteRedirect == "" &&
 		r.Header.Get("x-amz-storage-class") == "" &&
 		r.Header.Get("x-amz-server-side-encryption") == "" {
@@ -2137,6 +2208,11 @@ func (h *Handler) handleCopyObject(
 	taggingDirective := r.Header.Get("x-amz-tagging-directive")
 	if taggingDirective == "" {
 		taggingDirective = "COPY"
+	}
+	if taggingDirective != "COPY" && taggingDirective != "REPLACE" {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
+			"Unknown tagging directive.")
+		return
 	}
 
 	// Build copy options
@@ -2159,6 +2235,10 @@ func (h *Handler) handleCopyObject(
 	// If tagging directive is REPLACE, extract new tags from request header
 	if taggingDirective == "REPLACE" {
 		opts.Tags = parseTaggingHeader(r.Header.Get("x-amz-tagging"))
+		if errCode, errMsg := validateTags(opts.Tags); errCode != "" {
+			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+			return
+		}
 	}
 
 	// Extract Object Lock headers
@@ -2268,6 +2348,7 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
+	opts.Owner = aclOwner
 	obj, srcVersionIdUsed, err := copyObjectFn(
 		h,
 		srcBucket,
@@ -2299,6 +2380,13 @@ func (h *Handler) handleCopyObject(
 				http.StatusNotFound,
 				"NoSuchVersion",
 				"The specified version does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrCopySourceDeleteMarker) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"The source of a copy request may not specifically refer to a delete marker by version id.",
 			)
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
 			backend.WriteError(

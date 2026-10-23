@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -118,14 +119,6 @@ var (
 
 // New creates a new Handler with the given backend.
 func New(b *backend.Backend) *Handler {
-	// Wire up credential lookup to include dynamic IAM credentials.
-	credentialLookupFn = func(accessKey string) (string, bool) {
-		if secret, ok := DefaultCredentials()[accessKey]; ok {
-			return secret, true
-		}
-		return b.LookupCredential(accessKey)
-	}
-
 	return &Handler{
 		backend:           b,
 		pendingLogBatches: make(map[string]*serverAccessLogBatch),
@@ -153,9 +146,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.emitServerAccessLog(r, rw.status, rw.bytes, requestID, hostID)
 }
 
+// lookupCredential resolves an access key against the static test
+// credentials and this handler's dynamic IAM access keys.
+func (h *Handler) lookupCredential(accessKey string) (string, bool) {
+	if secret, ok := DefaultCredentials()[accessKey]; ok {
+		return secret, true
+	}
+	return h.backend.LookupCredential(accessKey)
+}
+
 // handleRequest is the main dispatch point.
 func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 	h.applyLifecycleIfDue(time.Now().UTC())
+	r = r.WithContext(context.WithValue(
+		r.Context(),
+		credentialLookupContextKey{},
+		h.lookupCredential,
+	))
 
 	if r.Method == http.MethodOptions {
 		origin := r.Header.Get("Origin")

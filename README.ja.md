@@ -186,6 +186,8 @@ curl -i http://127.0.0.1:9191/health
 | `aws:kms` 指定の `PutObject` / `CopyObject` | `x-amz-server-side-encryption-aws-kms-key-id` は任意（省略時は AWS 同様デフォルトキー扱い）。ヘッダーは保存のみで実際の暗号化はしない |
 | `PutBucketPolicy` | `NotPrincipal` と `Allow` を組み合わせたステートメントは拒否される |
 | SigV2 署名付き URL | `Expires` の形式・期限のみ検証し、署名自体は検証しない（モック用途） |
+| SigV2 `Authorization` ヘッダー | `AWS AccessKey:Signature` の形式と任意の `x-amz-date` のみ検証し、アクセスキーと署名は検証しない（モック用途） |
+| MFA Delete | `x-amz-mfa` が `<シリアル> <コード>` 形式で存在することのみ検証し、コード自体は検証しない |
 
 ### 追加機能
 
@@ -212,8 +214,23 @@ curl -i http://127.0.0.1:9191/health
 - `task sdk-test`: `integration/sdk` の統合テスト
 - `task s3-test`: Docker で Ceph `s3-tests` を実行
 - `task test`: `unit-test`, `sdk-test`, `s3-test` を順に実行
+- `task formal`: `formal/tla` の TLA+ 仕様をモデル検査（Java 11 以上が必要）し、Go のモデルベーステストを実行
 - `task tobari`: tobari でスコープ別カバレッジを測定（`./tobari/tobari.json` に出力）
 - `task tobari-html`: `tobari/tobari.json` から HTML カバレッジレポートを生成
+
+### 形式検証
+
+`formal/tla` には TLA+ 仕様があり、TLC モデル検査器が小さな範囲で全状態を網羅的に探索します。
+
+- `S3Versioning.tla`: バージョニング状態（Unset → Enabled ⇄ Suspended）、null バージョンの置き換え、削除マーカー、完全削除、Object Lock とリーガルホールド。不変条件は「null バージョンは高々1つ」「バージョン ID の一意性」「新しい順の並び」「Object Lock ならバージョニング有効」など。時相性質は「一度バージョニングしたバケットは未設定に戻らない」「リーガルホールド中のバージョンは消えない」など。
+- `S3ListPaging.tla`: ListObjects V1/V2、ListObjectVersions、ListMultipartUploads に共通する継続マーカーの規則（CommonPrefix も max-keys に数える、`(key, version)` の直後から再開）。全エントリがちょうど1回ずつ順番どおり返ること、IsTruncated が残りがあるときだけ立つこと、ページングが停止することを検査します。
+
+実装とモデルは、同じ規則を実際の backend に対して検査する Go テストで結び付けています。
+
+- `internal/backend/model_versioning_test.go`: バージョニング仕様の参照モデルを backend とロックステップで動かし、ランダムな操作列で比較（`TestVersioningModelRandomSequences`、`FuzzVersioningModel`）
+- `internal/backend/paging_property_test.go`: ページごとの一覧結果を独立したオラクルと比較（`TestListPagingProperties`、`FuzzListPagingProperties`）
+
+`task formal` で全部、`formal/tla/check.sh` で TLC のみを実行できます。
 
 ### `task s3-test` のマーカーポリシー
 

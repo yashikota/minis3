@@ -1339,6 +1339,20 @@ func (h *Handler) handlePostObjectFormUpload(
 	w.WriteHeader(status)
 }
 
+// maxListKeys is the most entries AWS returns from one list call; larger
+// max-keys values are accepted but capped.
+const maxListKeys = 1000
+
+// listingOwner returns the owner reported for an object in list responses:
+// the object's own owner (e.g. the writer under ObjectWriter ownership),
+// falling back to the default owner for entries without one.
+func listingOwner(obj *backend.Object) *backend.Owner {
+	if obj.Owner != nil {
+		return obj.Owner
+	}
+	return backend.DefaultOwner()
+}
+
 // handleListObjectsV2 handles ListObjectsV2 requests.
 func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucketName string) {
 	// Check bucket policy for ListBucket
@@ -1383,7 +1397,7 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 			)
 			return
 		}
-		maxKeys = parsed
+		maxKeys = min(parsed, maxListKeys)
 	}
 
 	result, err := h.backend.ListObjectsV2(
@@ -1425,11 +1439,11 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 		resp.EncodingType = "url"
 	}
 
-	var owner *backend.Owner
-	if fetchOwner {
-		owner = backend.DefaultOwner()
-	}
 	for _, obj := range result.Objects {
+		var owner *backend.Owner
+		if fetchOwner {
+			owner = listingOwner(obj)
+		}
 		key := obj.Key
 		if encodingType == "url" {
 			key = s3URLEncode(obj.Key)
@@ -1514,7 +1528,7 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 			)
 			return
 		}
-		maxKeys = parsed
+		maxKeys = min(parsed, maxListKeys)
 	}
 
 	result, err := h.backend.ListObjectsV1(bucketName, prefix, delimiter, marker, maxKeys)
@@ -1543,7 +1557,6 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 		resp.EncodingType = "url"
 	}
 
-	owner := backend.DefaultOwner()
 	for _, obj := range result.Objects {
 		key := obj.Key
 		if encodingType == "url" {
@@ -1559,7 +1572,7 @@ func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bu
 			ETag:         obj.ETag,
 			Size:         obj.Size,
 			StorageClass: storageClass,
-			Owner:        owner,
+			Owner:        listingOwner(obj),
 		}
 		if optionalAttrs["ChecksumAlgorithm"] && obj.ChecksumAlgorithm != "" {
 			info.ChecksumAlgorithm = []string{obj.ChecksumAlgorithm}
@@ -1593,6 +1606,12 @@ func (h *Handler) handleListObjectVersions(
 	r *http.Request,
 	bucketName string,
 ) {
+	// Check bucket policy / ACL for ListBucketVersions
+	if !h.checkAccess(r, bucketName, "s3:ListBucketVersions", "") {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	query := r.URL.Query()
 	prefix := query.Get("prefix")
 	delimiter := query.Get("delimiter")
@@ -1612,7 +1631,7 @@ func (h *Handler) handleListObjectVersions(
 			)
 			return
 		}
-		maxKeys = parsed
+		maxKeys = min(parsed, maxListKeys)
 	}
 
 	result, err := h.backend.ListObjectVersions(
@@ -1667,7 +1686,7 @@ func (h *Handler) handleListObjectVersions(
 			ETag:         obj.ETag,
 			Size:         obj.Size,
 			StorageClass: storageClass,
-			Owner:        backend.DefaultOwner(),
+			Owner:        listingOwner(obj),
 		})
 	}
 
@@ -1681,7 +1700,7 @@ func (h *Handler) handleListObjectVersions(
 			VersionId:    obj.VersionId,
 			IsLatest:     obj.IsLatest,
 			LastModified: obj.LastModified.Format(time.RFC3339),
-			Owner:        backend.DefaultOwner(),
+			Owner:        listingOwner(obj),
 		})
 	}
 
@@ -1786,11 +1805,27 @@ func (h *Handler) handlePutBucketVersioning(
 		return
 	}
 
-	status := backend.ParseVersioningStatus(config.Status)
-	mfaDelete := backend.ParseMFADeleteStatus(config.MFADelete)
+	if config.MFADelete != "" && config.MFADelete != "Enabled" &&
+		config.MFADelete != "Disabled" {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"MalformedXML",
+			"The XML you provided was not well-formed or did not validate against our published schema.",
+		)
+		return
+	}
 
-	// Check x-amz-mfa header if MFA Delete is being enabled
-	if mfaDelete == backend.MFADeleteEnabled {
+	status := backend.ParseVersioningStatus(config.Status)
+	_, currentMFADelete, _ := h.backend.GetBucketVersioning(bucketName)
+	mfaDelete := currentMFADelete
+	if config.MFADelete != "" {
+		mfaDelete = backend.ParseMFADeleteStatus(config.MFADelete)
+	}
+
+	// AWS requires x-amz-mfa to change the MfaDelete state, and to change
+	// the versioning state while MFA Delete is enabled.
+	if mfaDelete != currentMFADelete || currentMFADelete == backend.MFADeleteEnabled {
 		mfaHeader := r.Header.Get("x-amz-mfa")
 		if err := validateMFAHeader(mfaHeader); err != nil {
 			backend.WriteError(

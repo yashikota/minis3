@@ -47,6 +47,12 @@ var (
 	) (*backend.Object, error) {
 		return h.backend.GetObject(bucketName, key)
 	}
+	getCompletedUploadObjectFn = func(
+		h *Handler,
+		bucketName, key, uploadID string,
+	) (*backend.Object, bool) {
+		return h.backend.GetCompletedUploadObject(bucketName, key, uploadID)
+	}
 	abortMultipartUploadFn = func(
 		h *Handler,
 		bucketName, key, uploadID string,
@@ -620,75 +626,31 @@ func (h *Handler) handleCompleteMultipartUpload(
 		}
 	}
 
-	if upload, ok := h.backend.GetUpload(uploadId); ok && upload != nil {
-		algorithm := strings.ToUpper(strings.TrimSpace(upload.ChecksumAlgorithm))
-		if algorithm != "" {
-			checksumType := normalizeChecksumType(algorithm, upload.ChecksumType)
-			upload.ChecksumType = checksumType
-
-			partChecksums := make([]string, 0, len(completeReq.Parts))
-			partsData := make([][]byte, 0, len(completeReq.Parts))
-			canValidate := true
-			for _, p := range completeReq.Parts {
-				part, exists := upload.Parts[p.PartNumber]
-				if !exists {
-					canValidate = false
-					break
-				}
-				expected := checksumFromPartInfo(algorithm, part)
-				if expected == "" {
-					canValidate = false
-					break
-				}
-				provided := checksumFromCompletePart(algorithm, p)
-				if provided != "" && provided != expected {
-					backend.WriteError(
-						w,
-						http.StatusBadRequest,
-						"BadDigest",
-						"The Content-MD5 you specified did not match what we received.",
-					)
-					return
-				}
-				partChecksums = append(partChecksums, expected)
-				partsData = append(partsData, part.Data)
-			}
-
-			if canValidate {
-				combinedData := bytes.Join(partsData, nil)
-				finalChecksum := ""
-				computed := false
-				if checksumType == "COMPOSITE" {
-					finalChecksum, computed = computeCompositeChecksum(algorithm, partChecksums)
-				}
-				if !computed {
-					finalChecksum, computed = computeFullObjectChecksum(algorithm, combinedData)
-				}
-				if computed {
-					if provided := checksumFromCompleteHeaders(algorithm, r); provided != "" &&
-						provided != finalChecksum {
-						backend.WriteError(
-							w,
-							http.StatusBadRequest,
-							"BadDigest",
-							"The Content-MD5 you specified did not match what we received.",
-						)
-						return
-					}
-					setUploadFinalChecksum(upload, algorithm, finalChecksum)
-				}
-			}
-		}
+	// Validate and record checksums while holding the backend lock: the
+	// upload's part map is shared with concurrent UploadPart calls.
+	var checksumErr error
+	_ = h.backend.UpdateUpload(uploadId, func(upload *backend.MultipartUpload) error {
+		checksumErr = applyCompleteChecksums(r, upload, completeReq.Parts)
+		return nil
+	})
+	if checksumErr != nil {
+		backend.WriteError(
+			w,
+			http.StatusBadRequest,
+			"BadDigest",
+			"The Content-MD5 you specified did not match what we received.",
+		)
+		return
 	}
 
 	obj, err := completeMultipartUploadFn(h, bucketName, key, uploadId, completeReq.Parts)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
-			// S3 treats repeated completion of the same upload as idempotent success
-			// if the completed object already exists at the destination key.
-			existingObj, getErr := getObjectForMultipartCompletionFn(h, bucketName, key)
-			if getErr == nil && existingObj != nil {
-				obj = existingObj
+			// S3 treats repeated completion of the same upload as idempotent
+			// success while the object it produced still exists. Unknown
+			// upload IDs stay NoSuchUpload even if the key exists.
+			if completed, ok := getCompletedUploadObjectFn(h, bucketName, key, uploadId); ok {
+				obj = completed
 			} else {
 				backend.WriteError(
 					w,
@@ -1131,6 +1093,20 @@ func (h *Handler) handleUploadPartCopy(
 				"NoSuchKey",
 				"The specified source key does not exist.",
 			)
+		} else if errors.Is(err, backend.ErrVersionNotFound) {
+			backend.WriteError(
+				w,
+				http.StatusNotFound,
+				"NoSuchVersion",
+				"The specified version does not exist.",
+			)
+		} else if errors.Is(err, backend.ErrCopySourceDeleteMarker) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"The source of a copy request may not specifically refer to a delete marker by version id.",
+			)
 		} else if errors.Is(err, backend.ErrInvalidRange) {
 			backend.WriteError(
 				w,
@@ -1334,4 +1310,63 @@ func parseByteRange(rangeHeader string) (int64, int64, error) {
 	}
 
 	return start, end, nil
+}
+
+// applyCompleteChecksums validates the part and final checksums sent with
+// CompleteMultipartUpload against the uploaded parts and records the final
+// checksum on the upload. It returns backend.ErrBadDigest on a mismatch.
+// The caller must hold exclusive access to upload (backend.UpdateUpload).
+func applyCompleteChecksums(
+	r *http.Request,
+	upload *backend.MultipartUpload,
+	parts []backend.CompletePart,
+) error {
+	algorithm := strings.ToUpper(strings.TrimSpace(upload.ChecksumAlgorithm))
+	if algorithm == "" {
+		return nil
+	}
+	checksumType := normalizeChecksumType(algorithm, upload.ChecksumType)
+	upload.ChecksumType = checksumType
+
+	partChecksums := make([]string, 0, len(parts))
+	partsData := make([][]byte, 0, len(parts))
+	canValidate := true
+	for _, p := range parts {
+		part, exists := upload.Parts[p.PartNumber]
+		if !exists {
+			canValidate = false
+			break
+		}
+		expected := checksumFromPartInfo(algorithm, part)
+		if expected == "" {
+			canValidate = false
+			break
+		}
+		provided := checksumFromCompletePart(algorithm, p)
+		if provided != "" && provided != expected {
+			return backend.ErrBadDigest
+		}
+		partChecksums = append(partChecksums, expected)
+		partsData = append(partsData, part.Data)
+	}
+
+	if canValidate {
+		combinedData := bytes.Join(partsData, nil)
+		finalChecksum := ""
+		computed := false
+		if checksumType == "COMPOSITE" {
+			finalChecksum, computed = computeCompositeChecksum(algorithm, partChecksums)
+		}
+		if !computed {
+			finalChecksum, computed = computeFullObjectChecksum(algorithm, combinedData)
+		}
+		if computed {
+			if provided := checksumFromCompleteHeaders(algorithm, r); provided != "" &&
+				provided != finalChecksum {
+				return backend.ErrBadDigest
+			}
+			setUploadFinalChecksum(upload, algorithm, finalChecksum)
+		}
+	}
+	return nil
 }

@@ -68,7 +68,7 @@ func (b *Backend) CreateMultipartUpload(
 		}
 	}
 
-	uploadId := GenerateVersionId()
+	uploadId := b.generateUploadIdLocked()
 	owner := opts.Owner
 	if owner == nil {
 		owner = DefaultOwner()
@@ -148,24 +148,7 @@ func (b *Backend) UploadPart(
 		Data:         data,
 		LastModified: time.Now().UTC().Format(time.RFC3339),
 	}
-	switch strings.ToUpper(upload.ChecksumAlgorithm) {
-	case "CRC32":
-		h := crc32.NewIEEE()
-		_, _ = h.Write(data)
-		part.ChecksumCRC32 = base64.StdEncoding.EncodeToString(h.Sum(nil))
-	case "CRC32C":
-		h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
-		_, _ = h.Write(data)
-		part.ChecksumCRC32C = base64.StdEncoding.EncodeToString(h.Sum(nil))
-	case "CRC64NVME":
-		part.ChecksumCRC64NVME = checksumCRC64NVMEBase64(data)
-	case "SHA1":
-		sum := sha1.Sum(data)
-		part.ChecksumSHA1 = base64.StdEncoding.EncodeToString(sum[:])
-	case "SHA256":
-		sum := sha256.Sum256(data)
-		part.ChecksumSHA256 = base64.StdEncoding.EncodeToString(sum[:])
-	}
+	setPartChecksum(part, upload.ChecksumAlgorithm, data)
 
 	upload.Parts[partNumber] = part
 	return part, nil
@@ -179,6 +162,12 @@ func (b *Backend) CompleteMultipartUpload(
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// AWS reports a missing bucket before a missing upload.
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return nil, ErrBucketNotFound
+	}
+
 	upload, ok := b.uploads[uploadId]
 	if !ok {
 		return nil, ErrNoSuchUpload
@@ -186,11 +175,6 @@ func (b *Backend) CompleteMultipartUpload(
 
 	if upload.Bucket != bucketName || upload.Key != key {
 		return nil, ErrNoSuchUpload
-	}
-
-	bucket, ok := b.buckets[bucketName]
-	if !ok {
-		return nil, ErrBucketNotFound
 	}
 
 	if len(parts) == 0 {
@@ -392,8 +376,96 @@ func (b *Backend) CompleteMultipartUpload(
 
 	// Clean up the upload
 	delete(b.uploads, uploadId)
+	b.completedUploads[uploadId] = &completedUpload{
+		Bucket:    bucketName,
+		Key:       key,
+		VersionId: obj.VersionId,
+		ETag:      obj.ETag,
+	}
 
 	return obj, nil
+}
+
+// completedUpload records which object version a completed upload produced.
+type completedUpload struct {
+	Bucket    string
+	Key       string
+	VersionId string
+	// ETag tells the produced object apart from a later object that
+	// reuses its version ID (the "null" version in unversioned buckets).
+	ETag string
+}
+
+// GetCompletedUploadObject returns the object version produced by an upload
+// that was already completed, so a retried CompleteMultipartUpload can be
+// answered idempotently. It reports false for unknown upload IDs, for a
+// different bucket/key, and when the produced version no longer exists.
+func (b *Backend) GetCompletedUploadObject(bucketName, key, uploadId string) (*Object, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	done, ok := b.completedUploads[uploadId]
+	if !ok || done.Bucket != bucketName || done.Key != key {
+		return nil, false
+	}
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return nil, false
+	}
+	versions, ok := bucket.Objects[key]
+	if !ok {
+		return nil, false
+	}
+	for _, v := range versions.Versions {
+		if v.VersionId == done.VersionId && v.ETag == done.ETag {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+// UpdateUpload runs fn with exclusive access to an in-progress upload, so
+// callers can read parts and record final checksums without racing
+// concurrent UploadPart calls.
+func (b *Backend) UpdateUpload(uploadId string, fn func(*MultipartUpload) error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	upload, ok := b.uploads[uploadId]
+	if !ok {
+		return ErrNoSuchUpload
+	}
+	return fn(upload)
+}
+
+// setPartChecksum stores the part checksum for the upload's algorithm.
+func setPartChecksum(part *PartInfo, algorithm string, data []byte) {
+	value, ok := checksumForAlgorithm(algorithm, data)
+	if !ok {
+		return
+	}
+	switch strings.ToUpper(strings.TrimSpace(algorithm)) {
+	case "CRC32":
+		part.ChecksumCRC32 = value
+	case "CRC32C":
+		part.ChecksumCRC32C = value
+	case "CRC64NVME":
+		part.ChecksumCRC64NVME = value
+	case "SHA1":
+		part.ChecksumSHA1 = value
+	case "SHA256":
+		part.ChecksumSHA256 = value
+	}
+}
+
+// generateUploadIdLocked returns a new upload ID. IDs start with a
+// fixed-width hex counter so they sort lexicographically in creation order:
+// AWS lists uploads of the same key by ascending initiation time and pages
+// them with upload-id-marker using lexicographic comparison, and this keeps
+// both rules consistent. Caller must hold b.mu for writing.
+func (b *Backend) generateUploadIdLocked() string {
+	b.uploadSeq++
+	return fmt.Sprintf("%016x", b.uploadSeq) + generateRandomID(12)
 }
 
 func normalizeCompleteParts(parts []CompletePart) []CompletePart {
@@ -468,7 +540,9 @@ func (b *Backend) ListMultipartUploads(
 		uploads = append(uploads, upload)
 	}
 
-	// Sort by key, then by upload ID
+	// Sort by key, then by upload ID. Upload IDs are generated in
+	// lexicographically increasing order, so for a single key this is also
+	// ascending initiation time as AWS documents.
 	sort.Slice(uploads, func(i, j int) bool {
 		if uploads[i].Key != uploads[j].Key {
 			return uploads[i].Key < uploads[j].Key
@@ -476,46 +550,49 @@ func (b *Backend) ListMultipartUploads(
 		return uploads[i].UploadId < uploads[j].UploadId
 	})
 
-	result := &ListMultipartUploadsInternalResult{}
-	commonPrefixSet := make(map[string]struct{})
-
-	// Filter by markers
-	markerReached := opts.KeyMarker == ""
-	var filtered []*MultipartUpload
-
+	// Build one ordered entry stream where each rolled-up common prefix
+	// occupies a single slot; AWS counts CommonPrefixes toward MaxUploads.
+	type uploadEntry struct {
+		key          string
+		upload       *MultipartUpload
+		commonPrefix bool
+	}
+	var entries []uploadEntry
+	lastPrefix := ""
 	for _, upload := range uploads {
-		// Apply key marker
-		if !markerReached {
-			if upload.Key > opts.KeyMarker {
-				markerReached = true
-			} else if upload.Key == opts.KeyMarker && opts.UploadIdMarker != "" {
-				if upload.UploadId > opts.UploadIdMarker {
-					markerReached = true
-				} else {
-					continue
-				}
-			} else {
-				continue
-			}
-		}
-
-		// Apply prefix filter
 		if opts.Prefix != "" && !strings.HasPrefix(upload.Key, opts.Prefix) {
 			continue
 		}
-
-		// Handle delimiter
 		if opts.Delimiter != "" {
 			subKey := upload.Key[len(opts.Prefix):]
 			if idx := strings.Index(subKey, opts.Delimiter); idx != -1 {
 				commonPrefix := opts.Prefix + subKey[:idx+len(opts.Delimiter)]
-				commonPrefixSet[commonPrefix] = struct{}{}
+				if commonPrefix != lastPrefix {
+					entries = append(entries, uploadEntry{key: commonPrefix, commonPrefix: true})
+					lastPrefix = commonPrefix
+				}
 				continue
 			}
 		}
-
-		filtered = append(filtered, upload)
+		entries = append(entries, uploadEntry{key: upload.Key, upload: upload})
 	}
+
+	// Apply markers: key-marker alone skips every upload of that key;
+	// with upload-id-marker, uploads of the marker key with a greater
+	// upload ID are included.
+	startIdx := 0
+	if opts.KeyMarker != "" {
+		startIdx = len(entries)
+		for i, e := range entries {
+			if e.key > opts.KeyMarker ||
+				(opts.UploadIdMarker != "" && !e.commonPrefix &&
+					e.key == opts.KeyMarker && e.upload.UploadId > opts.UploadIdMarker) {
+				startIdx = i
+				break
+			}
+		}
+	}
+	entries = entries[startIdx:]
 
 	// Apply max uploads limit
 	maxUploads := opts.MaxUploads
@@ -523,18 +600,24 @@ func (b *Backend) ListMultipartUploads(
 		maxUploads = 1000
 	}
 
-	if len(filtered) > maxUploads {
+	result := &ListMultipartUploadsInternalResult{}
+	if len(entries) > maxUploads {
 		result.IsTruncated = true
-		result.NextKeyMarker = filtered[maxUploads-1].Key
-		result.NextUploadIdMarker = filtered[maxUploads-1].UploadId
-		filtered = filtered[:maxUploads]
+		last := entries[maxUploads-1]
+		result.NextKeyMarker = last.key
+		if !last.commonPrefix {
+			result.NextUploadIdMarker = last.upload.UploadId
+		}
+		entries = entries[:maxUploads]
 	}
 
-	result.Uploads = filtered
-	for cp := range commonPrefixSet {
-		result.CommonPrefixes = append(result.CommonPrefixes, cp)
+	for _, e := range entries {
+		if e.commonPrefix {
+			result.CommonPrefixes = append(result.CommonPrefixes, e.key)
+		} else {
+			result.Uploads = append(result.Uploads, e.upload)
+		}
 	}
-	sort.Strings(result.CommonPrefixes)
 
 	return result, nil
 }
@@ -643,7 +726,10 @@ func (b *Backend) CopyPart(
 			}
 		}
 		if srcObj == nil {
-			return nil, ErrSourceObjectNotFound
+			return nil, ErrVersionNotFound
+		}
+		if srcObj.IsDeleteMarker {
+			return nil, ErrCopySourceDeleteMarker
 		}
 	} else {
 		srcObj = srcVersions.getLatestVersion()
@@ -685,6 +771,9 @@ func (b *Backend) CopyPart(
 		Data:         data,
 		LastModified: time.Now().UTC().Format(time.RFC3339),
 	}
+	// Copied parts carry the upload's checksum like uploaded parts do, so
+	// ListParts and composite checksums see every part.
+	setPartChecksum(part, upload.ChecksumAlgorithm, data)
 
 	upload.Parts[partNumber] = part
 	return part, nil

@@ -185,6 +185,8 @@ curl -i http://127.0.0.1:9191/health
 | `PutObject` / `CopyObject` with `aws:kms` | `x-amz-server-side-encryption-aws-kms-key-id` is optional (omitted → default key is assumed, per AWS); headers are stored, no actual encryption |
 | `PutBucketPolicy` | Statements combining `NotPrincipal` with `Allow` are rejected |
 | SigV2 presigned URLs | Only `Expires` format/expiry is checked; the signature itself is not verified (mock only) |
+| SigV2 `Authorization` header | Only the `AWS AccessKey:Signature` shape and an optional `x-amz-date` are checked; neither the access key nor the signature is verified (mock only) |
+| MFA Delete | `x-amz-mfa` must be present and well formed (`<serial> <code>`); the code itself is not checked |
 
 ### Additional Features
 
@@ -211,8 +213,23 @@ curl -i http://127.0.0.1:9191/health
 - `task sdk-test`: Run integration tests in `integration/sdk`.
 - `task s3-test`: Run Ceph `s3-tests` in Docker.
 - `task test`: Run `unit-test`, `sdk-test`, and `s3-test`.
+- `task formal`: Model-check the TLA+ specifications in `formal/tla` (needs Java 11+) and run the Go model-based tests.
 - `task tobari`: Measure scoped coverage with tobari (outputs `./tobari/tobari.json`).
 - `task tobari-html`: Generate an HTML coverage report from `tobari/tobari.json`.
+
+### Formal verification
+
+`formal/tla` holds TLA+ specifications that the TLC model checker explores exhaustively within small bounds:
+
+- `S3Versioning.tla`: versioning states (Unset → Enabled ⇄ Suspended), null-version replacement, delete markers, permanent deletes, Object Lock and legal holds. Invariants include a unique null version, unique version IDs, newest-first ordering, and "Object Lock implies versioning enabled"; temporal properties include "a bucket never returns to unversioned" and "a version under legal hold is never removed".
+- `S3ListPaging.tla`: the continuation-marker rules shared by ListObjects V1/V2, ListObjectVersions and ListMultipartUploads (common prefixes count toward max-keys; resuming after `(key, version)`). TLC checks that paging returns every entry exactly once, in order, sets IsTruncated exactly when entries remain, and terminates.
+
+The implementation is tied to the models by Go tests that run the same rules against the real backend:
+
+- `internal/backend/model_versioning_test.go`: a reference model of the versioning spec stepped in lockstep with the backend over random operation sequences (`TestVersioningModelRandomSequences`, `FuzzVersioningModel`).
+- `internal/backend/paging_property_test.go`: page-by-page listings compared against an independent oracle (`TestListPagingProperties`, `FuzzListPagingProperties`).
+
+Run everything with `task formal`, or only TLC with `formal/tla/check.sh`.
 
 ### `task s3-test` marker policy
 
