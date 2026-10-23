@@ -168,7 +168,24 @@ func (b *Backend) DeleteBucket(name string) error {
 	}
 
 	delete(b.buckets, name)
+	b.purgeBucketUploadsLocked(name)
 	return nil
+}
+
+// purgeBucketUploadsLocked drops in-progress and completed upload state of a
+// deleted bucket so a bucket re-created with the same name starts empty.
+// Caller must hold b.mu for writing.
+func (b *Backend) purgeBucketUploadsLocked(name string) {
+	for id, upload := range b.uploads {
+		if upload.Bucket == name {
+			delete(b.uploads, id)
+		}
+	}
+	for id, done := range b.completedUploads {
+		if done.Bucket == name {
+			delete(b.completedUploads, id)
+		}
+	}
 }
 
 // ForceDeleteBucket deletes a bucket and all its objects unconditionally,
@@ -183,6 +200,7 @@ func (b *Backend) ForceDeleteBucket(name string) error {
 	}
 
 	delete(b.buckets, name)
+	b.purgeBucketUploadsLocked(name)
 	return nil
 }
 
@@ -301,7 +319,12 @@ func (b *Backend) SetBucketVersioning(
 		return ErrObjectLockNotEnabled
 	}
 
-	bucket.VersioningStatus = status
+	// VersioningUnset means "no Status in the request": AWS leaves the
+	// current state unchanged, and a bucket that was ever versioned can
+	// never return to the unversioned state.
+	if status != VersioningUnset {
+		bucket.VersioningStatus = status
+	}
 	bucket.MFADelete = mfaDelete
 	return nil
 }

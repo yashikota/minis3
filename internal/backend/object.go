@@ -400,6 +400,25 @@ func (b *Backend) GetObjectVersion(bucketName, key, versionId string) (*Object, 
 	return nil, ErrVersionNotFound
 }
 
+// DeletePreconditionTarget returns the object that DeleteObject (without a
+// version ID) preconditions are evaluated against: the current version, or
+// nil when the key does not exist or only delete markers remain, in which
+// case the delete is idempotent and preconditions are ignored.
+func (b *Backend) DeletePreconditionTarget(bucketName, key string) *Object {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	bucket, ok := b.buckets[bucketName]
+	if !ok {
+		return nil
+	}
+	versions, ok := bucket.Objects[key]
+	if !ok || len(versions.Versions) == 0 || versions.getLatestVersion() == nil {
+		return nil
+	}
+	return versions.Versions[0]
+}
+
 // DeleteObjectResult contains the result of deleting an object or version.
 type DeleteObjectVersionResult struct {
 	VersionId      string
@@ -512,6 +531,9 @@ type CopyObjectOptions struct {
 	WebsiteRedirectLocation string
 	// Checksum
 	ChecksumAlgorithm string
+	// Owner of the new object (the requester, or the bucket owner under
+	// bucket-owner ownership). Nil keeps the source object's owner.
+	Owner *Owner
 }
 
 // CopyObject copies an object from source to destination.
@@ -550,7 +572,7 @@ func (b *Backend) CopyObject(
 			return nil, "", ErrVersionNotFound
 		}
 		if srcObj.IsDeleteMarker {
-			return nil, "", ErrSourceObjectNotFound
+			return nil, "", ErrCopySourceDeleteMarker
 		}
 	} else {
 		// Get latest non-DeleteMarker version
@@ -584,7 +606,7 @@ func (b *Backend) CopyObject(
 		IsLatest:          true,
 		IsDeleteMarker:    false,
 		LastModified:      time.Now().UTC(),
-		ETag:              srcObj.ETag,
+		ETag:              copyETag(srcObj.ETag, copiedData),
 		Size:              srcObj.Size,
 		Data:              copiedData,
 		ChecksumCRC32:     srcObj.ChecksumCRC32,
@@ -595,6 +617,11 @@ func (b *Backend) CopyObject(
 		ChecksumAlgorithm: srcObj.ChecksumAlgorithm,
 		Owner:             srcObj.Owner,
 		ACL:               srcObj.ACL,
+	}
+	if opts.Owner != nil {
+		// A copy is a new object owned by its writer; ACLs are not copied.
+		obj.Owner = opts.Owner
+		obj.ACL = NewDefaultACLForOwner(opts.Owner)
 	}
 
 	// Override ChecksumAlgorithm if specified in opts and recompute
@@ -749,6 +776,16 @@ func (b *Backend) CopyObject(
 	addVersionToObject(dstBkt, dstKey, obj)
 
 	return obj, actualVersionId, nil
+}
+
+// copyETag returns the ETag of a CopyObject result. CopyObject writes a
+// single-part object, so a multipart source ETag ("md5-of-md5s-N") is
+// replaced with the MD5 of the copied data; other ETags carry over.
+func copyETag(srcETag string, data []byte) string {
+	if !strings.Contains(srcETag, "-") {
+		return srcETag
+	}
+	return fmt.Sprintf("\"%x\"", md5.Sum(data))
 }
 
 // DeleteObjects deletes multiple objects from a bucket.
@@ -1141,15 +1178,19 @@ func (b *Backend) ListObjectVersions(
 	}
 	sort.Strings(allKeys)
 
+	// Build one ordered entry stream in which every rolled-up common prefix
+	// occupies a single slot. AWS counts CommonPrefixes toward MaxKeys and
+	// pages them like versions, so prefixes must not be returned again on
+	// every page.
 	type versionEntry struct {
-		key       string
-		versionId string
-		object    *Object
+		key            string
+		versionId      string
+		object         *Object
+		isCommonPrefix bool
 	}
 
-	var allVersions []versionEntry
-	commonPrefixSet := make(map[string]struct{})
-
+	var entries []versionEntry
+	lastPrefix := ""
 	for _, key := range allKeys {
 		if prefix != "" && !strings.HasPrefix(key, prefix) {
 			continue
@@ -1159,33 +1200,27 @@ func (b *Backend) ListObjectVersions(
 			subKey := key[len(prefix):]
 			if idx := strings.Index(subKey, delimiter); idx != -1 {
 				commonPrefix := prefix + subKey[:idx+len(delimiter)]
-				commonPrefixSet[commonPrefix] = struct{}{}
+				// Keys sharing a prefix are contiguous in sorted order.
+				if commonPrefix != lastPrefix {
+					entries = append(entries, versionEntry{key: commonPrefix, isCommonPrefix: true})
+					lastPrefix = commonPrefix
+				}
 				continue
 			}
 		}
 
-		versions := bucket.Objects[key]
-		for _, v := range versions.Versions {
-			allVersions = append(allVersions, versionEntry{
-				key:       key,
-				versionId: v.VersionId,
-				object:    v,
-			})
+		// Versions are stored newest first. Keep that order stable for
+		// equal LastModified values (same-millisecond puts, clock skew) so
+		// paging stays deterministic without depending on the VersionId
+		// format.
+		versions := append([]*Object(nil), bucket.Objects[key].Versions...)
+		sort.SliceStable(versions, func(i, j int) bool {
+			return versions[i].LastModified.After(versions[j].LastModified)
+		})
+		for _, v := range versions {
+			entries = append(entries, versionEntry{key: key, versionId: v.VersionId, object: v})
 		}
 	}
-
-	// Sort by key, then by LastModified descending (newest first).
-	// The sort is stable so equal LastModified (same-millisecond puts,
-	// clock skew) falls back to insertion order, which is newest-first
-	// because addVersionToObject prepends new versions. This keeps the
-	// order deterministic across calls without depending on the
-	// VersionId format.
-	sort.SliceStable(allVersions, func(i, j int) bool {
-		if allVersions[i].key != allVersions[j].key {
-			return allVersions[i].key < allVersions[j].key
-		}
-		return allVersions[i].object.LastModified.After(allVersions[j].object.LastModified)
-	})
 
 	// Apply key-marker and version-id-marker.
 	// AWS spec (ListObjectVersions KeyMarker/VersionIdMarker):
@@ -1196,63 +1231,46 @@ func (b *Backend) ListObjectVersions(
 	//   the first entry with a greater key.
 	startIdx := 0
 	if keyMarker != "" {
-		if versionIdMarker == "" {
-			// Skip every entry of keyMarker; start at the first
-			// entry with a greater key.
-			startIdx = len(allVersions)
-			for i, ve := range allVersions {
-				if ve.key > keyMarker {
-					startIdx = i
-					break
-				}
+		startIdx = len(entries)
+		for i, ve := range entries {
+			if versionIdMarker != "" && !ve.isCommonPrefix &&
+				ve.key == keyMarker && ve.versionId == versionIdMarker {
+				startIdx = i + 1
+				break
 			}
-		} else {
-			startIdx = len(allVersions)
-			for i, ve := range allVersions {
-				if ve.key == keyMarker && ve.versionId == versionIdMarker {
-					startIdx = i + 1
-					break
-				}
-				if ve.key > keyMarker {
-					startIdx = i
-					break
-				}
+			if ve.key > keyMarker {
+				startIdx = i
+				break
 			}
-			// Exact (key, version-id) match at the tail yields
-			// startIdx == len(allVersions) via i+1. A marker after all
-			// entries leaves startIdx at len(allVersions) because no
-			// entry satisfies the greater-key condition.
 		}
 	}
 
 	result := &ListObjectVersionsResult{}
-
-	// Collect common prefixes
-	for cp := range commonPrefixSet {
-		result.CommonPrefixes = append(result.CommonPrefixes, cp)
+	if maxKeys <= 0 {
+		// max-keys=0: return no entries, IsTruncated=false (same as ListObjects).
+		return result, nil
 	}
-	sort.Strings(result.CommonPrefixes)
 
-	// Apply maxKeys
 	endIdx := startIdx + maxKeys
-	if endIdx > len(allVersions) {
-		endIdx = len(allVersions)
+	if endIdx >= len(entries) {
+		endIdx = len(entries)
 	} else {
 		result.IsTruncated = true
 	}
 
-	for i := startIdx; i < endIdx; i++ {
-		ve := allVersions[i]
-		if ve.object.IsDeleteMarker {
+	for _, ve := range entries[startIdx:endIdx] {
+		switch {
+		case ve.isCommonPrefix:
+			result.CommonPrefixes = append(result.CommonPrefixes, ve.key)
+		case ve.object.IsDeleteMarker:
 			result.DeleteMarkers = append(result.DeleteMarkers, ve.object)
-		} else {
+		default:
 			result.Versions = append(result.Versions, ve.object)
 		}
 	}
 
-	// Set next markers if truncated
-	if result.IsTruncated && endIdx > startIdx {
-		lastEntry := allVersions[endIdx-1]
+	if result.IsTruncated {
+		lastEntry := entries[endIdx-1]
 		result.NextKeyMarker = lastEntry.key
 		result.NextVersionIdMarker = lastEntry.versionId
 	}

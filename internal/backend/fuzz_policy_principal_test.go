@@ -113,8 +113,8 @@ func FuzzEvaluateConditions(f *testing.F) {
 	f.Add("", "", "", "", "", "")
 
 	f.Fuzz(func(t *testing.T, operator, condKey, condValue, accessKey, action, resource string) {
-		conditions := map[string]map[string]string{
-			operator: {condKey: condValue},
+		conditions := map[string]map[string]PolicyStringOrSlice{
+			operator: {condKey: {condValue}},
 		}
 		ctx := PolicyEvalContext{
 			AccessKey: accessKey,

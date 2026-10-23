@@ -3,7 +3,7 @@ package backend
 import (
 	"bytes"
 	"encoding/json"
-	"path"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -84,29 +84,41 @@ func ValidateIAMUserPolicyDocument(document string) error {
 
 // PolicyStatement represents a single statement in a bucket policy.
 type PolicyStatement struct {
-	Sid       string                       `json:"Sid,omitempty"`
-	Effect    string                       `json:"Effect"`
-	Action    PolicyStringOrSlice          `json:"Action"`
-	Resource  PolicyStringOrSlice          `json:"Resource"`
-	Principal any                          `json:"Principal,omitempty"`
-	Condition map[string]map[string]string `json:"Condition,omitempty"`
+	Sid       string                                    `json:"Sid,omitempty"`
+	Effect    string                                    `json:"Effect"`
+	Action    PolicyStringOrSlice                       `json:"Action"`
+	Resource  PolicyStringOrSlice                       `json:"Resource"`
+	Principal any                                       `json:"Principal,omitempty"`
+	Condition map[string]map[string]PolicyStringOrSlice `json:"Condition,omitempty"`
 }
 
 // PolicyStringOrSlice handles JSON fields that can be either a string or an array of strings.
 type PolicyStringOrSlice []string
 
 func (p *PolicyStringOrSlice) UnmarshalJSON(data []byte) error {
-	var single string
-	if err := json.Unmarshal(data, &single); err == nil {
-		*p = []string{single}
-		return nil
+	// IAM accepts a single value or an array, and condition values may be
+	// JSON booleans or numbers (e.g. {"Bool": {"aws:SecureTransport": false}}).
+	var raw any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
 	}
-	var multi []string
-	if err := json.Unmarshal(data, &multi); err == nil {
-		*p = multi
-		return nil
+	values, ok := raw.([]any)
+	if !ok {
+		values = []any{raw}
 	}
-	return json.Unmarshal(data, (*[]string)(p))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		switch v := v.(type) {
+		case string:
+			out = append(out, v)
+		case bool, float64:
+			out = append(out, fmt.Sprint(v))
+		default:
+			return fmt.Errorf("unsupported policy value %v", v)
+		}
+	}
+	*p = out
+	return nil
 }
 
 // PolicyEffect represents the result of policy evaluation.
@@ -344,42 +356,48 @@ func matchesResource(resources PolicyStringOrSlice, target string) bool {
 }
 
 func matchResourcePattern(pattern, target string) bool {
-	// Exact match
-	if pattern == target {
-		return true
-	}
-	// Wildcard matching using path.Match style, but handle arn:aws:s3::: prefix
-	if strings.Contains(pattern, "*") || strings.Contains(pattern, "?") {
-		matched, err := path.Match(pattern, target)
-		if err == nil && matched {
-			return true
-		}
-		// path.Match doesn't match across path separators for *
-		// So we need to handle arn:aws:s3:::bucket/* matching arn:aws:s3:::bucket/any/path/key
-		if strings.HasSuffix(pattern, "/*") {
-			prefix := strings.TrimSuffix(pattern, "/*")
-			if strings.HasPrefix(target, prefix+"/") {
-				return true
-			}
-		}
-	}
-	return false
+	// IAM ARN wildcards: "*" matches any run of characters including "/",
+	// and "?" matches exactly one character. No other character is special.
+	return wildcardMatch(pattern, target)
 }
 
-func evaluateConditions(conditions map[string]map[string]string, ctx PolicyEvalContext) bool {
+func evaluateConditions(
+	conditions map[string]map[string]PolicyStringOrSlice,
+	ctx PolicyEvalContext,
+) bool {
 	if len(conditions) == 0 {
 		return true // No conditions means unconditional match
 	}
 
-	// All condition operators must match (AND logic)
+	// All condition operators and keys must match (AND logic). Multiple
+	// values for one key are ORed, except for negated operators, which
+	// match only when the request value matches none of them.
 	for operator, condMap := range conditions {
-		for condKey, condValue := range condMap {
-			if !evaluateCondition(operator, condKey, condValue, ctx) {
+		for condKey, condValues := range condMap {
+			if !evaluateConditionValues(operator, condKey, condValues, ctx) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+func evaluateConditionValues(
+	operator, condKey string,
+	condValues PolicyStringOrSlice,
+	ctx PolicyEvalContext,
+) bool {
+	negated := strings.Contains(strings.TrimSuffix(operator, "IfExists"), "Not")
+	for _, condValue := range condValues {
+		matched := evaluateCondition(operator, condKey, condValue, ctx)
+		if negated && !matched {
+			return false
+		}
+		if !negated && matched {
+			return true
+		}
+	}
+	return negated
 }
 
 func evaluateCondition(operator, condKey, condValue string, ctx PolicyEvalContext) bool {

@@ -16,6 +16,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	restoreUploadPart := uploadPartFn
 	restoreComplete := completeMultipartUploadFn
 	restoreGetObject := getObjectForMultipartCompletionFn
+	restoreCompleted := getCompletedUploadObjectFn
 	restoreAbort := abortMultipartUploadFn
 	restoreListUploads := listMultipartUploadsFn
 	restoreListParts := listPartsFn
@@ -26,6 +27,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		uploadPartFn = restoreUploadPart
 		completeMultipartUploadFn = restoreComplete
 		getObjectForMultipartCompletionFn = restoreGetObject
+		getCompletedUploadObjectFn = restoreCompleted
 		abortMultipartUploadFn = restoreAbort
 		listMultipartUploadsFn = restoreListUploads
 		listPartsFn = restoreListParts
@@ -120,8 +122,8 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		) (*backend.Object, error) {
 			return nil, backend.ErrNoSuchUpload
 		}
-		getObjectForMultipartCompletionFn = func(*Handler, string, string) (*backend.Object, error) {
-			return &backend.Object{ETag: "\"etag-idempotent\""}, nil
+		getCompletedUploadObjectFn = func(*Handler, string, string, string) (*backend.Object, bool) {
+			return &backend.Object{ETag: "\"etag-idempotent\""}, true
 		}
 		body := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"x"</ETag></Part></CompleteMultipartUpload>`
 		req := newRequest(
@@ -133,7 +135,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusOK)
 		completeMultipartUploadFn = restoreComplete
-		getObjectForMultipartCompletionFn = restoreGetObject
+		getCompletedUploadObjectFn = restoreCompleted
 	})
 
 	t.Run("complete multipart unexpected backend error", func(t *testing.T) {

@@ -30,6 +30,12 @@ tasks:
     cmds:
       - richgo test -v -shuffle=on -race ./...
 
+  formal:
+    desc: "Model-check the TLA+ specs (needs Java 11+) and run the Go model-based tests"
+    cmds:
+      - formal/tla/check.sh
+      - go test -race -run 'TestVersioningModel|TestListPagingProperties' ./internal/backend/
+
   tobari:
     desc: "Measure scoped coverage with tobari (outputs ./tobari/tobari.json)"
     cmds:

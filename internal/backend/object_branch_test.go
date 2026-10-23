@@ -388,9 +388,9 @@ func TestCopyObjectBranches(t *testing.T) {
 		CopyObjectOptions{},
 	); !errors.Is(
 		err,
-		ErrSourceObjectNotFound,
+		ErrCopySourceDeleteMarker,
 	) {
-		t.Fatalf("expected ErrSourceObjectNotFound for delete marker version, got %v", err)
+		t.Fatalf("expected ErrCopySourceDeleteMarker for delete marker version, got %v", err)
 	}
 
 	// source latest non-delete-marker nil

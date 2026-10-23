@@ -1,0 +1,4 @@
+.tla2tools-*.jar
+.tlc-*.log
+states/
+*_TTrace_*.tla

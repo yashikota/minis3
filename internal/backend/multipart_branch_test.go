@@ -570,8 +570,21 @@ func TestMultipartListingAndCopyPartBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMultipartUploads failed: %v", err)
 	}
-	if len(page.CommonPrefixes) == 0 {
-		t.Fatalf("expected common prefixes with delimiter, got %+v", page)
+	// The marker lies inside the "a/dir/" prefix, so that prefix sorts at
+	// or before the marker and counts as already listed (same rule as
+	// ListObjects); returning it again would duplicate it across pages.
+	if len(page.CommonPrefixes) != 0 || len(page.Uploads) != 0 {
+		t.Fatalf("expected marker to skip the already-listed prefix, got %+v", page)
+	}
+	page, err = b.ListMultipartUploads("list-multipart-branches", ListMultipartUploadsOptions{
+		Prefix:    "a/",
+		Delimiter: "/",
+	})
+	if err != nil {
+		t.Fatalf("ListMultipartUploads failed: %v", err)
+	}
+	if len(page.CommonPrefixes) != 1 || page.CommonPrefixes[0] != "a/dir/" {
+		t.Fatalf("expected common prefix a/dir/ with delimiter, got %+v", page)
 	}
 
 	// Branch where marker key matches but upload id is not greater and thus skipped.
@@ -661,9 +674,9 @@ func TestMultipartListingAndCopyPartBranches(t *testing.T) {
 		-1,
 	); !errors.Is(
 		err,
-		ErrSourceObjectNotFound,
+		ErrVersionNotFound,
 	) {
-		t.Fatalf("expected ErrSourceObjectNotFound for missing src version, got %v", err)
+		t.Fatalf("expected ErrVersionNotFound for missing src version, got %v", err)
 	}
 	if _, err := b.CopyPart(
 		"src-copypart-branches",

@@ -126,7 +126,7 @@ func TestBucketVersioningAndListVersionsAdditionalBranches(t *testing.T) {
 				http.MethodGet,
 				"http://example.test/versioning-branch?versions&delimiter=/&encoding-type=url",
 				"",
-				nil,
+				map[string]string{"Authorization": authHeader("owner-ak")},
 			),
 		)
 		requireStatus(t, w, http.StatusOK)

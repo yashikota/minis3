@@ -39,9 +39,23 @@ func defaultCredentialLookup(accessKey string) (string, bool) {
 	return secret, ok
 }
 
-// credentialLookupFn resolves an access key to its secret key.
-// Overridden at handler initialization to also check dynamic IAM credentials.
+// credentialLookupFn resolves an access key to its secret key when the
+// request carries no handler-specific lookup (see lookupCredential).
 var credentialLookupFn = defaultCredentialLookup
+
+// credentialLookupContextKey carries the serving handler's credential lookup
+// on the request, so several minis3 instances in one process each resolve
+// their own IAM access keys instead of sharing a package-level hook.
+type credentialLookupContextKey struct{}
+
+// lookupCredential resolves accessKey with the lookup of the handler serving
+// r, falling back to credentialLookupFn.
+func lookupCredential(r *http.Request, accessKey string) (string, bool) {
+	if fn, ok := r.Context().Value(credentialLookupContextKey{}).(func(string) (string, bool)); ok {
+		return fn(accessKey)
+	}
+	return credentialLookupFn(accessKey)
+}
 
 // isPresignedURL checks if the request is a presigned URL request.
 func isPresignedURL(r *http.Request) bool {
@@ -58,7 +72,7 @@ func verifyAuthorizationHeader(r *http.Request) error {
 
 	if strings.HasPrefix(auth, "AWS4-HMAC-SHA256") {
 		accessKey := extractAccessKey(r)
-		secretKey, ok := credentialLookupFn(accessKey)
+		secretKey, ok := lookupCredential(r, accessKey)
 		if !ok {
 			return &presignedError{
 				code:    "InvalidAccessKeyId",
@@ -387,7 +401,7 @@ func verifyPresignedURLV4(r *http.Request) error {
 	service := credParts[3]
 
 	// Look up secret key
-	secretKey, ok := credentialLookupFn(accessKey)
+	secretKey, ok := lookupCredential(r, accessKey)
 	if !ok {
 		return &presignedError{
 			code:    "InvalidAccessKeyId",
