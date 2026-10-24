@@ -58,17 +58,15 @@ func TestObjectHelperUncoveredBranches(t *testing.T) {
 		t.Fatal("matchesETag should match unquoted candidate and unquoted ETag")
 	}
 
-	if _, _, err := parseRangeHeader("bytes=-x", 10); err == nil {
-		t.Fatal("parseRangeHeader should fail for invalid suffix")
-	}
-	if _, _, err := parseRangeHeader("bytes=1", 10); err == nil {
-		t.Fatal("parseRangeHeader should fail when dash is missing")
-	}
-	if _, _, err := parseRangeHeader("bytes=10-", 10); err == nil {
-		t.Fatal("parseRangeHeader should fail when start is out of range")
-	}
-	if _, _, err := parseRangeHeader("bytes=1-a", 10); err == nil {
-		t.Fatal("parseRangeHeader should fail for invalid end")
+	for header, want := range map[string]error{
+		"bytes=-x":  errRangeIgnored,
+		"bytes=1":   errRangeIgnored,
+		"bytes=10-": backend.ErrInvalidRange,
+		"bytes=1-a": errRangeIgnored,
+	} {
+		if _, _, err := parseRangeHeader(header, 10); !errors.Is(err, want) {
+			t.Fatalf("parseRangeHeader(%q) = %v, want %v", header, err, want)
+		}
 	}
 }
 

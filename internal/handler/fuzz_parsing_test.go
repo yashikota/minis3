@@ -1,6 +1,10 @@
 package handler
 
 import (
+	"errors"
+	"math"
+	"net/url"
+	"regexp"
 	"testing"
 
 	"github.com/yashikota/minis3/internal/backend"
@@ -22,12 +26,30 @@ func FuzzParseRangeHeader(f *testing.F) {
 	f.Add("bytes=-9999999999", int64(100))
 	f.Add("bytes=0-9223372036854775807", int64(100))
 	f.Add("BYTES=0-10", int64(100))
+	f.Add("bytes=0-1,3-4", int64(10))
+	f.Add("bytes=1-0", int64(10))
+	f.Add("bytes=-0", int64(10))
+	f.Add("bytes=+1-2", int64(10))
 
 	f.Fuzz(func(t *testing.T, header string, size int64) {
 		if size < 0 {
 			return
 		}
-		_, _, _ = parseRangeHeader(header, size)
+		start, end, err := parseRangeHeader(header, size)
+		wantStart, wantEnd, wantErr := referenceRange(header, size)
+		if !errors.Is(err, wantErr) || (wantErr == nil && err != nil) {
+			t.Fatalf(
+				"parseRangeHeader(%q, %d) error = %v, reference %v",
+				header,
+				size,
+				err,
+				wantErr,
+			)
+		}
+		if err == nil && (start != wantStart || end != wantEnd || start < 0 || end >= size) {
+			t.Fatalf("parseRangeHeader(%q, %d) = (%d, %d), reference (%d, %d)",
+				header, size, start, end, wantStart, wantEnd)
+		}
 	})
 }
 
@@ -49,7 +71,18 @@ func FuzzDecodeURI(f *testing.F) {
 	f.Add("%1%2%3")
 
 	f.Fuzz(func(t *testing.T, s string) {
-		_, _ = decodeURI(s)
+		got, err := decodeURI(s)
+		if err != nil {
+			t.Fatalf("decodeURI(%q) = %v", s, err)
+		}
+		// Where s is well-formed percent-encoding it decodes like the
+		// standard library; malformed escapes are kept as they are.
+		if want, err := url.PathUnescape(s); err == nil && got != want {
+			t.Fatalf("decodeURI(%q) = %q, url.PathUnescape = %q", s, got, want)
+		}
+		if len(got) > len(s) {
+			t.Fatalf("decodeURI(%q) = %q grew", s, got)
+		}
 	})
 }
 
@@ -109,4 +142,40 @@ func FuzzParseExpires(f *testing.F) {
 	f.Fuzz(func(t *testing.T, value string) {
 		_ = parseExpires(value)
 	})
+}
+
+// rangeSpec is the RFC 9110 grammar for a single byte range.
+var rangeSpec = regexp.MustCompile(`\Abytes=(?:([0-9]+)-([0-9]*)|-([0-9]+))\z`)
+
+// referenceRange restates GetObject's Range semantics (see
+// awsRangeResponses) from the RFC 9110 grammar.
+func referenceRange(header string, size int64) (int64, int64, error) {
+	m := rangeSpec.FindStringSubmatch(header)
+	if m == nil {
+		return 0, 0, errRangeIgnored
+	}
+	if m[3] != "" {
+		suffix := saturatingInt64(m[3])
+		if suffix == 0 || size == 0 {
+			return 0, 0, backend.ErrInvalidRange
+		}
+		if suffix > size {
+			suffix = size
+		}
+		return size - suffix, size - 1, nil
+	}
+	first, last := saturatingInt64(m[1]), int64(math.MaxInt64)
+	if m[2] != "" {
+		last = saturatingInt64(m[2])
+	}
+	if last < first {
+		return 0, 0, errRangeIgnored
+	}
+	if first >= size {
+		return 0, 0, backend.ErrInvalidRange
+	}
+	if last >= size {
+		last = size - 1
+	}
+	return first, last, nil
 }

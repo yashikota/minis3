@@ -184,6 +184,7 @@ curl -i http://127.0.0.1:9191/health
 | `RestoreObject` | Restores complete instantly; `x-amz-restore` always reports `ongoing-request="false"` once restored |
 | `PutObject` / `CopyObject` with `aws:kms` | `x-amz-server-side-encryption-aws-kms-key-id` is optional (omitted → default key is assumed, per AWS); headers are stored, no actual encryption |
 | `PutBucketPolicy` | Policies are validated strictly (unknown elements, actions, condition operators or malformed values are rejected with `MalformedPolicy`); `Principal`/`NotPrincipal` (`AWS` account IDs, account-root and user ARNs, `CanonicalUser`, `Service`), `Action`/`NotAction`, `Resource`/`NotResource` and every IAM condition operator family (String, Numeric, Date, Bool, Binary, IpAddress, Arn, Null, with `IfExists` and `ForAllValues`/`ForAnyValue`) are evaluated. `NotPrincipal` with `Allow` is rejected; `Resource` may be omitted and duplicate `Sid`s are accepted (as RGW does) |
+| `GetObject` `Range` | One range per request, as in AWS. A multi-range, reversed or malformed header is ignored and the whole object is returned with 200; a range that starts past the end, or `bytes=-0`, returns 416 `InvalidRange` |
 | MFA Delete | `x-amz-mfa` must be present and well formed (`<serial> <code>`); the code itself is not checked |
 
 ### Additional Features

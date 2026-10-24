@@ -45,6 +45,8 @@ jobs:
         with:
           aqua_version: v2.64.0
 
+      # pytest exits non-zero when tests fail; the summary below reports
+      # them and the last step fails the job, so keep going here.
       - name: Run s3-test
         run: task s3-test || true
 
@@ -52,10 +54,13 @@ jobs:
         id: summary
         working-directory: integration/s3-test
         run: |
+          # A missing log or result line means the suite did not run (for
+          # example the containers failed to start); that is a failure,
+          # not a pass.
           if [ ! -f s3-test.log ]; then
-            echo "s3-test.log not found"
+            echo "::error::s3-test.log not found: the s3-tests did not run"
             echo "has_results=false" >> $GITHUB_OUTPUT
-            exit 0
+            exit 1
           fi
 
           result_line=$(grep -oE '[0-9]+ (failed|passed|skipped|deselected|warnings?|errors?)(, [0-9]+ (failed|passed|skipped|deselected|warnings?|errors?))*' s3-test.log | tail -1)
@@ -78,10 +83,14 @@ jobs:
             echo "pass_rate=$pass_rate" >> $GITHUB_OUTPUT
             echo "has_results=true" >> $GITHUB_OUTPUT
           else
+            echo "::error::no pytest result line in s3-test.log"
+            tail -50 s3-test.log
             echo "has_results=false" >> $GITHUB_OUTPUT
+            exit 1
           fi
 
       - name: Write Job Summary
+        if: always()
         run: |
           echo "## S3 Tests Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -169,6 +178,19 @@ jobs:
         run: |
           echo "::error::s3-tests failed: ${{ steps.summary.outputs.failed }} failed, ${{ steps.summary.outputs.errors }} errors (passed ${{ steps.summary.outputs.passed }}, skipped ${{ steps.summary.outputs.skipped }})"
           exit 1
+
+      # Guards against tests silently dropping out of the run (deselected,
+      # not collected): raise the floor when more tests pass.
+      - name: Fail when fewer tests pass than expected
+        if: always() && steps.summary.outputs.has_results == 'true'
+        env:
+          MIN_PASSED: 629
+        run: |
+          passed='${{ steps.summary.outputs.passed }}'
+          if [ "$passed" -lt "$MIN_PASSED" ]; then
+            echo "::error::only ${passed} s3-tests passed, expected at least ${MIN_PASSED}"
+            exit 1
+          fi
 
   publish-badge:
     needs: s3-tests

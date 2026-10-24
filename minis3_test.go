@@ -391,77 +391,32 @@ func TestMinis3CloseAndAddrBeforeStart(t *testing.T) {
 	}
 }
 
-func TestMinis3StartListenError(t *testing.T) {
+func TestStartListenErrors(t *testing.T) {
 	t.Parallel()
-	failListen := func(_, _ string) (net.Listener, error) {
-		return nil, errors.New("boom")
+	start := map[string]func(*testing.T, *Minis3) error{
+		"Start":     func(_ *testing.T, s *Minis3) error { return s.Start() },
+		"StartAddr": func(_ *testing.T, s *Minis3) error { return s.StartAddr("127.0.0.1:9191") },
+		// Run and RunAddr are startNew on a new server.
+		"startNew": func(t *testing.T, s *Minis3) error {
+			got, err := startNew(s, "127.0.0.1:0")
+			if got != nil {
+				t.Errorf("startNew server = %#v on error, want nil", got)
+			}
+			return err
+		},
 	}
-
-	s := New()
-	s.listen = failListen
-	err := s.Start()
-	if err == nil {
-		t.Fatal("expected Start() to fail")
-	}
-	if !strings.Contains(err.Error(), "failed to listen: boom") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestMinis3StartAddrListenError(t *testing.T) {
-	t.Parallel()
-	failListen := func(_, _ string) (net.Listener, error) {
-		return nil, errors.New("boom-addr")
-	}
-
-	s := New()
-	s.listen = failListen
-	err := s.StartAddr("127.0.0.1:9191")
-	if err == nil {
-		t.Fatal("expected StartAddr() to fail")
-	}
-	if !strings.Contains(err.Error(), "failed to listen: boom-addr") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunReturnsStartError(t *testing.T) {
-	t.Parallel()
-	failListen := func(_, _ string) (net.Listener, error) {
-		return nil, errors.New("run-boom")
-	}
-
-	failing := New()
-	failing.listen = failListen
-	s, err := startNew(failing, "127.0.0.1:0")
-	if err == nil {
-		t.Fatal("expected Run() to fail")
-	}
-	if s != nil {
-		t.Fatalf("Run() server = %#v, want nil", s)
-	}
-	if !strings.Contains(err.Error(), "failed to listen: run-boom") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunAddrReturnsStartError(t *testing.T) {
-	t.Parallel()
-	failListen := func(_, _ string) (net.Listener, error) {
-		return nil, errors.New("run-addr-boom")
-	}
-
-	failing := New()
-	failing.listen = failListen
-	s, err := startNew(failing, "127.0.0.1:9191")
-	if err == nil {
-		t.Fatal("expected RunAddr() to fail")
-	}
-	if s != nil {
-		t.Fatalf("RunAddr() server = %#v, want nil", s)
-	}
-	if !strings.Contains(err.Error(), "failed to listen: run-addr-boom") {
-		t.Fatalf("unexpected error: %v", err)
+	for name, fn := range start {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s := New()
+			s.listen = func(_, _ string) (net.Listener, error) {
+				return nil, errors.New("boom-" + name)
+			}
+			err := fn(t, s)
+			if err == nil || !strings.Contains(err.Error(), "failed to listen: boom-"+name) {
+				t.Fatalf("%s() = %v, want the listen error", name, err)
+			}
+		})
 	}
 }
 

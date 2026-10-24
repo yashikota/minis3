@@ -185,6 +185,7 @@ curl -i http://127.0.0.1:9191/health
 | `RestoreObject` | リストアは即時完了。`x-amz-restore` は常に `ongoing-request="false"` を返す |
 | `aws:kms` 指定の `PutObject` / `CopyObject` | `x-amz-server-side-encryption-aws-kms-key-id` は任意（省略時は AWS 同様デフォルトキー扱い）。ヘッダーは保存のみで実際の暗号化はしない |
 | `PutBucketPolicy` | ポリシーは厳格に検証され、未知の要素・アクション・条件演算子や不正な値は `MalformedPolicy` で拒否される。`Principal`/`NotPrincipal`（`AWS` のアカウント ID・アカウント root / ユーザー ARN、`CanonicalUser`、`Service`）、`Action`/`NotAction`、`Resource`/`NotResource`、全 IAM 条件演算子ファミリー（String・Numeric・Date・Bool・Binary・IpAddress・Arn・Null、`IfExists` と `ForAllValues`/`ForAnyValue` 付き）を評価する。`NotPrincipal` と `Allow` の組み合わせは拒否。`Resource` は省略可能で、`Sid` の重複は許容する（RGW と同じ） |
+| `GetObject` の `Range` | AWS と同じく 1 リクエスト 1 範囲のみ。複数範囲・逆順・不正な形式のヘッダーは無視して 200 でオブジェクト全体を返す。末尾より後から始まる範囲と `bytes=-0` は 416 `InvalidRange` |
 | MFA Delete | `x-amz-mfa` が `<シリアル> <コード>` 形式で存在することのみ検証し、コード自体は検証しない |
 
 ### 追加機能
