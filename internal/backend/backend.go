@@ -308,7 +308,7 @@ func (b *Backend) CreateIAMUser(userName, path string) (*IAMUser, error) {
 	}
 	b.iamUsers[userName] = user
 
-	return user, nil
+	return snapshot(user), nil
 }
 
 // CreateIAMAccessKey creates a new access key pair for an IAM user.
@@ -333,7 +333,7 @@ func (b *Backend) CreateIAMAccessKey(userName string) (*IAMAccessKey, error) {
 	b.iamAccessKeys[accessKeyID] = key
 	b.iamKeysByUser[userName] = append(b.iamKeysByUser[userName], accessKeyID)
 
-	return key, nil
+	return snapshot(key), nil
 }
 
 // DeleteIAMAccessKey deletes an access key.
@@ -480,7 +480,7 @@ func (b *Backend) ListIAMUsers(pathPrefix string) []*IAMUser {
 			users = append(users, u)
 		}
 	}
-	return users
+	return snapshot(users)
 }
 
 // ListIAMAccessKeys returns access keys for a user.
@@ -494,7 +494,7 @@ func (b *Backend) ListIAMAccessKeys(userName string) []*IAMAccessKey {
 			keys = append(keys, k)
 		}
 	}
-	return keys
+	return snapshot(keys)
 }
 
 // LookupCredential looks up a secret key for an access key,

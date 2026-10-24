@@ -501,8 +501,11 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 			),
 		)
 		requireStatus(t, wPart4, http.StatusOK)
-		if up, ok := b.GetUpload(uploadID4); ok {
+		if err := b.UpdateUpload(uploadID4, func(up *backend.MultipartUpload) error {
 			up.ChecksumAlgorithm = "UNKNOWN"
+			return nil
+		}); err != nil {
+			t.Fatalf("UpdateUpload: %v", err)
 		}
 		partETag4 := wPart4.Header().Get("ETag")
 		wUnknownAlgo := doRequest(
@@ -781,19 +784,17 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 			)
 		}
 
-		obj, err := b.GetObject("obj-attrs-gap", "k")
-		if err != nil {
-			t.Fatalf("GetObject failed: %v", err)
-		}
-		obj.Parts = []backend.ObjectPart{{
-			PartNumber:        1,
-			Size:              10,
-			ChecksumCRC32:     "c1",
-			ChecksumCRC32C:    "c2",
-			ChecksumCRC64NVME: "c3",
-			ChecksumSHA1:      "c4",
-			ChecksumSHA256:    "c5",
-		}}
+		mustUpdateObject(t, b, "obj-attrs-gap", "k", func(obj *backend.Object) {
+			obj.Parts = []backend.ObjectPart{{
+				PartNumber:        1,
+				Size:              10,
+				ChecksumCRC32:     "c1",
+				ChecksumCRC32C:    "c2",
+				ChecksumCRC64NVME: "c3",
+				ChecksumSHA1:      "c4",
+				ChecksumSHA256:    "c5",
+			}}
+		})
 
 		wAttrsHeaderFallback := doRequest(
 			h,
@@ -1797,25 +1798,23 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wAttrsDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wAttrsDenied, "AccessDenied")
 
-		obj, err := b.GetObject("obj-left", "part")
-		if err != nil {
-			t.Fatalf("GetObject part failed: %v", err)
-		}
-		obj.Parts = []backend.ObjectPart{
-			{
-				PartNumber:        1,
-				Size:              10,
-				ChecksumCRC32:     "a",
-				ChecksumCRC32C:    "b",
-				ChecksumCRC64NVME: "c",
-				ChecksumSHA1:      "d",
-				ChecksumSHA256:    "e",
-			},
-			{
-				PartNumber: 2,
-				Size:       1,
-			},
-		}
+		mustUpdateObject(t, b, "obj-left", "part", func(obj *backend.Object) {
+			obj.Parts = []backend.ObjectPart{
+				{
+					PartNumber:        1,
+					Size:              10,
+					ChecksumCRC32:     "a",
+					ChecksumCRC32C:    "b",
+					ChecksumCRC64NVME: "c",
+					ChecksumSHA1:      "d",
+					ChecksumSHA256:    "e",
+				},
+				{
+					PartNumber: 2,
+					Size:       1,
+				},
+			}
+		})
 		wAttrsParts := doRequest(
 			h,
 			newRequest(

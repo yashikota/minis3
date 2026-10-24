@@ -300,7 +300,7 @@ func TestDeleteObjectVersionBranches(t *testing.T) {
 	if _, ok := b.GetBucket("delete-version-branches"); !ok {
 		t.Fatal("bucket should still exist")
 	}
-	bucket, _ := b.GetBucket("delete-version-branches")
+	bucket := liveBucket(t, b, "delete-version-branches")
 	if _, exists := bucket.Objects["k"]; exists {
 		t.Fatalf("expected object key cleanup when all versions deleted: %+v", bucket.Objects["k"])
 	}

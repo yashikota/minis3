@@ -3,6 +3,7 @@
 ## Project Structure & Module Organization
 - `minis3.go` is the public entry point for starting the S3 test server.
 - `internal/backend/` contains S3 state and behavior (bucket/object/versioning/lifecycle logic).
+  Its methods return snapshots and copy what they are given (see `internal/backend/snapshot.go`); change stored state only through its methods, or `UpdateBucket`/`UpdateObject`/`UpdateUpload` for state no S3 operation sets.
 - `internal/handler/` contains HTTP/S3 request handling, auth checks, and response shaping.
 - Root tests (for example `minis3_test.go`) cover package behavior.
 - `integration/sdk/` is a separate Go module for AWS SDK integration tests.

@@ -128,3 +128,24 @@ func requireS3ErrorCode(t *testing.T, w *httptest.ResponseRecorder, wantCode str
 		t.Fatalf("error code = %q, want %q, body=%s", er.Code, wantCode, w.Body.String())
 	}
 }
+
+// mustUpdateObject changes stored object state no S3 operation sets.
+func mustUpdateObject(
+	t *testing.T,
+	b *backend.Backend,
+	bucketName, key string,
+	fn func(*backend.Object),
+) {
+	t.Helper()
+	if err := b.UpdateObject(bucketName, key, "", fn); err != nil {
+		t.Fatalf("UpdateObject(%s/%s): %v", bucketName, key, err)
+	}
+}
+
+// mustUpdateBucket changes stored bucket state no S3 operation sets.
+func mustUpdateBucket(t *testing.T, b *backend.Backend, name string, fn func(*backend.Bucket)) {
+	t.Helper()
+	if err := b.UpdateBucket(name, fn); err != nil {
+		t.Fatalf("UpdateBucket(%s): %v", name, err)
+	}
+}

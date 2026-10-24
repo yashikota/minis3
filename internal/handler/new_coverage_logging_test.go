@@ -521,17 +521,13 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 	})
 
 	t.Run("policy shape and condition branches", func(t *testing.T) {
-		if dst, ok := b.GetBucket("dst-policy"); ok {
-			dst.Policy = ""
-		}
+		mustUpdateBucket(t, b, "dst-policy", func(dst *backend.Bucket) { dst.Policy = "" })
 		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
 			code != "AccessDenied" {
 			t.Fatalf("empty policy result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
-		if dst, ok := b.GetBucket("dst-policy"); ok {
-			dst.Policy = "{bad json"
-		}
+		mustUpdateBucket(t, b, "dst-policy", func(dst *backend.Bucket) { dst.Policy = "{bad json" })
 		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
 			code != "AccessDenied" {
 			t.Fatalf("invalid json result = (%v,%q), want (false,AccessDenied)", ok, code)

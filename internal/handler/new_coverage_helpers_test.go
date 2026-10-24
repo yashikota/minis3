@@ -440,14 +440,16 @@ func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetObject failed: %v", err)
 		}
-		origAlgo := obj.SSECustomerAlgorithm
-		origMD5 := obj.SSECustomerKeyMD5
 		t.Cleanup(func() {
-			obj.SSECustomerAlgorithm = origAlgo
-			obj.SSECustomerKeyMD5 = origMD5
+			mustUpdateObject(t, b, "attr-bkt", "k", func(live *backend.Object) {
+				live.SSECustomerAlgorithm = obj.SSECustomerAlgorithm
+				live.SSECustomerKeyMD5 = obj.SSECustomerKeyMD5
+			})
 		})
-		obj.SSECustomerAlgorithm = "AES256"
-		obj.SSECustomerKeyMD5 = "abc"
+		mustUpdateObject(t, b, "attr-bkt", "k", func(live *backend.Object) {
+			live.SSECustomerAlgorithm = "AES256"
+			live.SSECustomerKeyMD5 = "abc"
+		})
 
 		w := doRequest(
 			h,

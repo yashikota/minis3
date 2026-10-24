@@ -187,7 +187,7 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 	if err := b.PutBucketLogging("src-controls", nil); err != nil {
 		t.Fatalf("PutBucketLogging disable(nil) failed: %v", err)
 	}
-	srcBucket, _ = b.GetBucket("src-controls")
+	srcBucket = liveBucket(t, b, "src-controls")
 	if srcBucket.LoggingConfiguration != nil || srcBucket.LoggingConfigModifiedAt.IsZero() ||
 		srcBucket.LoggingObjectKey != "" {
 		t.Fatalf("PutBucketLogging disable(nil) should clear state, got %+v", srcBucket)
@@ -203,7 +203,7 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 		t.Fatalf("PutBucketLogging same target bucket = %v, want ErrInvalidRequest", err)
 	}
 
-	dstBucket, _ := b.GetBucket("dst-controls")
+	dstBucket := liveBucket(t, b, "dst-controls")
 	dstBucket.LoggingConfiguration = &BucketLoggingStatus{
 		LoggingEnabled: &LoggingEnabled{TargetBucket: "third-controls", TargetPrefix: "logs/"},
 	}
@@ -252,7 +252,7 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 		t.Fatalf("PutBucketLogging success failed: %v", err)
 	}
 	// Manually sparse config to cover GetBucketLogging normalization.
-	srcBucket, _ = b.GetBucket("src-controls")
+	srcBucket = liveBucket(t, b, "src-controls")
 	srcBucket.LoggingConfiguration = &BucketLoggingStatus{LoggingEnabled: &LoggingEnabled{
 		TargetBucket: "dst-controls",
 		TargetPrefix: "logs/",
@@ -280,14 +280,14 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 		)
 	}
 
-	srcBucket, _ = b.GetBucket("src-controls")
+	srcBucket = liveBucket(t, b, "src-controls")
 	firstModified := srcBucket.LoggingConfigModifiedAt
 	if err := b.PutBucketLogging("src-controls", &BucketLoggingStatus{
 		LoggingEnabled: &LoggingEnabled{TargetBucket: "dst-controls", TargetPrefix: "logs/"},
 	}); err != nil {
 		t.Fatalf("PutBucketLogging identical config failed: %v", err)
 	}
-	srcBucket, _ = b.GetBucket("src-controls")
+	srcBucket = liveBucket(t, b, "src-controls")
 	if !srcBucket.LoggingConfigModifiedAt.Equal(firstModified) {
 		t.Fatalf("LoggingConfigModifiedAt should remain unchanged for identical config")
 	}
@@ -298,7 +298,7 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutBucketLogging changed config failed: %v", err)
 	}
-	srcBucket, _ = b.GetBucket("src-controls")
+	srcBucket = liveBucket(t, b, "src-controls")
 	if !srcBucket.LoggingConfigModifiedAt.After(firstModified) {
 		t.Fatalf(
 			"LoggingConfigModifiedAt should advance for changed config: old=%v new=%v",
@@ -313,7 +313,7 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 	if err := b.DeleteBucketLogging("src-controls"); err != nil {
 		t.Fatalf("DeleteBucketLogging failed: %v", err)
 	}
-	srcBucket, _ = b.GetBucket("src-controls")
+	srcBucket = liveBucket(t, b, "src-controls")
 	if srcBucket.LoggingConfiguration != nil || srcBucket.LoggingObjectKey != "" {
 		t.Fatalf("DeleteBucketLogging should clear config, got %+v", srcBucket.LoggingConfiguration)
 	}
@@ -335,7 +335,7 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 		t.Fatalf("PutBucketRequestPayment invalid payer = %v, want ErrInvalidRequest", err)
 	}
 
-	srcBucket, _ = b.GetBucket("src-controls")
+	srcBucket = liveBucket(t, b, "src-controls")
 	srcBucket.RequestPaymentPayer = ""
 	cfg, err := b.GetBucketRequestPayment("src-controls")
 	if err != nil || cfg == nil || cfg.Payer != RequestPayerBucketOwner {
@@ -614,7 +614,7 @@ func TestBackendObjectACLAndDeletePreconditionHelpersCoverage(t *testing.T) {
 		t.Fatalf("PutObject failed: %v", err)
 	}
 
-	bkt, _ := b.GetBucket("objacl-controls")
+	bkt := liveBucket(t, b, "objacl-controls")
 	bkt.OwnerAccessKey = "root-access-key"
 	bkt.Objects["k"].Versions[0].ACL = nil
 	bkt.Objects["k"].Versions[0].Owner = nil
@@ -856,7 +856,7 @@ func TestBackendRestoreAndLifecycleHelperCoverage(t *testing.T) {
 
 	lcBackend := New()
 	mustCreateBucketCov(t, lcBackend, "lc-src")
-	lcBucket, _ := lcBackend.GetBucket("lc-src")
+	lcBucket := liveBucket(t, lcBackend, "lc-src")
 	lcBucket.LifecycleConfiguration = &LifecycleConfiguration{Rules: []LifecycleRule{
 		{
 			Status: LifecycleStatusEnabled,
@@ -988,7 +988,7 @@ func TestBackendRestoreAndLifecycleHelperCoverage(t *testing.T) {
 		StorageClass: "GLACIER",
 		LastModified: now,
 	}
-	bkt, _ := b.GetBucket("src-restore")
+	bkt := liveBucket(t, b, "src-restore")
 	bkt.Objects["obj"] = &ObjectVersions{Versions: []*Object{archived, nil}}
 	bkt.Objects["nil-versions"] = nil
 	past := now.Add(-time.Hour)
@@ -1023,7 +1023,7 @@ func TestBackendRestoreAndLifecycleHelperCoverage(t *testing.T) {
 		StorageClass: "STANDARD",
 		Data:         []byte("hydrated-data"),
 	}
-	cloudBkt, _ := b.GetBucket(cloudBucketName)
+	cloudBkt := liveBucket(t, b, cloudBucketName)
 	cloudBkt.Objects[dstObj.Key] = &ObjectVersions{Versions: []*Object{nil}}
 	target := &Object{StorageClass: "GLACIER"}
 	hydrateArchivedObjectDataLocked(b, "src-restore", "obj", target)
@@ -1065,7 +1065,7 @@ func TestBackendMultipartChecksumBranchesCoverage(t *testing.T) {
 		t.Helper()
 		b := New()
 		mustCreateBucketCov(t, b, "mp-src")
-		bkt, _ := b.GetBucket("mp-src")
+		bkt := liveBucket(t, b, "mp-src")
 		if enforcedOwner {
 			bkt.OwnerAccessKey = "unknown-owner"
 			bkt.ObjectOwnership = ObjectOwnershipBucketOwnerEnforced
@@ -1167,7 +1167,7 @@ func TestBackendMultipartChecksumBranchesCoverage(t *testing.T) {
 func TestBackendPutCopyDeletePolicyAndRetentionRemainingBranches(t *testing.T) {
 	b := New()
 	mustCreateBucketCov(t, b, "put-rem")
-	putBucket, _ := b.GetBucket("put-rem")
+	putBucket := liveBucket(t, b, "put-rem")
 	putBucket.OwnerAccessKey = "unknown-owner"
 	putBucket.ObjectOwnership = ObjectOwnershipBucketOwnerEnforced
 
@@ -1209,7 +1209,7 @@ func TestBackendPutCopyDeletePolicyAndRetentionRemainingBranches(t *testing.T) {
 	); err != nil {
 		t.Fatalf("CopyObject CRC32 failed: %v", err)
 	}
-	dstBucket, _ := b.GetBucket("copy-dst-rem")
+	dstBucket := liveBucket(t, b, "copy-dst-rem")
 	dstBucket.ObjectOwnership = ObjectOwnershipBucketOwnerEnforced
 	dstBucket.OwnerAccessKey = "unknown-owner"
 	copied, _, err := b.CopyObject(
@@ -1236,7 +1236,7 @@ func TestBackendPutCopyDeletePolicyAndRetentionRemainingBranches(t *testing.T) {
 		t.Fatalf("PutObject delete-precond failed: %v", err)
 	}
 	past := time.Now().UTC().Add(-time.Hour)
-	targetBucket, _ := b.GetBucket("copy-dst-rem")
+	targetBucket := liveBucket(t, b, "copy-dst-rem")
 	targetObj := targetBucket.Objects["delete-precond"].Versions[0]
 	targetObj.LastModified = past
 	wrongSize := int64(9)

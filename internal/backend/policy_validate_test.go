@@ -417,7 +417,7 @@ func TestPutBucketPolicyRejectsInvalidPolicyWithoutChangingState(t *testing.T) {
 	if err != nil || got != good {
 		t.Fatalf("policy after rejected put = %q, %v; want the previous policy", got, err)
 	}
-	bucket, _ := b.GetBucket("bkt")
+	bucket := liveBucket(t, b, "bkt")
 	if !bucket.PolicyDenySelfAccess {
 		t.Fatal("rejected put must not reset PolicyDenySelfAccess")
 	}

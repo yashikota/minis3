@@ -68,6 +68,7 @@ func (b *Backend) CreateMultipartUpload(
 		}
 	}
 
+	opts = snapshot(opts)
 	uploadId := b.generateUploadIdLocked()
 	owner := opts.Owner
 	if owner == nil {
@@ -110,7 +111,7 @@ func (b *Backend) CreateMultipartUpload(
 	}
 
 	b.uploads[uploadId] = upload
-	return upload, nil
+	return snapshot(upload), nil
 }
 
 // UploadPart uploads a part for a multipart upload.
@@ -151,7 +152,7 @@ func (b *Backend) UploadPart(
 	setPartChecksum(part, upload.ChecksumAlgorithm, data)
 
 	upload.Parts[partNumber] = part
-	return part, nil
+	return snapshot(part), nil
 }
 
 // CompleteMultipartUpload completes a multipart upload by assembling previously uploaded parts.
@@ -383,7 +384,7 @@ func (b *Backend) CompleteMultipartUpload(
 		ETag:      obj.ETag,
 	}
 
-	return obj, nil
+	return snapshot(obj), nil
 }
 
 // completedUpload records which object version a completed upload produced.
@@ -418,7 +419,7 @@ func (b *Backend) GetCompletedUploadObject(bucketName, key, uploadId string) (*O
 	}
 	for _, v := range versions.Versions {
 		if v.VersionId == done.VersionId && v.ETag == done.ETag {
-			return v, true
+			return snapshot(v), true
 		}
 	}
 	return nil, false
@@ -619,7 +620,7 @@ func (b *Backend) ListMultipartUploads(
 		}
 	}
 
-	return result, nil
+	return snapshot(result), nil
 }
 
 // ListPartsOptions contains options for ListParts.
@@ -679,7 +680,7 @@ func (b *Backend) ListParts(
 	}
 
 	result.Parts = parts
-	return result, upload, nil
+	return snapshot(result), snapshot(upload), nil
 }
 
 // CopyPart copies a part from an existing object.
@@ -776,7 +777,7 @@ func (b *Backend) CopyPart(
 	setPartChecksum(part, upload.ChecksumAlgorithm, data)
 
 	upload.Parts[partNumber] = part
-	return part, nil
+	return snapshot(part), nil
 }
 
 // GetUpload returns a multipart upload by its upload ID.
@@ -785,5 +786,5 @@ func (b *Backend) GetUpload(uploadId string) (*MultipartUpload, bool) {
 	defer b.mu.RUnlock()
 
 	upload, ok := b.uploads[uploadId]
-	return upload, ok
+	return snapshot(upload), ok
 }

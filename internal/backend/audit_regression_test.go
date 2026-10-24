@@ -332,11 +332,11 @@ func TestCopyObjectOwnershipAndETag(t *testing.T) {
 	if dst.ETag == src.ETag || dst.ETag != "\"8d777f385d3dfec8815d20f7496026dc\"" {
 		t.Fatalf("copy ETag = %s, want MD5 of the data (source %s)", dst.ETag, src.ETag)
 	}
-	if dst.Owner != alt || dst.ACL == nil || dst.ACL.Owner.ID != alt.ID {
+	if dst.Owner == nil || *dst.Owner != *alt || dst.ACL == nil || dst.ACL.Owner.ID != alt.ID {
 		t.Fatalf("copy owner = %+v acl=%+v, want %+v", dst.Owner, dst.ACL, alt)
 	}
 	plain, _, _ := b.CopyObject("copy-owner", "dst", "", "copy-owner", "dst2", CopyObjectOptions{})
-	if plain.ETag != dst.ETag || plain.Owner != dst.Owner {
+	if plain.ETag != dst.ETag || *plain.Owner != *dst.Owner {
 		t.Fatalf("single-part copy without owner override changed ETag/owner: %+v", plain)
 	}
 }
@@ -414,7 +414,11 @@ func TestDeletePreconditionTarget(t *testing.T) {
 		t.Fatal("missing bucket/key must have no precondition target")
 	}
 	put, _ := b.PutObject("delete-target", "k", []byte("x"), PutObjectOptions{})
-	if got := b.DeletePreconditionTarget("delete-target", "k"); got != put {
+	if got := b.DeletePreconditionTarget(
+		"delete-target",
+		"k",
+	); got == nil || got.VersionId != put.VersionId ||
+		got.ETag != put.ETag {
 		t.Fatalf("target = %+v, want current version", got)
 	}
 	dm, _ := b.DeleteObject("delete-target", "k", false)
