@@ -26,6 +26,9 @@ type Handler struct {
 
 	loggingMu         sync.Mutex
 	pendingLogBatches map[string]*serverAccessLogBatch
+
+	credentialsMu    sync.RWMutex
+	extraCredentials map[string]string
 }
 
 const serverAccessLogRollInterval = 5 * time.Second
@@ -147,12 +150,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // lookupCredential resolves an access key against the static test
-// credentials and this handler's dynamic IAM access keys.
+// credentials, credentials added with addCredential and this handler's
+// dynamic IAM access keys.
 func (h *Handler) lookupCredential(accessKey string) (string, bool) {
 	if secret, ok := DefaultCredentials()[accessKey]; ok {
 		return secret, true
 	}
+	h.credentialsMu.RLock()
+	secret, ok := h.extraCredentials[accessKey]
+	h.credentialsMu.RUnlock()
+	if ok {
+		return secret, true
+	}
 	return h.backend.LookupCredential(accessKey)
+}
+
+// addCredential makes this handler accept accessKey with secretKey, in
+// addition to the default and IAM credentials.
+func (h *Handler) addCredential(accessKey, secretKey string) {
+	h.credentialsMu.Lock()
+	defer h.credentialsMu.Unlock()
+	if h.extraCredentials == nil {
+		h.extraCredentials = map[string]string{}
+	}
+	h.extraCredentials[accessKey] = secretKey
 }
 
 // handleRequest is the main dispatch point.

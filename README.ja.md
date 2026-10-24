@@ -185,14 +185,13 @@ curl -i http://127.0.0.1:9191/health
 | `RestoreObject` | リストアは即時完了。`x-amz-restore` は常に `ongoing-request="false"` を返す |
 | `aws:kms` 指定の `PutObject` / `CopyObject` | `x-amz-server-side-encryption-aws-kms-key-id` は任意（省略時は AWS 同様デフォルトキー扱い）。ヘッダーは保存のみで実際の暗号化はしない |
 | `PutBucketPolicy` | ポリシーは厳格に検証され、未知の要素・アクション・条件演算子や不正な値は `MalformedPolicy` で拒否される。`Principal`/`NotPrincipal`（`AWS` のアカウント ID・アカウント root / ユーザー ARN、`CanonicalUser`、`Service`）、`Action`/`NotAction`、`Resource`/`NotResource`、全 IAM 条件演算子ファミリー（String・Numeric・Date・Bool・Binary・IpAddress・Arn・Null、`IfExists` と `ForAllValues`/`ForAnyValue` 付き）を評価する。`NotPrincipal` と `Allow` の組み合わせは拒否。`Resource` は省略可能で、`Sid` の重複は許容する（RGW と同じ） |
-| SigV2 署名付き URL | `Expires` の形式・期限のみ検証し、署名自体は検証しない（モック用途） |
-| SigV2 `Authorization` ヘッダー | `AWS AccessKey:Signature` の形式と任意の `x-amz-date` のみ検証し、アクセスキーと署名は検証しない（モック用途） |
 | MFA Delete | `x-amz-mfa` が `<シリアル> <コード>` 形式で存在することのみ検証し、コード自体は検証しない |
 
 ### 追加機能
 
 - **条件付きヘッダー:** GetObject/HeadObject で `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since`
-- **署名付き URL:** SigV4 presigned URL の検証。SigV2 は `Expires` の形式・期限のみ検証し、署名自体は検証しない（モック用途）
+- **署名付き URL:** SigV4 / SigV2 presigned URL の署名・アクセスキー・期限を検証
+- **SigV2 `Authorization` ヘッダー:** アクセスキー、HMAC-SHA1 署名、`Date`/`x-amz-date` の時刻ずれを検証
 - **AWS Chunked Encoding:** `aws-chunked` 転送エンコーディングの透過デコード
 - **レスポンスヘッダー上書き:** GetObject の `response-content-type`, `response-content-disposition` など
 - **コピー元条件ヘッダー:** `x-amz-copy-source-if-match`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-unmodified-since`

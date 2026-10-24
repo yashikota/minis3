@@ -25,6 +25,7 @@ func TestHandleObjectAnonymousPutWithoutPolicyIsDenied(t *testing.T) {
 		bytes.NewReader([]byte("data")),
 	)
 	w := httptest.NewRecorder()
+	signTestRequest(h, req)
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
@@ -51,6 +52,7 @@ func TestHandleObjectAnonymousPutAllowedOnPublicWriteBucket(t *testing.T) {
 		bytes.NewReader([]byte("data")),
 	)
 	w := httptest.NewRecorder()
+	signTestRequest(h, req)
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -89,6 +91,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/bucket-acl/obj", nil)
 		w := httptest.NewRecorder()
+		signTestRequest(h, req)
 		h.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
@@ -108,6 +111,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/bucket-acl/obj", nil)
 		w := httptest.NewRecorder()
+		signTestRequest(h, req)
 		h.ServeHTTP(w, req)
 
 		if w.Code != http.StatusForbidden {
@@ -153,6 +157,7 @@ func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
 	)
 	putReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	putRes := httptest.NewRecorder()
+	signTestRequest(h, putReq)
 	h.ServeHTTP(putRes, putReq)
 	if putRes.Code != http.StatusOK {
 		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
@@ -161,6 +166,7 @@ func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/bucket-acl-roundtrip?acl", nil)
 	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	getRes := httptest.NewRecorder()
+	signTestRequest(h, getReq)
 	h.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf(
@@ -209,6 +215,7 @@ func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
 	putReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
 	putReq.Header.Set("x-amz-acl", "bucket-owner-read")
 	putRes := httptest.NewRecorder()
+	signTestRequest(h, putReq)
 	h.ServeHTTP(putRes, putReq)
 	if putRes.Code != http.StatusOK {
 		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
@@ -217,6 +224,7 @@ func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
 	getACLReq := httptest.NewRequest(http.MethodGet, "/bucket-owner-read-test/foo?acl", nil)
 	getACLReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
 	getACLRes := httptest.NewRecorder()
+	signTestRequest(h, getACLReq)
 	h.ServeHTTP(getACLRes, getACLReq)
 	if getACLRes.Code != http.StatusOK {
 		t.Fatalf("unexpected GetObjectAcl status: got %d, want %d", getACLRes.Code, http.StatusOK)
@@ -508,6 +516,7 @@ func TestHandlePutBucketACLRejectsUnknownCanonicalUser(t *testing.T) {
 	)
 	req.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	w := httptest.NewRecorder()
+	signTestRequest(h, req)
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -543,6 +552,7 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 		putReq.Header.Set(header, "id="+alt.ID)
 	}
 	putRes := httptest.NewRecorder()
+	signTestRequest(h, putReq)
 	h.ServeHTTP(putRes, putReq)
 	if putRes.Code != http.StatusOK {
 		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
@@ -551,6 +561,7 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/bucket-object-grants/foo?acl", nil)
 	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	getRes := httptest.NewRecorder()
+	signTestRequest(h, getReq)
 	h.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("unexpected GetObjectAcl status: got %d, want %d", getRes.Code, http.StatusOK)
@@ -608,6 +619,7 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 		createReq.Header.Set(header, "id="+alt.ID)
 	}
 	createRes := httptest.NewRecorder()
+	signTestRequest(h, createReq)
 	h.ServeHTTP(createRes, createReq)
 	if createRes.Code != http.StatusOK {
 		t.Fatalf("unexpected CreateBucket status: got %d, want %d", createRes.Code, http.StatusOK)
@@ -616,6 +628,7 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/bucket-create-grants?acl", nil)
 	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	getRes := httptest.NewRecorder()
+	signTestRequest(h, getReq)
 	h.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("unexpected GetBucketAcl status: got %d, want %d", getRes.Code, http.StatusOK)
@@ -677,6 +690,7 @@ func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
 	copyReq.Header.Set("x-amz-copy-source", "/bucket-copy-acl/src")
 	copyReq.Header.Set("x-amz-acl", "public-read")
 	copyRes := httptest.NewRecorder()
+	signTestRequest(h, copyReq)
 	h.ServeHTTP(copyRes, copyReq)
 	if copyRes.Code != http.StatusOK {
 		t.Fatalf("unexpected CopyObject status: got %d, want %d", copyRes.Code, http.StatusOK)
@@ -685,6 +699,7 @@ func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/bucket-copy-acl/dst", nil)
 	getReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
 	getRes := httptest.NewRecorder()
+	signTestRequest(h, getReq)
 	h.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("unexpected GET status: got %d, want %d", getRes.Code, http.StatusOK)
@@ -750,6 +765,7 @@ func TestHandleRequestOptionsPreflightValidation(t *testing.T) {
 				req.Header.Set(k, v)
 			}
 			w := httptest.NewRecorder()
+			signTestRequest(h, req)
 			h.ServeHTTP(w, req)
 
 			if w.Code != http.StatusBadRequest {
