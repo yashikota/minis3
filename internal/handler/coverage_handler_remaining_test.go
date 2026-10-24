@@ -91,7 +91,11 @@ func TestPutBucketOwnershipAndPostBucketLoggingRemainingBranches(t *testing.T) {
 		mustCreateBucket(t, b, "post-dst")
 		b.SetBucketOwner("post-src", "minis3-access-key")
 		b.SetBucketOwner("post-dst", "minis3-access-key")
-		if err := b.PutBucketPolicy("post-dst", `{"Statement":[]}`, false); err != nil {
+		if err := b.PutBucketPolicy(
+			"post-dst",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+			false,
+		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 
@@ -146,34 +150,6 @@ func TestPutBucketOwnershipAndPostBucketLoggingRemainingBranches(t *testing.T) {
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
 	})
-}
-
-func TestLoggingConditionValuesAdditionalBranches(t *testing.T) {
-	values, found := loggingConditionValues(
-		map[string]any{"ArnLike": "not-a-map"},
-		[]string{"ArnLike"},
-		"aws:SourceArn",
-	)
-	if found || len(values) != 0 {
-		t.Fatalf(
-			"loggingConditionValues non-map operator = (%v,%v), want (false,empty)",
-			found,
-			values,
-		)
-	}
-
-	values, found = loggingConditionValues(
-		map[string]any{"ArnLike": map[string]any{"other": "x"}},
-		[]string{"ArnLike"},
-		"aws:SourceArn",
-	)
-	if found || len(values) != 0 {
-		t.Fatalf(
-			"loggingConditionValues missing condition key = (%v,%v), want (false,empty)",
-			found,
-			values,
-		)
-	}
 }
 
 func TestLoggingHelperRemainingBranches(t *testing.T) {
@@ -401,7 +377,11 @@ func TestFlushLogBatchAndForceFlushErrorBranches(t *testing.T) {
 		mustCreateBucket(t, b, "flush-dst")
 		b.SetBucketOwner("flush-src", "minis3-access-key")
 		b.SetBucketOwner("flush-dst", "minis3-access-key")
-		if err := b.PutBucketPolicy("flush-dst", `{"Statement":[]}`, false); err != nil {
+		if err := b.PutBucketPolicy(
+			"flush-dst",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+			false,
+		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 
@@ -443,7 +423,11 @@ func TestFlushLogBatchAndForceFlushErrorBranches(t *testing.T) {
 		mustCreateBucket(t, b, "force-dst")
 		b.SetBucketOwner("force-src", "minis3-access-key")
 		b.SetBucketOwner("force-dst", "minis3-access-key")
-		if err := b.PutBucketPolicy("force-dst", `{"Statement":[]}`, false); err != nil {
+		if err := b.PutBucketPolicy(
+			"force-dst",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+			false,
+		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 
@@ -540,7 +524,7 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 	reqOther.Header.Set("Authorization", authHeader("tenant-access-key"))
 
 	t.Run("allow statement mismatch denies before ACL fallback", func(t *testing.T) {
-		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::access-remain/*","Condition":{"StringEquals":{"aws:SourceIp":"192.0.2.1"}}}]}`
+		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::access-remain/*","Condition":{"StringEquals":{"aws:SourceIp":"198.51.100.7"}}}]}`
 		if err := b.PutBucketPolicy("access-remain", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
@@ -1110,7 +1094,7 @@ func TestObjectRemainingBranches(t *testing.T) {
 		b.SetBucketOwner("obj-remain-log-target", "minis3-access-key")
 		if err := b.PutBucketPolicy(
 			"obj-remain-log-target",
-			`{"Statement":[]}`,
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
 			false,
 		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)

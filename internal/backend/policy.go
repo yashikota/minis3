@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // BucketPolicy represents a parsed S3 bucket policy.
 type BucketPolicy struct {
 	Version   string              `json:"Version"`
+	ID        string              `json:"Id,omitempty"`
 	Statement PolicyStatementList `json:"Statement"`
 }
 
@@ -72,7 +74,7 @@ func ValidateIAMUserPolicyDocument(document string) error {
 			}
 			seenSids[stmt.Sid] = struct{}{}
 		}
-		if stmt.Principal != nil {
+		if stmt.Principal != nil || stmt.NotPrincipal != nil {
 			return ErrMalformedPolicyDocument
 		}
 		if stmt.Effect != "Allow" && stmt.Effect != "Deny" {
@@ -83,13 +85,22 @@ func ValidateIAMUserPolicyDocument(document string) error {
 }
 
 // PolicyStatement represents a single statement in a bucket policy.
+//
+// Action/NotAction, Resource/NotResource and Principal/NotPrincipal are
+// mutually exclusive pairs. A nil slice (or nil principal) means the element
+// is absent. ValidateBucketPolicy guarantees that a stored bucket policy has
+// exactly one principal and one action element per statement, and at most
+// one resource element (an absent Resource applies to the whole bucket).
 type PolicyStatement struct {
-	Sid       string                                    `json:"Sid,omitempty"`
-	Effect    string                                    `json:"Effect"`
-	Action    PolicyStringOrSlice                       `json:"Action"`
-	Resource  PolicyStringOrSlice                       `json:"Resource"`
-	Principal any                                       `json:"Principal,omitempty"`
-	Condition map[string]map[string]PolicyStringOrSlice `json:"Condition,omitempty"`
+	Sid          string                                    `json:"Sid,omitempty"`
+	Effect       string                                    `json:"Effect"`
+	Action       PolicyStringOrSlice                       `json:"Action,omitempty"`
+	NotAction    PolicyStringOrSlice                       `json:"NotAction,omitempty"`
+	Resource     PolicyStringOrSlice                       `json:"Resource,omitempty"`
+	NotResource  PolicyStringOrSlice                       `json:"NotResource,omitempty"`
+	Principal    any                                       `json:"Principal,omitempty"`
+	NotPrincipal any                                       `json:"NotPrincipal,omitempty"`
+	Condition    map[string]map[string]PolicyStringOrSlice `json:"Condition,omitempty"`
 }
 
 // PolicyStringOrSlice handles JSON fields that can be either a string or an array of strings.
@@ -98,8 +109,12 @@ type PolicyStringOrSlice []string
 func (p *PolicyStringOrSlice) UnmarshalJSON(data []byte) error {
 	// IAM accepts a single value or an array, and condition values may be
 	// JSON booleans or numbers (e.g. {"Bool": {"aws:SecureTransport": false}}).
+	// Numbers keep their literal spelling so that a large account ID written
+	// as a number still compares equal to its string form.
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
 	var raw any
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := decoder.Decode(&raw); err != nil {
 		return err
 	}
 	values, ok := raw.([]any)
@@ -111,7 +126,9 @@ func (p *PolicyStringOrSlice) UnmarshalJSON(data []byte) error {
 		switch v := v.(type) {
 		case string:
 			out = append(out, v)
-		case bool, float64:
+		case json.Number:
+			out = append(out, v.String())
+		case bool:
 			out = append(out, fmt.Sprint(v))
 		default:
 			return fmt.Errorf("unsupported policy value %v", v)
@@ -139,6 +156,28 @@ type PolicyEvalContext struct {
 	RequestObjectTags  map[string]string
 	AccessKey          string
 	IsAnonymous        bool
+	// Principal identifies the caller. When nil it is derived from
+	// AccessKey/IsAnonymous with PrincipalForAccessKey.
+	Principal *PolicyPrincipal
+	// ConditionKeys holds request context values for global and
+	// service-specific condition keys (aws:SourceIp, s3:prefix, ...). Keys
+	// are matched case-insensitively, as IAM condition key names are.
+	ConditionKeys map[string][]string
+	// CurrentTime is the request time for aws:CurrentTime/aws:EpochTime.
+	// The zero value means time.Now().
+	CurrentTime time.Time
+}
+
+// parseBucketPolicy decodes a bucket policy for evaluation.
+func parseBucketPolicy(policyJSON string) (*BucketPolicy, bool) {
+	if policyJSON == "" {
+		return nil, false
+	}
+	var policy BucketPolicy
+	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
+		return nil, false
+	}
+	return &policy, true
 }
 
 // EvaluateBucketPolicy evaluates a bucket policy against the given context.
@@ -149,192 +188,90 @@ func EvaluateBucketPolicy(policyJSON string, ctx PolicyEvalContext) bool {
 }
 
 // EvaluateBucketPolicyAccess evaluates a bucket policy and returns the effect.
-// Deny takes priority over Allow. If no statement matches, returns Default.
+// An applicable Deny statement wins over any Allow; if no statement applies
+// the result is Default (implicit deny, left to the caller's ACL logic).
+// Statement order is irrelevant.
 func EvaluateBucketPolicyAccess(policyJSON string, ctx PolicyEvalContext) PolicyEffect {
-	if policyJSON == "" {
+	policy, ok := parseBucketPolicy(policyJSON)
+	if !ok {
 		return PolicyEffectDefault
 	}
+	return policy.evaluate(ctx)
+}
 
-	var policy BucketPolicy
-	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
-		return PolicyEffectDefault
-	}
-
-	hasAllow := false
-
-	// First pass: check for explicit Deny (Deny takes priority)
-	for _, stmt := range policy.Statement {
-		if stmt.Effect != "Deny" {
+func (p *BucketPolicy) evaluate(ctx PolicyEvalContext) PolicyEffect {
+	ctx.Principal = resolvePrincipal(ctx)
+	allowed := false
+	for i := range p.Statement {
+		stmt := &p.Statement[i]
+		if !stmt.applies(ctx) || !evaluateConditions(stmt.Condition, ctx) {
 			continue
 		}
-		if !matchesPrincipal(stmt.Principal, ctx) {
-			continue
-		}
-		if !matchesAction(stmt.Action, ctx.Action) {
-			continue
-		}
-		if !matchesResource(stmt.Resource, ctx.Resource) {
-			continue
-		}
-		if evaluateConditions(stmt.Condition, ctx) {
+		switch stmt.Effect {
+		case "Deny":
 			return PolicyEffectDeny
+		case "Allow":
+			allowed = true
 		}
 	}
-
-	// Second pass: check for explicit Allow
-	for _, stmt := range policy.Statement {
-		if stmt.Effect != "Allow" {
-			continue
-		}
-		if !matchesPrincipal(stmt.Principal, ctx) {
-			continue
-		}
-		if !matchesAction(stmt.Action, ctx.Action) {
-			continue
-		}
-		if !matchesResource(stmt.Resource, ctx.Resource) {
-			continue
-		}
-		if evaluateConditions(stmt.Condition, ctx) {
-			hasAllow = true
-		}
-	}
-
-	if hasAllow {
+	if allowed {
 		return PolicyEffectAllow
 	}
 	return PolicyEffectDefault
 }
 
+// applies reports whether the statement's principal, action and resource
+// elements match the request, ignoring conditions.
+func (s *PolicyStatement) applies(ctx PolicyEvalContext) bool {
+	return s.matchesPrincipal(ctx) && s.matchesAction(ctx.Action) &&
+		s.matchesResource(ctx.Resource)
+}
+
+func (s *PolicyStatement) matchesPrincipal(ctx PolicyEvalContext) bool {
+	if s.NotPrincipal != nil {
+		return !matchesPrincipal(s.NotPrincipal, ctx)
+	}
+	return matchesPrincipal(s.Principal, ctx)
+}
+
+func (s *PolicyStatement) matchesAction(action string) bool {
+	if s.NotAction != nil {
+		return !matchesAction(s.NotAction, action)
+	}
+	return matchesAction(s.Action, action)
+}
+
+func (s *PolicyStatement) matchesResource(resource string) bool {
+	if s.NotResource != nil {
+		return !matchesResource(s.NotResource, resource)
+	}
+	return matchesResource(s.Resource, resource)
+}
+
 // HasAllowStatementForRequest reports whether the policy has an Allow statement
 // that matches principal/action/resource for the request context, regardless of conditions.
 func HasAllowStatementForRequest(policyJSON string, ctx PolicyEvalContext) bool {
-	if policyJSON == "" {
-		return false
-	}
-
-	var policy BucketPolicy
-	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
-		return false
-	}
-
-	for _, stmt := range policy.Statement {
-		if stmt.Effect != "Allow" {
-			continue
-		}
-		if !matchesPrincipal(stmt.Principal, ctx) {
-			continue
-		}
-		if !matchesAction(stmt.Action, ctx.Action) {
-			continue
-		}
-		if !matchesResource(stmt.Resource, ctx.Resource) {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-func matchesPrincipal(principal any, ctx PolicyEvalContext) bool {
-	// Backward-compat: statements without Principal are treated as matching.
-	if principal == nil {
-		return true
-	}
-
-	values, ok := extractAWSPrincipals(principal)
+	policy, ok := parseBucketPolicy(policyJSON)
 	if !ok {
 		return false
 	}
-	for _, value := range values {
-		switch value {
-		case "*":
-			return true
-		default:
-			if ctx.AccessKey != "" && value == ctx.AccessKey {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func extractAWSPrincipals(principal any) ([]string, bool) {
-	switch p := principal.(type) {
-	case string:
-		return []string{p}, true
-	case []any:
-		values := make([]string, 0, len(p))
-		for _, item := range p {
-			s, ok := item.(string)
-			if !ok {
-				return nil, false
-			}
-			values = append(values, s)
-		}
-		return values, true
-	case map[string]any:
-		rawAWS, ok := p["AWS"]
-		if !ok {
-			return nil, false
-		}
-		return extractAWSPrincipals(rawAWS)
-	default:
-		return nil, false
-	}
-}
-
-func isPublicPrincipal(principal any) bool {
-	values, ok := extractAWSPrincipals(principal)
-	if !ok {
-		return false
-	}
-	for _, value := range values {
-		if value == "*" {
+	ctx.Principal = resolvePrincipal(ctx)
+	for i := range policy.Statement {
+		stmt := &policy.Statement[i]
+		if stmt.Effect == "Allow" && stmt.applies(ctx) {
 			return true
 		}
-	}
-	return false
-}
-
-// IsPolicyPublic returns true when policy contains an unconditional public Allow.
-func IsPolicyPublic(policyJSON string) bool {
-	if policyJSON == "" {
-		return false
-	}
-
-	var policy BucketPolicy
-	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
-		return false
-	}
-
-	for _, stmt := range policy.Statement {
-		if stmt.Effect != "Allow" {
-			continue
-		}
-		if !isPublicPrincipal(stmt.Principal) {
-			continue
-		}
-		// Conservative behavior: any condition makes it non-public.
-		if len(stmt.Condition) > 0 {
-			continue
-		}
-		return true
 	}
 	return false
 }
 
 func matchesAction(actions PolicyStringOrSlice, target string) bool {
+	// IAM action names are case-insensitive and support * and ? wildcards
+	// anywhere in the pattern.
+	target = strings.ToLower(target)
 	for _, action := range actions {
-		if action == "*" || action == "s3:*" || strings.EqualFold(action, target) {
+		if action == "*" || wildcardMatch(strings.ToLower(action), target) {
 			return true
-		}
-		// Support prefix wildcards like s3:Get*
-		if strings.HasSuffix(action, "*") {
-			prefix := strings.TrimSuffix(action, "*")
-			if strings.HasPrefix(strings.ToLower(target), strings.ToLower(prefix)) {
-				return true
-			}
 		}
 	}
 	return false
@@ -361,108 +298,26 @@ func matchResourcePattern(pattern, target string) bool {
 	return wildcardMatch(pattern, target)
 }
 
-func evaluateConditions(
-	conditions map[string]map[string]PolicyStringOrSlice,
-	ctx PolicyEvalContext,
-) bool {
-	if len(conditions) == 0 {
-		return true // No conditions means unconditional match
-	}
-
-	// All condition operators and keys must match (AND logic). Multiple
-	// values for one key are ORed, except for negated operators, which
-	// match only when the request value matches none of them.
-	for operator, condMap := range conditions {
-		for condKey, condValues := range condMap {
-			if !evaluateConditionValues(operator, condKey, condValues, ctx) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func evaluateConditionValues(
-	operator, condKey string,
-	condValues PolicyStringOrSlice,
-	ctx PolicyEvalContext,
-) bool {
-	negated := strings.Contains(strings.TrimSuffix(operator, "IfExists"), "Not")
-	for _, condValue := range condValues {
-		matched := evaluateCondition(operator, condKey, condValue, ctx)
-		if negated && !matched {
-			return false
-		}
-		if !negated && matched {
-			return true
-		}
-	}
-	return negated
-}
-
-func evaluateCondition(operator, condKey, condValue string, ctx PolicyEvalContext) bool {
-	if !conditionKeySupportedForAction(condKey, ctx.Action) {
-		return false
-	}
-
-	// Handle IfExists suffix - if the key doesn't exist, the condition is satisfied
-	isIfExists := strings.HasSuffix(operator, "IfExists")
-	baseOperator := strings.TrimSuffix(operator, "IfExists")
-
-	actualValue := getConditionKeyValue(condKey, ctx)
-
-	if isIfExists && actualValue == "" {
-		return true // Key doesn't exist, condition is vacuously true
-	}
-
-	switch baseOperator {
-	case "StringEquals":
-		return actualValue == condValue
-	case "StringNotEquals":
-		return actualValue != condValue
-	case "StringLike":
-		return matchWildcard(condValue, actualValue)
-	case "StringNotLike":
-		return !matchWildcard(condValue, actualValue)
-	case "Null":
-		isNull := actualValue == ""
-		if condValue == "true" {
-			return isNull
-		}
-		return !isNull
-	default:
-		return false
-	}
-}
-
-func conditionKeySupportedForAction(condKey, action string) bool {
-	if strings.HasPrefix(condKey, "s3:ExistingObjectTag/") {
-		switch strings.ToLower(action) {
-		case "s3:putobject", "s3:deleteobject":
-			return false
-		}
-	}
-	return true
-}
-
-func matchWildcard(pattern, s string) bool {
-	// Simple wildcard matching: * matches any sequence, ? matches any single char
-	return wildcardMatch(pattern, s)
-}
-
+// wildcardMatch reports whether s matches an IAM wildcard pattern: "*"
+// matches any run of characters (including "/" and none) and "?" exactly one
+// character. Matching is per Unicode character, not per byte.
 func wildcardMatch(pattern, s string) bool {
+	if !strings.ContainsAny(pattern, "*?") {
+		return pattern == s
+	}
+	p, str := []rune(pattern), []rune(s)
 	px, sx := 0, 0
 	starIdx, matchIdx := -1, 0
 
-	for sx < len(s) {
-		if px < len(pattern) && pattern[px] == '?' {
+	for sx < len(str) {
+		if px < len(p) && p[px] == '?' {
 			px++
 			sx++
-		} else if px < len(pattern) && pattern[px] == '*' {
+		} else if px < len(p) && p[px] == '*' {
 			starIdx = px
 			matchIdx = sx
 			px++
-		} else if px < len(pattern) && pattern[px] == s[sx] {
+		} else if px < len(p) && p[px] == str[sx] {
 			px++
 			sx++
 		} else if starIdx >= 0 {
@@ -474,49 +329,9 @@ func wildcardMatch(pattern, s string) bool {
 		}
 	}
 
-	for px < len(pattern) && pattern[px] == '*' {
+	for px < len(p) && p[px] == '*' {
 		px++
 	}
 
-	return px == len(pattern)
-}
-
-func getConditionKeyValue(condKey string, ctx PolicyEvalContext) string {
-	// ExistingObjectTag condition: s3:ExistingObjectTag/<key>
-	if strings.HasPrefix(condKey, "s3:ExistingObjectTag/") {
-		tagKey := condKey[len("s3:ExistingObjectTag/"):]
-		if ctx.ExistingObjectTags != nil {
-			return ctx.ExistingObjectTags[tagKey]
-		}
-		return ""
-	}
-
-	// RequestObjectTag condition: s3:RequestObjectTag/<key>
-	if strings.HasPrefix(condKey, "s3:RequestObjectTag/") {
-		tagKey := condKey[len("s3:RequestObjectTag/"):]
-		if ctx.RequestObjectTags != nil {
-			return ctx.RequestObjectTags[tagKey]
-		}
-		return ""
-	}
-
-	// aws: prefixed conditions (Referer, etc.)
-	if strings.HasPrefix(condKey, "aws:") {
-		headerName := condKey[len("aws:"):]
-		if ctx.Headers != nil {
-			return ctx.Headers[strings.ToLower(headerName)]
-		}
-		return ""
-	}
-
-	// s3: prefixed conditions (headers)
-	if strings.HasPrefix(condKey, "s3:") {
-		headerName := condKey[len("s3:"):]
-		if ctx.Headers != nil {
-			return ctx.Headers[headerName]
-		}
-		return ""
-	}
-
-	return ""
+	return px == len(p)
 }

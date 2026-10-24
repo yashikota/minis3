@@ -39,19 +39,3 @@ func FuzzNormalizePostPolicyFieldName(f *testing.F) {
 		_ = normalizePostPolicyFieldName(fieldName)
 	})
 }
-
-func FuzzHandlerWildcardMatch(f *testing.F) {
-	f.Add("*", "anything")
-	f.Add("prefix*", "prefixSuffix")
-	f.Add("?oo", "foo")
-	f.Add("", "")
-	f.Add("*a*b*c*", "xaxbxcx")
-	f.Add("http://*.example.com", "http://www.example.com")
-	f.Add("https://*", "https://example.com")
-	f.Add("*://example.com", "http://example.com")
-	f.Add("http://localhost:*", "http://localhost:3000")
-
-	f.Fuzz(func(t *testing.T, pattern, value string) {
-		_ = wildcardMatch(pattern, value)
-	})
-}

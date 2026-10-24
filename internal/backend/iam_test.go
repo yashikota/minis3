@@ -164,7 +164,7 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
-	policy := `{"Version":"2012-10-17","Statement":[]}`
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`
 
 	t.Run("default denySelfAccess is false", func(t *testing.T) {
 		_ = b.PutBucketPolicy("test-bucket", policy, false)

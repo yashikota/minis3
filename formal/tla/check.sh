@@ -6,8 +6,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-TLA_VERSION="v1.8.0"
-TLA_SHA256="dae639a1f51a9e13ce60c369b15f32124cf1a78017aca366b6de0ae2b5169439"
+TLA_VERSION="v1.7.4"
+TLA_SHA256="936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
 JAR="${TLA2TOOLS_JAR:-.tla2tools-${TLA_VERSION}.jar}"
 
 if [ ! -f "$JAR" ]; then

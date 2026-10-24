@@ -34,7 +34,7 @@ tasks:
     desc: "Model-check the TLA+ specs (needs Java 11+) and run the Go model-based tests"
     cmds:
       - formal/tla/check.sh
-      - go test -race -run 'TestVersioningModel|TestListPagingProperties' ./internal/backend/
+      - go test -race -run 'TestVersioningModel|TestListPagingProperties|TestBucketPolicyModel|TestPolicyConditionModel' ./internal/backend/
 
   tobari:
     desc: "Measure scoped coverage with tobari (outputs ./tobari/tobari.json)"

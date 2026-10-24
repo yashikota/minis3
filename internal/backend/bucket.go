@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -449,12 +448,8 @@ func (b *Backend) PutBucketPolicy(bucketName, policy string, denySelfAccess bool
 		return ErrBucketNotFound
 	}
 
-	// Basic JSON validation
-	if !isValidJSON(policy) {
-		return ErrMalformedPolicy
-	}
-	if !isSupportedBucketPolicy(policy) {
-		return ErrMalformedPolicy
+	if err := ValidateBucketPolicy(policy, bucketName); err != nil {
+		return err
 	}
 
 	bucket.Policy = policy
@@ -475,45 +470,6 @@ func (b *Backend) DeleteBucketPolicy(bucketName string) error {
 	bucket.Policy = ""
 	bucket.PolicyDenySelfAccess = false
 	return nil
-}
-
-// isValidJSON checks if a string is valid JSON.
-func isValidJSON(s string) bool {
-	return json.Valid([]byte(s))
-}
-
-func isSupportedBucketPolicy(policy string) bool {
-	var doc map[string]any
-	if err := json.Unmarshal([]byte(policy), &doc); err != nil {
-		return false
-	}
-	statementsRaw, ok := doc["Statement"]
-	if !ok {
-		return true
-	}
-	var statements []any
-	switch s := statementsRaw.(type) {
-	case []any:
-		statements = s
-	case map[string]any:
-		statements = []any{s}
-	default:
-		return true
-	}
-
-	for _, raw := range statements {
-		stmt, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		effect, _ := stmt["Effect"].(string)
-		if _, hasNotPrincipal := stmt["NotPrincipal"]; hasNotPrincipal &&
-			strings.EqualFold(effect, "Allow") {
-			return false
-		}
-	}
-
-	return true
 }
 
 // DefaultOwner returns the default owner for minis3.

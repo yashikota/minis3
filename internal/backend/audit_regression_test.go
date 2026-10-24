@@ -462,10 +462,10 @@ func TestPolicyConditionValueLists(t *testing.T) {
 	}
 
 	// Boolean condition values parse.
-	boolPolicy := `{"Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:*",` +
+	boolPolicy := `{"Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:*","Resource":"*",` +
 		`"Condition":{"Bool":{"aws:SecureTransport":false}}}]}`
-	if !isSupportedBucketPolicy(boolPolicy) {
-		t.Fatal("boolean condition value rejected")
+	if err := ValidateBucketPolicy(boolPolicy, ""); err != nil {
+		t.Fatalf("boolean condition value rejected: %v", err)
 	}
 }
 

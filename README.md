@@ -183,7 +183,7 @@ curl -i http://127.0.0.1:9191/health
 | `UploadPartCopy` | `CopySourceSSECustomerAlgorithm`, `CopySourceSSECustomerKey`, `CopySourceSSECustomerKeyMD5`, `SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5` |
 | `RestoreObject` | Restores complete instantly; `x-amz-restore` always reports `ongoing-request="false"` once restored |
 | `PutObject` / `CopyObject` with `aws:kms` | `x-amz-server-side-encryption-aws-kms-key-id` is optional (omitted → default key is assumed, per AWS); headers are stored, no actual encryption |
-| `PutBucketPolicy` | Statements combining `NotPrincipal` with `Allow` are rejected |
+| `PutBucketPolicy` | Policies are validated strictly (unknown elements, actions, condition operators or malformed values are rejected with `MalformedPolicy`); `Principal`/`NotPrincipal` (`AWS` account IDs, account-root and user ARNs, `CanonicalUser`, `Service`), `Action`/`NotAction`, `Resource`/`NotResource` and every IAM condition operator family (String, Numeric, Date, Bool, Binary, IpAddress, Arn, Null, with `IfExists` and `ForAllValues`/`ForAnyValue`) are evaluated. `NotPrincipal` with `Allow` is rejected; `Resource` may be omitted and duplicate `Sid`s are accepted (as RGW does) |
 | SigV2 presigned URLs | Only `Expires` format/expiry is checked; the signature itself is not verified (mock only) |
 | SigV2 `Authorization` header | Only the `AWS AccessKey:Signature` shape and an optional `x-amz-date` are checked; neither the access key nor the signature is verified (mock only) |
 | MFA Delete | `x-amz-mfa` must be present and well formed (`<serial> <code>`); the code itself is not checked |
@@ -222,12 +222,15 @@ curl -i http://127.0.0.1:9191/health
 `formal/tla` holds TLA+ specifications that the TLC model checker explores exhaustively within small bounds:
 
 - `S3Versioning.tla`: versioning states (Unset → Enabled ⇄ Suspended), null-version replacement, delete markers, permanent deletes, Object Lock and legal holds. Invariants include a unique null version, unique version IDs, newest-first ordering, and "Object Lock implies versioning enabled"; temporal properties include "a bucket never returns to unversioned" and "a version under legal hold is never removed".
+- `S3BucketPolicy.tla`: bucket policy evaluation over every statement shape (Principal/NotPrincipal, Action/NotAction, Resource/NotResource, conditions). TLC checks that the implementation-shaped single-pass fold equals the declarative "explicit Deny wins, else any Allow" semantics, that statement order is irrelevant, that Deny is sticky and Allow is monotone, that anonymous callers are matched only through `*`, and that the Not* elements are exact complements. `S3BucketPolicyPairs.cfg` explores all two-statement policies.
+- `S3PolicyCondition.tla`: the IAM condition operator algebra over every match relation: negation is the complement for plain operators, `IfExists` only changes the missing-key case, `ForAllValues`/`ForAnyValue` on empty sets, De Morgan duality between the set qualifiers and negation, value lists are disjunctions, and `Null` is a presence test.
 - `S3ListPaging.tla`: the continuation-marker rules shared by ListObjects V1/V2, ListObjectVersions and ListMultipartUploads (common prefixes count toward max-keys; resuming after `(key, version)`). TLC checks that paging returns every entry exactly once, in order, sets IsTruncated exactly when entries remain, and terminates.
 
 The implementation is tied to the models by Go tests that run the same rules against the real backend:
 
 - `internal/backend/model_versioning_test.go`: a reference model of the versioning spec stepped in lockstep with the backend over random operation sequences (`TestVersioningModelRandomSequences`, `FuzzVersioningModel`).
 - `internal/backend/paging_property_test.go`: page-by-page listings compared against an independent oracle (`TestListPagingProperties`, `FuzzListPagingProperties`).
+- `internal/backend/policy_model_test.go`: the policy and condition models transcribed in Go and compared against the real policy validator and evaluator for every single statement, every statement pair, and random long policies (`TestBucketPolicyModel*`, `TestPolicyConditionModel`).
 
 Run everything with `task formal`, or only TLC with `formal/tla/check.sh`.
 

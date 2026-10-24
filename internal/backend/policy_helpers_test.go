@@ -96,7 +96,7 @@ func TestPolicyMatcherHelpers(t *testing.T) {
 	})
 
 	t.Run("wildcard helper branches", func(t *testing.T) {
-		if !matchWildcard("a*", "abcd") {
+		if !wildcardMatch("a*", "abcd") {
 			t.Fatal("expected wildcard match")
 		}
 		if !wildcardMatch("a?c", "abc") {

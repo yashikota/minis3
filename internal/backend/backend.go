@@ -297,7 +297,7 @@ func (b *Backend) CreateIAMUser(userName, path string) (*IAMUser, error) {
 	}
 
 	userID := "AID" + strings.ToUpper(generateRandomID(10))
-	arn := fmt.Sprintf("arn:aws:iam::123456789012:user%s%s", path, userName)
+	arn := fmt.Sprintf("arn:aws:iam::%s:user%s%s", iamAccountID, path, userName)
 
 	user := &IAMUser{
 		UserName:   userName,
@@ -507,6 +507,20 @@ func (b *Backend) LookupCredential(accessKey string) (string, bool) {
 		return k.SecretAccessKey, true
 	}
 	return "", false
+}
+
+// PrincipalForAccessKey returns the policy identity for an access key,
+// resolving keys of IAM users created through the IAM API to those users.
+func (b *Backend) PrincipalForAccessKey(accessKey string) *PolicyPrincipal {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if k, ok := b.iamAccessKeys[accessKey]; ok {
+		if user, ok := b.iamUsers[k.UserName]; ok {
+			return PrincipalForIAMUser(user, accessKey)
+		}
+	}
+	return PrincipalForAccessKey(accessKey)
 }
 
 func WriteError(w http.ResponseWriter, code int, s3Code, message string) {

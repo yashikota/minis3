@@ -181,7 +181,7 @@ func TestBucketPolicy(t *testing.T) {
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
-	validPolicy := `{"Version":"2012-10-17","Statement":[]}`
+	validPolicy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`
 	invalidPolicy := `{invalid json}`
 
 	t.Run("no policy initially", func(t *testing.T) {
@@ -235,32 +235,6 @@ func TestBucketPolicy(t *testing.T) {
 			t.Errorf("expected ErrBucketNotFound, got %v", err)
 		}
 	})
-}
-
-func TestIsValidJSON(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  bool
-	}{
-		{"valid object", `{"key": "value"}`, true},
-		{"valid array", `["a", "b"]`, true},
-		{"valid nested", `{"nested": {"key": "value"}}`, true},
-		{"valid with escapes", `{"key": "value with \"quotes\""}`, true},
-		{"empty string", ``, false},
-		{"not json", `hello`, false},
-		{"unbalanced braces", `{"key": "value"`, false},
-		{"unbalanced brackets", `["a", "b"`, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isValidJSON(tt.input)
-			if got != tt.want {
-				t.Errorf("isValidJSON(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
 }
 
 func TestGetBucketUsage(t *testing.T) {

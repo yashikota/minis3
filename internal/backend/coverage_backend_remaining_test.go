@@ -27,10 +27,11 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 	if err := ValidateBucketName("tenant:abc-bucket"); err != nil {
 		t.Fatalf("ValidateBucketName tenant-prefixed valid name failed: %v", err)
 	}
-	if !isSupportedBucketPolicy(
+	if err := ValidateBucketPolicy(
 		`{"Version":"2012-10-17","Statement":{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}}`,
-	) {
-		t.Fatal("isSupportedBucketPolicy should support map-style Statement")
+		"b",
+	); err != nil {
+		t.Fatalf("ValidateBucketPolicy should support map-style Statement: %v", err)
 	}
 
 	// Cover SetBucketOwner path when ACL already exists.
