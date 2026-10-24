@@ -309,7 +309,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/mp-gap/u?uploadId=fake&partNumber=1",
 				"p",
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, w, http.StatusOK)
@@ -334,7 +334,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				"http://example.test/mp-gap/noobj?uploadId=u1",
 				completeBody,
-				map[string]string{"If-Match": `"etag"`},
+				map[string]string{
+					"Authorization": authHeader("minis3-access-key"),
+					"If-Match":      `"etag"`,
+				},
 			),
 		)
 		requireStatus(t, wIfMatchNoObj, http.StatusNotFound)
@@ -347,7 +350,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				"http://example.test/mp-gap/exists?uploadId=u2",
 				completeBody,
-				map[string]string{"If-Match": `"other"`},
+				map[string]string{
+					"Authorization": authHeader("minis3-access-key"),
+					"If-Match":      `"other"`,
+				},
 			),
 		)
 		requireStatus(t, wIfMatchMismatch, http.StatusPreconditionFailed)
@@ -363,7 +369,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				"http://example.test/mp-gap/exists?uploadId=u3",
 				completeBody,
-				map[string]string{"If-None-Match": obj.ETag},
+				map[string]string{
+					"Authorization": authHeader("minis3-access-key"),
+					"If-None-Match": obj.ETag,
+				},
 			),
 		)
 		requireStatus(t, wIfNoneMatch, http.StatusPreconditionFailed)
@@ -401,7 +410,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				fmt.Sprintf("http://example.test/mp-gap/checksum?uploadId=%s", uploadID),
 				`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>`+partETag+`</ETag><ChecksumSHA256>bad</ChecksumSHA256></Part></CompleteMultipartUpload>`,
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, wBadPartDigest, http.StatusBadRequest)
@@ -438,7 +447,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				fmt.Sprintf("http://example.test/mp-gap/checksum2?uploadId=%s", uploadID2),
 				`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>`+partETag2+`</ETag></Part></CompleteMultipartUpload>`,
-				map[string]string{"x-amz-checksum-sha256": "wrong"},
+				map[string]string{
+					"Authorization":         authHeader("minis3-access-key"),
+					"x-amz-checksum-sha256": "wrong",
+				},
 			),
 		)
 		requireStatus(t, wHeaderBadDigest, http.StatusBadRequest)
@@ -460,7 +472,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				fmt.Sprintf("http://example.test/mp-gap/missing-part?uploadId=%s", uploadID3),
 				`<CompleteMultipartUpload><Part><PartNumber>2</PartNumber><ETag>"x"</ETag></Part></CompleteMultipartUpload>`,
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, wMissingPart, http.StatusBadRequest)
@@ -499,7 +511,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				fmt.Sprintf("http://example.test/mp-gap/unknown-algo?uploadId=%s", uploadID4),
 				`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>`+partETag4+`</ETag></Part></CompleteMultipartUpload>`,
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, wUnknownAlgo, http.StatusOK)
@@ -517,7 +529,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				"http://example.test/mp-gap/complete-hook?uploadId=u-hook",
 				completeBody,
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, wCompleteBadDigest, http.StatusBadRequest)
@@ -1429,6 +1441,14 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		h, b := newTestHandler(t)
 		mustCreateBucket(t, b, "post-gap")
 		b.SetBucketOwner("post-gap", "minis3-access-key")
+		// Anonymous form uploads need s3:PutObject.
+		if err := b.PutBucketPolicy(
+			"post-gap",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:PutObject","Resource":"arn:aws:s3:::post-gap/*"}]}`,
+			false,
+		); err != nil {
+			t.Fatalf("PutBucketPolicy post-gap failed: %v", err)
+		}
 
 		origOwner := ownerForAccessKeyFn
 		origPostPutACL := postObjectPutACLFn

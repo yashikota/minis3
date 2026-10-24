@@ -85,6 +85,7 @@ func TestBucketVersioningAndListVersionsAdditionalBranches(t *testing.T) {
 			"http://example.test/versioning-branch?versioning",
 			nil,
 		)
+		req.Header.Set("Authorization", authHeader("owner-ak"))
 		req.Body = io.NopCloser(failingReader{})
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusBadRequest)
@@ -101,7 +102,12 @@ func TestBucketVersioningAndListVersionsAdditionalBranches(t *testing.T) {
 		}
 		w := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/versioning-branch?versioning", "", nil),
+			newRequest(
+				http.MethodGet,
+				"http://example.test/versioning-branch?versioning",
+				"",
+				map[string]string{"Authorization": authHeader("owner-ak")},
+			),
 		)
 		requireStatus(t, w, http.StatusOK)
 		if !strings.Contains(w.Body.String(), "<MfaDelete>Enabled</MfaDelete>") {

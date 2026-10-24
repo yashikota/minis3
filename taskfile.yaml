@@ -35,6 +35,7 @@ tasks:
     cmds:
       - formal/tla/check.sh
       - go test -race -run 'TestVersioningModel|TestListPagingProperties|TestBucketPolicyModel|TestPolicyConditionModel' ./internal/backend/
+      - go test -race -run 'TestAuthorizationModel|TestOperationTable|TestOperationAuthorizationMatrix' ./internal/handler/
 
   tobari:
     desc: "Measure scoped coverage with tobari (outputs ./tobari/tobari.json)"

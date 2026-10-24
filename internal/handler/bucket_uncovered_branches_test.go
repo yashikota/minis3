@@ -728,7 +728,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		}
 		wGetTag := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/cfg-err?tagging", "", nil),
+			newRequest(http.MethodGet, "http://example.test/cfg-err?tagging", "", ownerHeaders),
 		)
 		requireStatus(t, wGetTag, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetTag, "InternalError")
@@ -744,7 +744,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/cfg-err?tagging",
 				`<Tagging><TagSet><Tag><Key>a</Key><Value>b</Value></Tag></TagSet></Tagging>`,
-				nil,
+				ownerHeaders,
 			),
 		)
 		requireStatus(t, wPutTag, http.StatusInternalServerError)
@@ -755,7 +755,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		deleteBucketTaggingFn = func(*Handler, string) error { return errors.New("tagging del boom") }
 		wDeleteTag := doRequest(
 			h,
-			newRequest(http.MethodDelete, "http://example.test/cfg-err?tagging", "", nil),
+			newRequest(http.MethodDelete, "http://example.test/cfg-err?tagging", "", ownerHeaders),
 		)
 		requireStatus(t, wDeleteTag, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteTag, "InternalError")
@@ -843,7 +843,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/no-bucket-for-acl?acl",
 				`<AccessControlPolicy><AccessControlList><Grant><Grantee><ID>0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList></AccessControlPolicy>`,
-				nil,
+				ownerHeaders,
 			),
 		)
 		requireStatus(t, wPutACLNoBucket, http.StatusNotFound)
@@ -874,7 +874,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		}
 		wGetLC := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/cfg-err?lifecycle", "", nil),
+			newRequest(http.MethodGet, "http://example.test/cfg-err?lifecycle", "", ownerHeaders),
 		)
 		requireStatus(t, wGetLC, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetLC, "InternalError")
@@ -886,7 +886,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/cfg-err?lifecycle",
 				`<LifecycleConfiguration><Rule><Status>Enabled</Status><Expiration><Days>-1</Days></Expiration></Rule></LifecycleConfiguration>`,
-				nil,
+				ownerHeaders,
 			),
 		)
 		requireStatus(t, wPutLCInvalid, http.StatusBadRequest)
@@ -901,7 +901,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/cfg-err?lifecycle",
 				`<LifecycleConfiguration><Rule><ID>r</ID><Status>Enabled</Status><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>`,
-				nil,
+				ownerHeaders,
 			),
 		)
 		requireStatus(t, wPutLCInternal, http.StatusInternalServerError)
@@ -914,7 +914,12 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		}
 		wDeleteLC := doRequest(
 			h,
-			newRequest(http.MethodDelete, "http://example.test/cfg-err?lifecycle", "", nil),
+			newRequest(
+				http.MethodDelete,
+				"http://example.test/cfg-err?lifecycle",
+				"",
+				ownerHeaders,
+			),
 		)
 		requireStatus(t, wDeleteLC, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteLC, "InternalError")
@@ -926,7 +931,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		}
 		wGetEnc := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/cfg-err?encryption", "", nil),
+			newRequest(http.MethodGet, "http://example.test/cfg-err?encryption", "", ownerHeaders),
 		)
 		requireStatus(t, wGetEnc, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetEnc, "InternalError")
@@ -946,7 +951,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/cfg-err?encryption",
 				`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>`,
-				nil,
+				ownerHeaders,
 			),
 		)
 		requireStatus(t, wPutEnc, http.StatusInternalServerError)
@@ -957,7 +962,12 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		deleteBucketEncryptionFn = func(*Handler, string) error { return errors.New("enc del boom") }
 		wDeleteEnc := doRequest(
 			h,
-			newRequest(http.MethodDelete, "http://example.test/cfg-err?encryption", "", nil),
+			newRequest(
+				http.MethodDelete,
+				"http://example.test/cfg-err?encryption",
+				"",
+				ownerHeaders,
+			),
 		)
 		requireStatus(t, wDeleteEnc, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteEnc, "InternalError")
@@ -969,7 +979,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		}
 		wGetCORS := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/cfg-err?cors", "", nil),
+			newRequest(http.MethodGet, "http://example.test/cfg-err?cors", "", ownerHeaders),
 		)
 		requireStatus(t, wGetCORS, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetCORS, "InternalError")
@@ -985,7 +995,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/cfg-err?cors",
 				`<CORSConfiguration><CORSRule><AllowedMethod>GET</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>`,
-				nil,
+				ownerHeaders,
 			),
 		)
 		requireStatus(t, wPutCORS, http.StatusInternalServerError)
@@ -996,7 +1006,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		deleteBucketCORSFn = func(*Handler, string) error { return errors.New("cors del boom") }
 		wDeleteCORS := doRequest(
 			h,
-			newRequest(http.MethodDelete, "http://example.test/cfg-err?cors", "", nil),
+			newRequest(http.MethodDelete, "http://example.test/cfg-err?cors", "", ownerHeaders),
 		)
 		requireStatus(t, wDeleteCORS, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteCORS, "InternalError")
@@ -1008,7 +1018,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		}
 		wGetWebsite := doRequest(
 			h,
-			newRequest(http.MethodGet, "http://example.test/cfg-err?website", "", nil),
+			newRequest(http.MethodGet, "http://example.test/cfg-err?website", "", ownerHeaders),
 		)
 		requireStatus(t, wGetWebsite, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetWebsite, "InternalError")
@@ -1024,7 +1034,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/cfg-err?website",
 				`<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument></WebsiteConfiguration>`,
-				nil,
+				ownerHeaders,
 			),
 		)
 		requireStatus(t, wPutWebsite, http.StatusInternalServerError)
@@ -1035,7 +1045,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		deleteBucketWebsiteFn = func(*Handler, string) error { return errors.New("website del boom") }
 		wDeleteWebsite := doRequest(
 			h,
-			newRequest(http.MethodDelete, "http://example.test/cfg-err?website", "", nil),
+			newRequest(http.MethodDelete, "http://example.test/cfg-err?website", "", ownerHeaders),
 		)
 		requireStatus(t, wDeleteWebsite, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteWebsite, "InternalError")

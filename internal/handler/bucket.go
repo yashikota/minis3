@@ -216,6 +216,9 @@ var (
 )
 
 func isAnonymousRequest(r *http.Request) bool {
+	if accessKey, ok := callerAccessKeyOverride(r); ok {
+		return accessKey == ""
+	}
 	if r.Header.Get("Authorization") != "" {
 		return false
 	}
@@ -1077,10 +1080,6 @@ func (h *Handler) handleBucket(w http.ResponseWriter, r *http.Request, bucketNam
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		if !h.checkAccess(r, bucketName, "s3:ListBucket", "") {
-			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-			return
-		}
 		// HeadBucket response headers per S3 API spec
 		w.Header().Set("x-amz-bucket-region", "us-east-1")
 		w.Header().Set("x-amz-access-point-alias", "false")
@@ -1205,6 +1204,14 @@ func (h *Handler) handlePostObjectFormUpload(
 			return
 		}
 		opts.Tags = tags
+	}
+	// The form's signer (or an anonymous caller) needs s3:PutObject.
+	r = withCallerAccessKey(r, accessKey)
+	if !h.checkAccessWithContext(r, bucketName, "s3:PutObject", key, backend.PolicyEvalContext{
+		RequestObjectTags: opts.Tags,
+	}) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
 	}
 	if !validatePostObjectChecksums(formFields, body, &opts) {
 		backend.WriteError(w, http.StatusBadRequest, "InvalidRequest", "Checksum validation failed")
@@ -1355,12 +1362,6 @@ func listingOwner(obj *backend.Object) *backend.Owner {
 
 // handleListObjectsV2 handles ListObjectsV2 requests.
 func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bucketName string) {
-	// Check bucket policy for ListBucket
-	if !h.checkAccess(r, bucketName, "s3:ListBucket", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	query := r.URL.Query()
 	prefix := query.Get("prefix")
 	delimiter := query.Get("delimiter")
@@ -1488,12 +1489,6 @@ func (h *Handler) handleListObjectsV2(w http.ResponseWriter, r *http.Request, bu
 
 // handleListObjectsV1 handles ListObjects (v1) requests.
 func (h *Handler) handleListObjectsV1(w http.ResponseWriter, r *http.Request, bucketName string) {
-	// Check bucket policy for ListBucket
-	if !h.checkAccess(r, bucketName, "s3:ListBucket", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	query := r.URL.Query()
 	prefix := query.Get("prefix")
 	delimiter := query.Get("delimiter")
@@ -1606,12 +1601,6 @@ func (h *Handler) handleListObjectVersions(
 	r *http.Request,
 	bucketName string,
 ) {
-	// Check bucket policy / ACL for ListBucketVersions
-	if !h.checkAccess(r, bucketName, "s3:ListBucketVersions", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	query := r.URL.Query()
 	prefix := query.Get("prefix")
 	delimiter := query.Get("delimiter")
@@ -1917,11 +1906,6 @@ func (h *Handler) handleGetBucketLocation(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetBucketLocation", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	location, err := getBucketLocationFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2095,11 +2079,6 @@ func (h *Handler) handleGetBucketPolicy(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetBucketPolicy", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	policy, err := getBucketPolicyFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2133,11 +2112,6 @@ func (h *Handler) handlePutBucketPolicy(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutBucketPolicy", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	defer func() { _ = r.Body.Close() }()
 	body, err := readAllFn(r.Body)
 	if err != nil {
@@ -2191,11 +2165,6 @@ func (h *Handler) handleGetBucketPolicyStatus(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetBucketPolicyStatus", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	bucket, ok := h.backend.GetBucket(bucketName)
 	if !ok {
 		backend.WriteError(
@@ -2239,11 +2208,6 @@ func (h *Handler) handleDeleteBucketPolicy(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:DeleteBucketPolicy", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	err := deleteBucketPolicyFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2268,11 +2232,6 @@ func (h *Handler) handleGetBucketACL(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetBucketAcl", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	acl, err := getBucketACLFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2308,11 +2267,6 @@ func (h *Handler) handlePutBucketACL(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutBucketAcl", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	config := h.getBucketPublicAccessBlock(bucketName)
 
 	// Check for canned ACL header first
@@ -2413,10 +2367,6 @@ func (h *Handler) handleGetBucketOwnershipControls(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetBucketOwnershipControls", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	controls, err := getBucketOwnershipControlsFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2453,10 +2403,6 @@ func (h *Handler) handlePutBucketOwnershipControls(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutBucketOwnershipControls", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -2513,10 +2459,6 @@ func (h *Handler) handleDeleteBucketOwnershipControls(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:DeleteBucketOwnershipControls", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	if err := deleteBucketOwnershipControlsFn(h, bucketName); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2538,10 +2480,6 @@ func (h *Handler) handleGetBucketRequestPayment(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetBucketRequestPayment", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	cfg, err := getBucketRequestPaymentFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2571,10 +2509,6 @@ func (h *Handler) handlePutBucketRequestPayment(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutBucketRequestPayment", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -2624,10 +2558,6 @@ func (h *Handler) handleGetBucketLogging(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetBucketLogging", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	status, err := getBucketLoggingFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2662,10 +2592,6 @@ func (h *Handler) handlePutBucketLogging(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutBucketLogging", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	sourceBucket, exists := h.backend.GetBucket(bucketName)
 	if !exists {
 		backend.WriteError(
@@ -2676,6 +2602,8 @@ func (h *Handler) handlePutBucketLogging(
 		)
 		return
 	}
+	// Like RGW, only the bucket owner may change logging, even when a bucket
+	// policy grants s3:PutBucketLogging (s3-tests test_bucket_logging_owner).
 	if sourceBucket.OwnerAccessKey != extractAccessKey(r) {
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
@@ -2789,11 +2717,6 @@ func (h *Handler) handlePostBucketLogging(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutBucketLogging", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	_, exists := h.backend.GetBucket(bucketName)
 	if !exists {
 		backend.WriteError(
@@ -2831,10 +2754,6 @@ func (h *Handler) handleDeleteBucketLogging(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutBucketLogging", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	if err := deleteBucketLoggingFn(h, bucketName); err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -3516,11 +3435,6 @@ func (h *Handler) handleGetPublicAccessBlock(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetBucketPublicAccessBlock", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	config, err := getPublicAccessBlockFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -3560,11 +3474,6 @@ func (h *Handler) handlePutPublicAccessBlock(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutBucketPublicAccessBlock", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	defer func() { _ = r.Body.Close() }()
 	body, err := readAllFn(r.Body)
 	if err != nil {
@@ -3611,11 +3520,6 @@ func (h *Handler) handleDeletePublicAccessBlock(
 	r *http.Request,
 	bucketName string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:DeleteBucketPublicAccessBlock", "") {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	err := deletePublicAccessBlockFn(h, bucketName)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
