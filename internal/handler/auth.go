@@ -235,8 +235,11 @@ func verifyAuthorizationHeaderV2(r *http.Request, auth string) error {
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 		return &presignedError{code: "AccessDenied", message: "Access Denied"}
 	}
-	// AWS validates the x-amz-date header when present on SigV2 requests.
-	// boto never sends it for SigV2, so only tampered requests reach here.
+	// AWS validates the x-amz-date header when present on SigV2 requests,
+	// and then signs an empty Date element; botocore still signs the Date
+	// header, so both are accepted.
+	date := r.Header.Get("Date")
+	dates := []string{date}
 	if values, present := r.Header["X-Amz-Date"]; present {
 		dateHeader := ""
 		if len(values) > 0 {
@@ -245,8 +248,20 @@ func verifyAuthorizationHeaderV2(r *http.Request, auth string) error {
 		if err := checkSigV2RequestDate(dateHeader); err != nil {
 			return err
 		}
+		dates = []string{"", date}
+	} else if err := checkSigV2RequestDate(date); err != nil {
+		return err
 	}
-	return nil
+	secretKey, ok := lookupCredential(r, parts[0])
+	if !ok {
+		return errInvalidAccessKeyID
+	}
+	for _, date := range dates {
+		if verifySigV2Signature(r, secretKey, date, parts[1]) {
+			return nil
+		}
+	}
+	return errSignatureDoesNotMatch
 }
 
 // checkSigV2RequestDate validates an x-amz-date header value on SigV2
@@ -538,8 +553,18 @@ func verifyPresignedURLV2(r *http.Request) error {
 		return &presignedError{code: "AccessDenied", message: "Request has expired"}
 	}
 
-	// For V2, we'll accept any valid-looking signature for mock purposes
-	// A full implementation would verify the signature
+	accessKey := query.Get("AWSAccessKeyId")
+	if accessKey == "" {
+		return &presignedError{code: "AccessDenied", message: "Access Denied"}
+	}
+	secretKey, ok := lookupCredential(r, accessKey)
+	if !ok {
+		return errInvalidAccessKeyID
+	}
+	// The Expires value takes the place of the Date element.
+	if !verifySigV2Signature(r, secretKey, expiresStr, query.Get("Signature")) {
+		return errSignatureDoesNotMatch
+	}
 	return nil
 }
 

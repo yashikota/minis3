@@ -184,14 +184,13 @@ curl -i http://127.0.0.1:9191/health
 | `RestoreObject` | Restores complete instantly; `x-amz-restore` always reports `ongoing-request="false"` once restored |
 | `PutObject` / `CopyObject` with `aws:kms` | `x-amz-server-side-encryption-aws-kms-key-id` is optional (omitted → default key is assumed, per AWS); headers are stored, no actual encryption |
 | `PutBucketPolicy` | Policies are validated strictly (unknown elements, actions, condition operators or malformed values are rejected with `MalformedPolicy`); `Principal`/`NotPrincipal` (`AWS` account IDs, account-root and user ARNs, `CanonicalUser`, `Service`), `Action`/`NotAction`, `Resource`/`NotResource` and every IAM condition operator family (String, Numeric, Date, Bool, Binary, IpAddress, Arn, Null, with `IfExists` and `ForAllValues`/`ForAnyValue`) are evaluated. `NotPrincipal` with `Allow` is rejected; `Resource` may be omitted and duplicate `Sid`s are accepted (as RGW does) |
-| SigV2 presigned URLs | Only `Expires` format/expiry is checked; the signature itself is not verified (mock only) |
-| SigV2 `Authorization` header | Only the `AWS AccessKey:Signature` shape and an optional `x-amz-date` are checked; neither the access key nor the signature is verified (mock only) |
 | MFA Delete | `x-amz-mfa` must be present and well formed (`<serial> <code>`); the code itself is not checked |
 
 ### Additional Features
 
 - **Conditional Headers:** If-Match, If-None-Match, If-Modified-Since, If-Unmodified-Since (for GetObject/HeadObject)
-- **Presigned URLs:** SigV4 presigned URL verification; SigV2 presigned URLs only check `Expires` format/expiry (signature is not verified, mock only)
+- **Presigned URLs:** SigV4 and SigV2 presigned URLs are verified (signature, access key and expiry)
+- **SigV2 `Authorization` header:** the access key, the HMAC-SHA1 signature and the `Date`/`x-amz-date` skew are verified
 - **AWS Chunked Encoding:** Transparent decoding of `aws-chunked` transfer encoding
 - **Response Header Overrides:** GetObject query parameters (`response-content-type`, `response-content-disposition`, etc.)
 - **Copy Source Conditionals:** `x-amz-copy-source-if-match`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-unmodified-since`

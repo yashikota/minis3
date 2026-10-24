@@ -284,15 +284,29 @@ func TestVerifyPresignedURLV4(t *testing.T) {
 
 func TestVerifyPresignedURLV2(t *testing.T) {
 	t.Run("valid non-expired request", func(t *testing.T) {
-		expires := time.Now().Add(5 * time.Minute).Unix()
-		req := httptest.NewRequest(
-			http.MethodGet,
-			"/bucket/key?Signature=any&Expires="+strconv.FormatInt(expires, 10),
-			nil,
-		)
+		expires := strconv.FormatInt(time.Now().Add(5*time.Minute).Unix(), 10)
+		unsigned := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+		sig := sigV2Signature("minis3-secret-key", sigV2StringsToSign(unsigned, expires)[0])
+		q := url.Values{
+			"AWSAccessKeyId": {"minis3-access-key"},
+			"Expires":        {expires},
+			"Signature":      {sig},
+		}
+		req := httptest.NewRequest(http.MethodGet, "/bucket/key?"+q.Encode(), nil)
 		if err := verifyPresignedURL(req); err != nil {
 			t.Fatalf("expected valid v2 request, got %v", err)
 		}
+	})
+
+	t.Run("unsigned placeholder signature", func(t *testing.T) {
+		expires := time.Now().Add(5 * time.Minute).Unix()
+		req := httptest.NewRequest(
+			http.MethodGet,
+			"/bucket/key?AWSAccessKeyId=minis3-access-key&Signature=any&Expires="+
+				strconv.FormatInt(expires, 10),
+			nil,
+		)
+		requirePresignedErrorCode(t, verifyPresignedURL(req), "SignatureDoesNotMatch")
 	})
 
 	t.Run("expired request", func(t *testing.T) {

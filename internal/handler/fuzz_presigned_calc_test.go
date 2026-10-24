@@ -2,7 +2,9 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 )
 
 func FuzzCalculatePresignedSignatureV4(f *testing.F) {
@@ -51,20 +53,53 @@ func FuzzCalculatePresignedSignatureV4(f *testing.F) {
 }
 
 func FuzzVerifyAuthorizationHeaderV2(f *testing.F) {
-	f.Add("AWS AKIAIOSFODNN7EXAMPLE:signature")
-	f.Add("AWS :empty")
-	f.Add("AWS key:")
-	f.Add("")
-	f.Add("AWS AKID:sig123")
-	f.Add("invalid")
-	f.Add("AWS a:b:c")
+	f.Add("GET", "/bucket/key", "acl", "x-amz-meta-a", "1", "text/plain", "AWS key:sig")
+	f.Add("PUT", "/bucket/k%20ey", "versionId=3&prefix=p", "X-Amz-Acl", "private", "", "AWS a:b:c")
+	f.Add("DELETE", "/b", "uploads", "x-amz-date", "", "", "")
 
-	f.Fuzz(func(t *testing.T, auth string) {
-		req, err := http.NewRequest(http.MethodGet, "/bucket/key", nil)
-		if err != nil {
+	f.Fuzz(func(t *testing.T, method, path, rawQuery, header, value, contentType, auth string) {
+		target := "http://example.test" + path
+		if rawQuery != "" {
+			target += "?" + rawQuery
+		}
+		req, err := http.NewRequest(method, target, nil)
+		if err != nil || req.URL.Path == "" || strings.ContainsAny(header, "\r\n:") ||
+			header == "" {
 			return
 		}
-		_ = verifyAuthorizationHeaderV2(req, auth)
+		req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
+		if strings.EqualFold(header, "x-amz-date") {
+			return
+		}
+		req.Header.Set(header, value)
+		req.Header.Set("Content-Type", contentType)
+
+		// Arbitrary headers never pass unless they carry a valid signature.
+		if err := verifyAuthorizationHeaderV2(req, auth); err == nil {
+			parts := strings.SplitN(strings.TrimPrefix(auth, "AWS "), ":", 2)
+			secret := DefaultCredentials()[parts[0]]
+			if !verifySigV2Signature(req, secret, req.Header.Get("Date"), parts[1]) {
+				t.Fatalf("%q accepted without a valid signature", auth)
+			}
+		}
+
+		// Oracle: a request signed with the right secret verifies, and
+		// with any other secret or a tampered element it does not.
+		date := req.Header.Get("Date")
+		signature := sigV2Signature("minis3-secret-key", sigV2StringsToSign(req, date)[0])
+		signed := "AWS minis3-access-key:" + signature
+		if err := verifyAuthorizationHeaderV2(req, signed); err != nil {
+			t.Fatalf("own signature rejected: %v", err)
+		}
+		if verifyAuthorizationHeaderV2(req, "AWS minis3-access-key:"+
+			sigV2Signature("minis3-alt-secret-key", sigV2StringsToSign(req, date)[0])) == nil {
+			t.Fatal("signature from another secret accepted")
+		}
+		other := req.Clone(req.Context())
+		other.Method = method + "X"
+		if verifyAuthorizationHeaderV2(other, signed) == nil {
+			t.Fatal("signature accepted for another method")
+		}
 	})
 }
 
