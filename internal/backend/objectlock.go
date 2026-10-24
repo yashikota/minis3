@@ -49,7 +49,7 @@ func (b *Backend) GetObjectLockConfiguration(bucketName string) (*ObjectLockConf
 		}, nil
 	}
 
-	return bucket.ObjectLockConfiguration, nil
+	return snapshot(bucket.ObjectLockConfiguration), nil
 }
 
 // PutObjectLockConfiguration sets the Object Lock configuration for a bucket.
@@ -99,7 +99,7 @@ func (b *Backend) PutObjectLockConfiguration(
 	// Enable Object Lock only once the configuration is known to be valid:
 	// enabling is irreversible, so a rejected request must not flip it.
 	bucket.ObjectLockEnabled = true
-	bucket.ObjectLockConfiguration = config
+	bucket.ObjectLockConfiguration = snapshot(config)
 	return nil
 }
 

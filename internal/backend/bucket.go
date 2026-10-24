@@ -149,7 +149,7 @@ func (b *Backend) GetBucket(name string) (*Bucket, bool) {
 	defer b.mu.RUnlock()
 
 	val, ok := b.buckets[name]
-	return val, ok
+	return snapshotBucket(val), ok
 }
 
 // DeleteBucket deletes a bucket if it is empty
@@ -212,7 +212,7 @@ func (b *Backend) ListBuckets() []*Bucket {
 	for _, bkt := range b.buckets {
 		res = append(res, bkt)
 	}
-	return res
+	return snapshotBuckets(res)
 }
 
 // ListBucketsWithOptions returns buckets with pagination and filtering support.
@@ -256,7 +256,7 @@ func (b *Backend) ListBucketsWithOptions(opts ListBucketsOptions) *ListBucketsRe
 		result.IsTruncated = true
 	}
 
-	result.Buckets = allBuckets[startIdx:endIdx]
+	result.Buckets = snapshotBuckets(allBuckets[startIdx:endIdx])
 
 	// Set continuation token if truncated
 	if result.IsTruncated && len(result.Buckets) > 0 {
@@ -403,7 +403,7 @@ func (b *Backend) PutBucketTagging(bucketName string, tags map[string]string) er
 		return ErrBucketNotFound
 	}
 
-	bucket.Tags = tags
+	bucket.Tags = snapshot(tags)
 	return nil
 }
 
@@ -523,10 +523,12 @@ func newGroupGrant(uri, permission string) Grant {
 	}
 }
 
+// normalizeACL returns a normalized copy of acl.
 func normalizeACL(acl *AccessControlPolicy) *AccessControlPolicy {
 	if acl == nil {
 		return NewDefaultACL()
 	}
+	acl = snapshot(acl)
 	if acl.Xmlns == "" {
 		acl.Xmlns = S3Xmlns
 	}
@@ -657,7 +659,7 @@ func (b *Backend) GetBucketACL(bucketName string) (*AccessControlPolicy, error) 
 		return NewDefaultACLForOwner(OwnerForAccessKey(bucket.OwnerAccessKey)), nil
 	}
 
-	return bucket.ACL, nil
+	return snapshot(bucket.ACL), nil
 }
 
 // PutBucketACL sets the ACL for a bucket.
@@ -725,7 +727,7 @@ func (b *Backend) GetObjectACL(bucketName, key, versionId string) (*AccessContro
 		return NewDefaultACLForOwner(OwnerForAccessKey(bucket.OwnerAccessKey)), nil
 	}
 
-	return obj.ACL, nil
+	return snapshot(obj.ACL), nil
 }
 
 // PutObjectACL sets the ACL for an object.
@@ -881,7 +883,7 @@ func (b *Backend) GetBucketLogging(bucketName string) (*BucketLoggingStatus, err
 	if bucket.LoggingConfiguration == nil {
 		return &BucketLoggingStatus{Xmlns: S3Xmlns}, nil
 	}
-	resp := *bucket.LoggingConfiguration
+	resp := *snapshot(bucket.LoggingConfiguration)
 	if resp.LoggingEnabled != nil {
 		if resp.LoggingEnabled.TargetObjectKeyFormat == nil {
 			resp.LoggingEnabled.TargetObjectKeyFormat = &TargetObjectKeyFormat{
@@ -937,9 +939,9 @@ func (b *Backend) PutBucketLogging(bucketName string, status *BucketLoggingStatu
 			LoggingType:      status.LoggingEnabled.LoggingType,
 			ObjectRollTime:   status.LoggingEnabled.ObjectRollTime,
 			RecordsBatchSize: status.LoggingEnabled.RecordsBatchSize,
-			Filter:           status.LoggingEnabled.Filter,
+			Filter:           snapshot(status.LoggingEnabled.Filter),
 			// TargetGrants are accepted in requests but not persisted.
-			TargetObjectKeyFormat: status.LoggingEnabled.TargetObjectKeyFormat,
+			TargetObjectKeyFormat: snapshot(status.LoggingEnabled.TargetObjectKeyFormat),
 		},
 	}
 	if next.LoggingEnabled.TargetObjectKeyFormat == nil {
@@ -1175,7 +1177,7 @@ func (b *Backend) GetBucketLifecycleConfiguration(
 		return nil, ErrNoSuchLifecycleConfiguration
 	}
 
-	return bucket.LifecycleConfiguration, nil
+	return snapshot(bucket.LifecycleConfiguration), nil
 }
 
 // PutBucketLifecycleConfiguration sets the lifecycle configuration for a bucket.
@@ -1200,9 +1202,7 @@ func normalizeLifecycleConfiguration(config *LifecycleConfiguration) *LifecycleC
 		return nil
 	}
 
-	normalized := *config
-	normalized.Rules = make([]LifecycleRule, len(config.Rules))
-	copy(normalized.Rules, config.Rules)
+	normalized := *snapshot(config)
 
 	for i := range normalized.Rules {
 		if strings.TrimSpace(normalized.Rules[i].ID) == "" {
@@ -1242,7 +1242,7 @@ func (b *Backend) GetBucketEncryption(
 		return nil, ErrServerSideEncryptionConfigurationNotFound
 	}
 
-	return bucket.EncryptionConfiguration, nil
+	return snapshot(bucket.EncryptionConfiguration), nil
 }
 
 // PutBucketEncryption sets the encryption configuration for a bucket.
@@ -1258,7 +1258,7 @@ func (b *Backend) PutBucketEncryption(
 		return ErrBucketNotFound
 	}
 
-	bucket.EncryptionConfiguration = config
+	bucket.EncryptionConfiguration = snapshot(config)
 	return nil
 }
 
@@ -1290,7 +1290,7 @@ func (b *Backend) GetBucketCORS(bucketName string) (*CORSConfiguration, error) {
 		return nil, ErrNoSuchCORSConfiguration
 	}
 
-	return bucket.CORSConfiguration, nil
+	return snapshot(bucket.CORSConfiguration), nil
 }
 
 // PutBucketCORS sets the CORS configuration for a bucket.
@@ -1303,7 +1303,7 @@ func (b *Backend) PutBucketCORS(bucketName string, config *CORSConfiguration) er
 		return ErrBucketNotFound
 	}
 
-	bucket.CORSConfiguration = config
+	bucket.CORSConfiguration = snapshot(config)
 	return nil
 }
 
@@ -1335,7 +1335,7 @@ func (b *Backend) GetBucketWebsite(bucketName string) (*WebsiteConfiguration, er
 		return nil, ErrNoSuchWebsiteConfiguration
 	}
 
-	return bucket.WebsiteConfiguration, nil
+	return snapshot(bucket.WebsiteConfiguration), nil
 }
 
 // PutBucketWebsite sets the website configuration for a bucket.
@@ -1348,7 +1348,7 @@ func (b *Backend) PutBucketWebsite(bucketName string, config *WebsiteConfigurati
 		return ErrBucketNotFound
 	}
 
-	bucket.WebsiteConfiguration = config
+	bucket.WebsiteConfiguration = snapshot(config)
 	return nil
 }
 
@@ -1380,7 +1380,7 @@ func (b *Backend) GetPublicAccessBlock(bucketName string) (*PublicAccessBlockCon
 		return nil, ErrNoSuchPublicAccessBlockConfiguration
 	}
 
-	return bucket.PublicAccessBlock, nil
+	return snapshot(bucket.PublicAccessBlock), nil
 }
 
 // PutPublicAccessBlock sets the public access block configuration for a bucket.
@@ -1396,7 +1396,7 @@ func (b *Backend) PutPublicAccessBlock(
 		return ErrBucketNotFound
 	}
 
-	bucket.PublicAccessBlock = config
+	bucket.PublicAccessBlock = snapshot(config)
 	return nil
 }
 

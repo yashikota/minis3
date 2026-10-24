@@ -599,9 +599,9 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 
 	t.Run("list handlers additional branches", func(t *testing.T) {
 		mustPutObject(t, b, "cfg-err", "v2-obj", "data")
-		if obj, err := b.GetObject("cfg-err", "v2-obj"); err == nil {
+		mustUpdateObject(t, b, "cfg-err", "v2-obj", func(obj *backend.Object) {
 			obj.StorageClass = ""
-		}
+		})
 		if _, err := b.PutObject(
 			"cfg-err",
 			"v1-obj",
@@ -610,9 +610,9 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		); err != nil {
 			t.Fatalf("PutObject(v1-obj) failed: %v", err)
 		}
-		if obj, err := b.GetObject("cfg-err", "v1-obj"); err == nil {
+		mustUpdateObject(t, b, "cfg-err", "v1-obj", func(obj *backend.Object) {
 			obj.StorageClass = ""
-		}
+		})
 
 		wV2 := doRequest(
 			h,
@@ -644,9 +644,9 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 			t.Fatalf("SetBucketVersioning failed: %v", err)
 		}
 		mustPutObject(t, b, "cfg-err", "ver-obj", "data")
-		if obj, err := b.GetObject("cfg-err", "ver-obj"); err == nil {
+		mustUpdateObject(t, b, "cfg-err", "ver-obj", func(obj *backend.Object) {
 			obj.StorageClass = ""
-		}
+		})
 		wVersions := doRequest(
 			h,
 			newRequest(

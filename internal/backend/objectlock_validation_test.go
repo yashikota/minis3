@@ -217,8 +217,9 @@ func TestObjectLockRetentionModeValidation(t *testing.T) {
 				}
 				// Inject retention directly to exercise Complete validation
 				// (Create would reject invalid values, so bypass it here).
-				upload.RetentionMode = tc.mode
-				upload.RetainUntilDate = date
+				live := liveUpload(t, b, upload.UploadId)
+				live.RetentionMode = tc.mode
+				live.RetainUntilDate = date
 				// LegalHold empty keeps focus on retention validation.
 				part, err := b.UploadPart(
 					"lock-complete",
@@ -323,8 +324,9 @@ func TestRetentionRequiresObjectLockEnabled(t *testing.T) {
 		// reject it, but Complete must still guard uploads that carry
 		// retention (e.g. recreated buckets) instead of storing it.
 		date := future
-		upload.RetentionMode = RetentionModeGovernance
-		upload.RetainUntilDate = &date
+		live := liveUpload(t, b, upload.UploadId)
+		live.RetentionMode = RetentionModeGovernance
+		live.RetainUntilDate = &date
 		part, err := b.UploadPart("plain-complete", "k", upload.UploadId, 1, []byte("x"))
 		if err != nil {
 			t.Fatalf("UploadPart failed: %v", err)

@@ -168,7 +168,7 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 
 	t.Run("default denySelfAccess is false", func(t *testing.T) {
 		_ = b.PutBucketPolicy("test-bucket", policy, false)
-		bucket, _ := b.GetBucket("test-bucket")
+		bucket := liveBucket(t, b, "test-bucket")
 		if bucket.PolicyDenySelfAccess {
 			t.Fatal("PolicyDenySelfAccess should be false")
 		}
@@ -176,7 +176,7 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 
 	t.Run("denySelfAccess set to true", func(t *testing.T) {
 		_ = b.PutBucketPolicy("test-bucket", policy, true)
-		bucket, _ := b.GetBucket("test-bucket")
+		bucket := liveBucket(t, b, "test-bucket")
 		if !bucket.PolicyDenySelfAccess {
 			t.Fatal("PolicyDenySelfAccess should be true")
 		}
@@ -185,7 +185,7 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 	t.Run("delete policy resets denySelfAccess", func(t *testing.T) {
 		_ = b.PutBucketPolicy("test-bucket", policy, true)
 		_ = b.DeleteBucketPolicy("test-bucket")
-		bucket, _ := b.GetBucket("test-bucket")
+		bucket := liveBucket(t, b, "test-bucket")
 		if bucket.PolicyDenySelfAccess {
 			t.Fatal("PolicyDenySelfAccess should be false after delete")
 		}

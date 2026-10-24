@@ -156,10 +156,7 @@ func TestApplyLifecycleExpiresNoncurrentVersions(t *testing.T) {
 
 	b.ApplyLifecycle(time.Now().UTC().Add(11*time.Second), 10*time.Second)
 
-	bucket, ok := b.GetBucket("lifecycle-noncurrent")
-	if !ok || bucket == nil {
-		t.Fatal("GetBucket failed after lifecycle apply")
-	}
+	bucket := liveBucket(t, b, "lifecycle-noncurrent")
 	versions := bucket.Objects["myobject"].Versions
 	if len(versions) != 2 {
 		t.Fatalf("expected current + 1 noncurrent versions, got %d", len(versions))
@@ -226,10 +223,7 @@ func TestApplyLifecycleDeletesExpiredObjectDeleteMarker(t *testing.T) {
 
 	b.ApplyLifecycle(time.Now().UTC().Add(70*time.Second), 10*time.Second)
 
-	bucket, ok := b.GetBucket("lifecycle-delete-marker")
-	if !ok || bucket == nil {
-		t.Fatal("GetBucket failed")
-	}
+	bucket := liveBucket(t, b, "lifecycle-delete-marker")
 	if _, exists := bucket.Objects["test1/a"]; exists {
 		t.Fatalf(
 			"expected test1/a to be removed after delete marker expiration, objects=%+v",
@@ -285,10 +279,7 @@ func TestApplyLifecycleDeletesOrphanDeleteMarkerAfterExpirationDays(t *testing.T
 		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
 	}
 
-	bucket, ok := b.GetBucket("lifecycle-delete-marker-days")
-	if !ok || bucket == nil {
-		t.Fatal("GetBucket failed")
-	}
+	bucket := liveBucket(t, b, "lifecycle-delete-marker-days")
 	dmTime := bucket.Objects["test1/a"].Versions[0].LastModified
 
 	// Before 5 debug-days (5 * 10 seconds), delete marker should remain.
@@ -467,10 +458,7 @@ func TestApplyLifecycleTransitionsNoncurrentVersionsStorageClass(t *testing.T) {
 		t.Fatalf("PutBucketLifecycleConfiguration failed: %v", err)
 	}
 
-	bucket, ok := b.GetBucket("lifecycle-noncurrent-transition")
-	if !ok || bucket == nil {
-		t.Fatal("GetBucket failed")
-	}
+	bucket := liveBucket(t, b, "lifecycle-noncurrent-transition")
 	base := bucket.Objects["obj"].Versions[0].LastModified
 
 	b.ApplyLifecycle(base.Add(11*time.Second), 10*time.Second)

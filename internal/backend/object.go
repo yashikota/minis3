@@ -241,6 +241,7 @@ func (b *Backend) PutObject(
 	if !ok {
 		return nil, ErrBucketNotFound
 	}
+	opts = snapshot(opts)
 
 	md5Hash := md5.New()
 	_, _ = md5Hash.Write(data)
@@ -359,7 +360,7 @@ func (b *Backend) PutObject(
 
 	addVersionToObject(bucket, key, obj)
 
-	return obj, nil
+	return snapshot(obj), nil
 }
 
 // GetObject retrieves the latest version of an object from a bucket.
@@ -387,13 +388,13 @@ func (b *Backend) GetObjectVersion(bucketName, key, versionId string) (*Object, 
 	if versionId == "" {
 		// Return the latest version (may be a DeleteMarker)
 		// Caller should check IsDeleteMarker
-		return versions.Versions[0], nil
+		return snapshot(versions.Versions[0]), nil
 	}
 
 	// Find specific version
 	for _, v := range versions.Versions {
 		if v.VersionId == versionId {
-			return v, nil
+			return snapshot(v), nil
 		}
 	}
 
@@ -416,7 +417,7 @@ func (b *Backend) DeletePreconditionTarget(bucketName, key string) *Object {
 	if !ok || len(versions.Versions) == 0 || versions.getLatestVersion() == nil {
 		return nil
 	}
-	return versions.Versions[0]
+	return snapshot(versions.Versions[0])
 }
 
 // DeleteObjectResult contains the result of deleting an object or version.
@@ -496,12 +497,12 @@ func (b *Backend) DeleteObjectVersion(
 		return &DeleteObjectVersionResult{
 			VersionId:      versionId,
 			IsDeleteMarker: isDeleteMarker,
-			DeletedObject:  deletedObj,
+			DeletedObject:  snapshot(deletedObj),
 		}, nil
 	}
 
 	// No versionId specified: create delete marker or physically delete
-	return createDeleteMarkerUnlocked(bucket, key), nil
+	return snapshot(createDeleteMarkerUnlocked(bucket, key)), nil
 }
 
 // CopyObjectOptions contains options for CopyObject operation.
@@ -587,6 +588,7 @@ func (b *Backend) CopyObject(
 	if !ok {
 		return nil, "", ErrDestinationBucketNotFound
 	}
+	opts = snapshot(opts)
 
 	copiedData := make([]byte, len(srcObj.Data))
 	copy(copiedData, srcObj.Data)
@@ -615,8 +617,8 @@ func (b *Backend) CopyObject(
 		ChecksumSHA1:      srcObj.ChecksumSHA1,
 		ChecksumSHA256:    srcObj.ChecksumSHA256,
 		ChecksumAlgorithm: srcObj.ChecksumAlgorithm,
-		Owner:             srcObj.Owner,
-		ACL:               srcObj.ACL,
+		Owner:             snapshot(srcObj.Owner),
+		ACL:               snapshot(srcObj.ACL),
 	}
 	if opts.Owner != nil {
 		// A copy is a new object owned by its writer; ACLs are not copied.
@@ -775,7 +777,7 @@ func (b *Backend) CopyObject(
 
 	addVersionToObject(dstBkt, dstKey, obj)
 
-	return obj, actualVersionId, nil
+	return snapshot(obj), actualVersionId, nil
 }
 
 // copyETag returns the ETag of a CopyObject result. CopyObject writes a
@@ -1044,7 +1046,7 @@ func (b *Backend) ListObjectsV1(
 		}
 	}
 
-	return result, nil
+	return snapshot(result), nil
 }
 
 // ListObjectsV2 lists objects with support for prefix, delimiter, continuation token, and max-keys.
@@ -1155,7 +1157,7 @@ func (b *Backend) ListObjectsV2(
 	}
 
 	result.KeyCount = len(result.Objects) + len(result.CommonPrefixes)
-	return result, nil
+	return snapshot(result), nil
 }
 
 // ListObjectVersions lists all versions of objects in a bucket.
@@ -1248,7 +1250,7 @@ func (b *Backend) ListObjectVersions(
 	result := &ListObjectVersionsResult{}
 	if maxKeys <= 0 {
 		// max-keys=0: return no entries, IsTruncated=false (same as ListObjects).
-		return result, nil
+		return snapshot(result), nil
 	}
 
 	endIdx := startIdx + maxKeys
@@ -1275,7 +1277,7 @@ func (b *Backend) ListObjectVersions(
 		result.NextVersionIdMarker = lastEntry.versionId
 	}
 
-	return result, nil
+	return snapshot(result), nil
 }
 
 // GetObjectTagging retrieves tags for an object.
@@ -1315,7 +1317,7 @@ func (b *Backend) GetObjectTagging(
 	}
 
 	// Return empty map if no tags (not an error)
-	tags := obj.Tags
+	tags := snapshot(obj.Tags)
 	if tags == nil {
 		tags = make(map[string]string)
 	}
@@ -1365,7 +1367,7 @@ func (b *Backend) PutObjectTagging(
 		return "", ErrObjectNotFound
 	}
 
-	obj.Tags = tags
+	obj.Tags = snapshot(tags)
 	return obj.VersionId, nil
 }
 

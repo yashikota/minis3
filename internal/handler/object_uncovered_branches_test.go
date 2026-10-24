@@ -504,11 +504,9 @@ func TestObjectACLAndAttributesAdditionalBranchesUncovered(t *testing.T) {
 	t.Run(
 		"get object attributes checksum, storage default, and version header",
 		func(t *testing.T) {
-			obj, err := b.GetObject("obj-acl-attr", "k")
-			if err != nil {
-				t.Fatalf("GetObject failed: %v", err)
-			}
-			obj.StorageClass = ""
+			mustUpdateObject(t, b, "obj-acl-attr", "k", func(obj *backend.Object) {
+				obj.StorageClass = ""
+			})
 
 			w := doRequest(
 				h,

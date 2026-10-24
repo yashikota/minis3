@@ -206,14 +206,12 @@ func TestHandleObjectSSECAndPartBranches(t *testing.T) {
 	)
 	requireStatus(t, wPut, http.StatusOK)
 
-	obj, err := b.GetObject("obj-ssec", "key")
-	if err != nil {
-		t.Fatalf("GetObject failed: %v", err)
-	}
-	obj.Parts = []backend.ObjectPart{
-		{PartNumber: 1, Size: 2, ETag: "\"p1\""},
-		{PartNumber: 2, Size: 2, ETag: "\"p2\""},
-	}
+	mustUpdateObject(t, b, "obj-ssec", "key", func(obj *backend.Object) {
+		obj.Parts = []backend.ObjectPart{
+			{PartNumber: 1, Size: 2, ETag: "\"p1\""},
+			{PartNumber: 2, Size: 2, ETag: "\"p2\""},
+		}
+	})
 
 	t.Run("get missing sse-c headers", func(t *testing.T) {
 		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/obj-ssec/key", "", nil))
