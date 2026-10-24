@@ -57,15 +57,6 @@ func TestCoverageGapAuthAndService(t *testing.T) {
 
 func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
 	t.Run("bucket helper branch fill", func(t *testing.T) {
-		if !wildcardMatch("a**c", "ac") {
-			t.Fatal("a**c should match ac")
-		}
-		if !wildcardMatch("a*b*c", "axbyc") {
-			t.Fatal("a*b*c should match axbyc")
-		}
-		if wildcardMatch("a*b*c", "axc") {
-			t.Fatal("a*b*c should not match axc")
-		}
 		if got := qualifiedBucketARN("bucket", "obj"); got != "arn:aws:s3:::bucket/obj" {
 			t.Fatalf("qualifiedBucketARN(bucket,obj) = %q", got)
 		}
@@ -79,7 +70,12 @@ func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
 		if got := h.resolveLoggingTargetBucketName("tenant-access-key", " "); got != "" {
 			t.Fatalf("resolveLoggingTargetBucketName(empty) = %q, want empty", got)
 		}
-		mustPutBucketPolicy(t, b, "dst-h", `{"Statement":["not-map"]}`)
+		mustPutBucketPolicy(
+			t,
+			b,
+			"dst-h",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+		)
 		if ok, code := h.bucketLoggingTargetAllowed("src-h", "dst-h", "logs/"); ok ||
 			code != "AccessDenied" {
 			t.Fatalf("bucketLoggingTargetAllowed invalid statement elem = (%v,%q)", ok, code)
@@ -1060,7 +1056,12 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		); got != "-" {
 			t.Fatalf("loggingACLRequired policy allow = %q, want -", got)
 		}
-		mustPutBucketPolicy(t, b, "src-h2", `{"Version":"2012-10-17","Statement":[]}`)
+		mustPutBucketPolicy(
+			t,
+			b,
+			"src-h2",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+		)
 		if got := h.loggingACLRequired(
 			newRequest(http.MethodGet, "http://example.test/src-h2/k", "", map[string]string{
 				"Authorization": authHeader("root-access-key"),

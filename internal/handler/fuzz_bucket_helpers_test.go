@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"testing"
 )
 
@@ -94,52 +93,6 @@ func FuzzSourceAccountIDForLogging(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, accessKey string) {
 		_ = sourceAccountIDForLogging(accessKey)
-	})
-}
-
-func FuzzPolicyValueToStrings(f *testing.F) {
-	f.Add([]byte(`"s3:GetObject"`))
-	f.Add([]byte(`["s3:GetObject","s3:PutObject"]`))
-	f.Add([]byte(`null`))
-	f.Add([]byte(`123`))
-	f.Add([]byte(`{}`))
-	f.Add([]byte(`[]`))
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		var v any
-		if err := json.Unmarshal(data, &v); err != nil {
-			return
-		}
-		_ = policyValueToStrings(v)
-	})
-}
-
-func FuzzMapValueByFold(f *testing.F) {
-	f.Add("StringEquals", "stringequals")
-	f.Add("StringLike", "STRINGLIKE")
-	f.Add("", "")
-	f.Add("key", "KEY")
-
-	f.Fuzz(func(t *testing.T, mapKey, searchKey string) {
-		m := map[string]any{mapKey: "value"}
-		_, _ = mapValueByFold(m, searchKey)
-	})
-}
-
-func FuzzPrincipalHasLoggingService(f *testing.F) {
-	f.Add([]byte(`"*"`))
-	f.Add([]byte(`{"Service":"logging.s3.amazonaws.com"}`))
-	f.Add([]byte(`{"Service":["logging.s3.amazonaws.com","other"]}`))
-	f.Add([]byte(`{"AWS":"*"}`))
-	f.Add([]byte(`null`))
-	f.Add([]byte(`{}`))
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		var principal any
-		if err := json.Unmarshal(data, &principal); err != nil {
-			return
-		}
-		_ = principalHasLoggingService(principal)
 	})
 }
 

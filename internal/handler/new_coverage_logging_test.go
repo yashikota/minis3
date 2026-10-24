@@ -346,7 +346,7 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 		// No policy on target -> AccessDenied from bucketLoggingTargetAllowed.
 		if err := b.PutBucketPolicy(
 			"dst-log",
-			`{"Version":"2012-10-17","Statement":[]}`,
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
 			false,
 		); err != nil {
 			t.Fatalf("PutBucketPolicy reset failed: %v", err)
@@ -451,45 +451,6 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 }
 
 func TestBucketLoggingHelperFunctions(t *testing.T) {
-	if got := policyValueToStrings("x"); len(got) != 1 || got[0] != "x" {
-		t.Fatalf("policyValueToStrings(string) = %#v", got)
-	}
-	if got := policyValueToStrings([]any{"x", 1, "y"}); len(got) != 2 || got[0] != "x" ||
-		got[1] != "y" {
-		t.Fatalf("policyValueToStrings([]any) = %#v", got)
-	}
-	if got := policyValueToStrings(123); got != nil {
-		t.Fatalf("policyValueToStrings(default) = %#v, want nil", got)
-	}
-
-	if !wildcardMatch("*", "abc") {
-		t.Fatal("wildcard * should match")
-	}
-	if !wildcardMatch("a*c", "abbbc") {
-		t.Fatal("wildcard a*c should match abbbc")
-	}
-	if wildcardMatch("a*d", "abbbc") {
-		t.Fatal("wildcard a*d should not match abbbc")
-	}
-	if !wildcardMatch("exact", "exact") {
-		t.Fatal("exact match should match")
-	}
-
-	if !principalHasLoggingService("*") {
-		t.Fatal("string * principal should allow logging service")
-	}
-	if !principalHasLoggingService(map[string]any{"Service": "logging.s3.amazonaws.com"}) {
-		t.Fatal("service principal string should allow")
-	}
-	if !principalHasLoggingService(
-		map[string]any{"Service": []any{"x", "logging.s3.amazonaws.com"}},
-	) {
-		t.Fatal("service principal list should allow")
-	}
-	if principalHasLoggingService(map[string]any{"Service": "other"}) {
-		t.Fatal("non-logging service principal should not allow")
-	}
-
 	tenant, bucket := splitQualifiedBucketName("tenant:bucket")
 	if tenant != "tenant" || bucket != "bucket" {
 		t.Fatalf("splitQualifiedBucketName = (%q,%q), want (tenant,bucket)", tenant, bucket)
@@ -576,16 +537,15 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 			t.Fatalf("invalid json result = (%v,%q), want (false,AccessDenied)", ok, code)
 		}
 
-		mustPutBucketPolicy(t, b, "dst-policy", `{"Version":"2012-10-17"}`)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
-			code != "AccessDenied" {
-			t.Fatalf("missing statement result = (%v,%q), want (false,AccessDenied)", ok, code)
-		}
-
-		mustPutBucketPolicy(t, b, "dst-policy", `{"Statement":"invalid"}`)
-		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
-			code != "AccessDenied" {
-			t.Fatalf("invalid statement type result = (%v,%q), want (false,AccessDenied)", ok, code)
+		// Policies without a usable statement are rejected up front, so a
+		// logging target can never end up with one.
+		for _, invalid := range []string{
+			`{"Version":"2012-10-17"}`,
+			`{"Statement":"invalid"}`,
+		} {
+			if err := b.PutBucketPolicy("dst-policy", invalid, false); err == nil {
+				t.Fatalf("PutBucketPolicy(%s) succeeded, want MalformedPolicy", invalid)
+			}
 		}
 
 		mustPutBucketPolicy(
@@ -625,7 +585,7 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 			t,
 			b,
 			"dst-policy",
-			`{"Statement":[{"Effect":"Allow","Principal":{"Service":"logging.s3.amazonaws.com"},"Action":"s3:PutObject","Resource":"arn:aws:s3:::another/*"}]}`,
+			`{"Statement":[{"Effect":"Allow","Principal":{"Service":"logging.s3.amazonaws.com"},"Action":"s3:PutObject","Resource":"arn:aws:s3:::dst-policy/other/*"}]}`,
 		)
 		if ok, code := h.bucketLoggingTargetAllowed("src-policy", "dst-policy", "logs/"); ok ||
 			code != "AccessDenied" {
@@ -877,7 +837,12 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		b.SetBucketOwner("src-denied", "minis3-access-key")
 		mustCreateBucket(t, b, "dst-denied")
 		b.SetBucketOwner("dst-denied", "minis3-access-key")
-		mustPutBucketPolicy(t, b, "dst-denied", `{"Statement":[]}`)
+		mustPutBucketPolicy(
+			t,
+			b,
+			"dst-denied",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+		)
 		_, err = h.flushServerAccessLogBatch(&serverAccessLogBatch{
 			TargetBucket: "dst-denied",
 			TargetPrefix: "logs/",

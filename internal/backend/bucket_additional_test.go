@@ -923,53 +923,6 @@ func TestGetObjectVersionLookup(t *testing.T) {
 	}
 }
 
-func TestIsSupportedBucketPolicy(t *testing.T) {
-	tests := []struct {
-		name   string
-		policy string
-		want   bool
-	}{
-		{
-			name:   "malformed json",
-			policy: "{",
-			want:   false,
-		},
-		{
-			name:   "no statement",
-			policy: `{"Version":"2012-10-17"}`,
-			want:   true,
-		},
-		{
-			name:   "statement unexpected type treated as supported",
-			policy: `{"Version":"2012-10-17","Statement":"oops"}`,
-			want:   true,
-		},
-		{
-			name:   "allow with notprincipal unsupported",
-			policy: `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","NotPrincipal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`,
-			want:   false,
-		},
-		{
-			name:   "deny with notprincipal supported",
-			policy: `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","NotPrincipal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`,
-			want:   true,
-		},
-		{
-			name:   "non-object statement items are ignored",
-			policy: `{"Version":"2012-10-17","Statement":[1,{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`,
-			want:   true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isSupportedBucketPolicy(tt.policy); got != tt.want {
-				t.Fatalf("isSupportedBucketPolicy() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestPutBucketPolicyRejectsAllowNotPrincipal(t *testing.T) {
 	b := New()
 	if err := b.CreateBucket("policy-notprincipal"); err != nil {

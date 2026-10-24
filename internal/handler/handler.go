@@ -972,19 +972,7 @@ func (h *Handler) loggingACLRequired(r *http.Request, bucketName, key string) st
 		return "-"
 	}
 
-	var resource string
-	if key != "" {
-		resource = fmt.Sprintf("arn:aws:s3:::%s/%s", displayBucketName(bucketName), key)
-	} else {
-		resource = fmt.Sprintf("arn:aws:s3:::%s", displayBucketName(bucketName))
-	}
-	ctx := backend.PolicyEvalContext{
-		Action:      action,
-		Resource:    resource,
-		Headers:     extractPolicyHeaders(r),
-		AccessKey:   accessKey,
-		IsAnonymous: isAnonymous,
-	}
+	ctx := h.fillPolicyContext(r, bucketName, action, key, backend.PolicyEvalContext{})
 	effect := backend.EvaluateBucketPolicyAccess(bucket.Policy, ctx)
 	if effect == backend.PolicyEffectAllow {
 		return "-"
@@ -1026,15 +1014,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		requesterCanonicalID = backend.OwnerForAccessKey(accessKey).ID
 	}
 
-	resource := policyResourceARN(bucketName, key)
-
-	ctx := backend.PolicyEvalContext{
-		Action:      action,
-		Resource:    resource,
-		Headers:     extractPolicyHeaders(r),
-		AccessKey:   accessKey,
-		IsAnonymous: isAnonymous,
-	}
+	ctx := h.fillPolicyContext(r, bucketName, action, key, backend.PolicyEvalContext{})
 
 	effect := backend.EvaluateBucketPolicyAccess(bucket.Policy, ctx)
 
@@ -1292,22 +1272,7 @@ func (h *Handler) checkAccessWithContext(
 	isOwner := accessKey == bucket.OwnerAccessKey
 	ownerImplicit := bucket.OwnerAccessKey == "" && isAnonymousRequest(r)
 
-	// Build resource ARN if not already set
-	if ctx.Resource == "" {
-		ctx.Resource = policyResourceARN(bucketName, key)
-	}
-
-	if ctx.Action == "" {
-		ctx.Action = action
-	}
-
-	if ctx.Headers == nil {
-		ctx.Headers = extractPolicyHeaders(r)
-	}
-	if ctx.AccessKey == "" {
-		ctx.AccessKey = accessKey
-	}
-	ctx.IsAnonymous = isAnonymousRequest(r)
+	ctx = h.fillPolicyContext(r, bucketName, action, key, ctx)
 
 	effect := backend.EvaluateBucketPolicyAccess(bucket.Policy, ctx)
 
@@ -1669,6 +1634,17 @@ func extractPolicyHeaders(r *http.Request) map[string]string {
 			headers[h] = v
 		}
 	}
+	// Every other x-amz-* header is available as an s3:x-amz-* condition key.
+	for name, values := range r.Header {
+		lower := strings.ToLower(name)
+		if !strings.HasPrefix(lower, "x-amz-") || len(values) == 0 || values[0] == "" {
+			continue
+		}
+		if _, ok := headers[lower]; !ok {
+			headers[lower] = values[0]
+		}
+	}
+
 	// Also capture Referer for aws:Referer conditions
 	if v := headerValueAnyCase(r.Header, "Referer"); v != "" {
 		headers["referer"] = v

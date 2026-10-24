@@ -298,7 +298,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 	})
 
 	t.Run("explicit deny blocks even owner", func(t *testing.T) {
-		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-bucket/*"}]}`
+		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-bucket/*"}]}`
 		if err := b.PutBucketPolicy("policy-bucket", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
@@ -311,7 +311,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 	})
 
 	t.Run("allow permits non-owner", func(t *testing.T) {
-		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-bucket/*"}]}`
+		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-bucket/*"}]}`
 		if err := b.PutBucketPolicy("policy-bucket", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
@@ -332,7 +332,7 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 	b.SetBucketOwner("policy-context-bucket", "minis3-access-key")
 	h := New(b)
 
-	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-context-bucket/*","Condition":{"StringEquals":{"s3:ExistingObjectTag/Project":"alpha"}}}]}`
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-context-bucket/*","Condition":{"StringEquals":{"s3:ExistingObjectTag/Project":"alpha"}}}]}`
 	if err := b.PutBucketPolicy("policy-context-bucket", policy, false); err != nil {
 		t.Fatalf("PutBucketPolicy failed: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestCheckAccessWithContextStringLikeIfExistsRefererMismatch(t *testing.T) {
 	b.SetBucketOwner("policy-referer-bucket", "minis3-access-key")
 	h := New(b)
 
-	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Principal":"*","Resource":"arn:aws:s3:::policy-referer-bucket/*","Condition":{"StringLikeIfExists":{"aws:Referer":"http://www.example.com/*"}}}]}`
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Principal":"*","Resource":"arn:aws:s3:::policy-referer-bucket/*","Condition":{"StringLikeIfExists":{"aws:Referer":"http://www.example.com/*"}}}]}`
 	if err := b.PutBucketPolicy("policy-referer-bucket", policy, false); err != nil {
 		t.Fatalf("PutBucketPolicy failed: %v", err)
 	}

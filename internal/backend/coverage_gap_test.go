@@ -147,24 +147,6 @@ func TestPolicyPrincipalHelperBranches(t *testing.T) {
 		t.Fatal("expected non-matching access key principal to not match")
 	}
 
-	if values, ok := extractAWSPrincipals("*"); !ok || len(values) != 1 || values[0] != "*" {
-		t.Fatalf("unexpected extracted principals for string: values=%v ok=%v", values, ok)
-	}
-	if values, ok := extractAWSPrincipals([]any{"a", "b"}); !ok || len(values) != 2 {
-		t.Fatalf("unexpected extracted principals for []any: values=%v ok=%v", values, ok)
-	}
-	if values, ok := extractAWSPrincipals([]any{"a", 1}); ok || values != nil {
-		t.Fatalf("expected []any with non-string to fail: values=%v ok=%v", values, ok)
-	}
-	if values, ok := extractAWSPrincipals(map[string]any{"AWS": []any{"a", "b"}}); !ok ||
-		len(values) != 2 {
-		t.Fatalf("unexpected extracted principals for AWS map: values=%v ok=%v", values, ok)
-	}
-	if values, ok := extractAWSPrincipals(map[string]any{"CanonicalUser": "x"}); ok ||
-		values != nil {
-		t.Fatalf("expected map without AWS key to fail: values=%v ok=%v", values, ok)
-	}
-
 	if !isPublicPrincipal(map[string]any{"AWS": "*"}) {
 		t.Fatal("expected public principal to be detected")
 	}
@@ -186,10 +168,15 @@ func TestPolicyPrincipalHelperBranches(t *testing.T) {
 	) {
 		t.Fatal("expected unconditional public allow policy to be public")
 	}
-	if IsPolicyPublic(
+	if !IsPolicyPublic(
 		`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*","Condition":{"StringEquals":{"aws:Referer":"x"}}}]}`,
 	) {
-		t.Fatal("policy with condition should not be treated as public")
+		t.Fatal("a Referer condition does not restrict who can call: policy is public")
+	}
+	if IsPolicyPublic(
+		`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*","Condition":{"IpAddress":{"aws:SourceIp":"10.0.0.0/24"}}}]}`,
+	) {
+		t.Fatal("policy pinned to a source IP range should not be treated as public")
 	}
 	if IsPolicyPublic(
 		`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`,

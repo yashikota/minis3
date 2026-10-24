@@ -2170,12 +2170,12 @@ func (h *Handler) handlePutBucketPolicy(
 				"The specified bucket does not exist.",
 			)
 		} else if errors.Is(err, backend.ErrMalformedPolicy) {
-			backend.WriteError(
-				w,
-				http.StatusBadRequest,
-				"MalformedPolicy",
-				"This policy contains invalid Json.",
-			)
+			message := "This policy contains invalid Json."
+			var validationErr *backend.PolicyValidationError
+			if errors.As(err, &validationErr) {
+				message = validationErr.Message
+			}
+			backend.WriteError(w, http.StatusBadRequest, "MalformedPolicy", message)
 		} else {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		}
@@ -2851,100 +2851,6 @@ func (h *Handler) handleDeleteBucketLogging(
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func policyValueToStrings(v any) []string {
-	switch vv := v.(type) {
-	case string:
-		return []string{vv}
-	case []any:
-		res := make([]string, 0, len(vv))
-		for _, item := range vv {
-			if s, ok := item.(string); ok {
-				res = append(res, s)
-			}
-		}
-		return res
-	default:
-		return nil
-	}
-}
-
-func mapValueByFold(m map[string]any, key string) (any, bool) {
-	for k, v := range m {
-		if strings.EqualFold(k, key) {
-			return v, true
-		}
-	}
-	return nil, false
-}
-
-func loggingConditionValues(
-	conditions map[string]any,
-	operators []string,
-	conditionKey string,
-) ([]string, bool) {
-	found := false
-	values := make([]string, 0)
-	for _, operator := range operators {
-		rawOperator, ok := mapValueByFold(conditions, operator)
-		if !ok {
-			continue
-		}
-		operatorMap, ok := rawOperator.(map[string]any)
-		if !ok {
-			continue
-		}
-		rawConditionValues, ok := mapValueByFold(operatorMap, conditionKey)
-		if !ok {
-			continue
-		}
-		found = true
-		values = append(values, policyValueToStrings(rawConditionValues)...)
-	}
-	return values, found
-}
-
-func wildcardMatch(pattern, value string) bool {
-	if pattern == "*" {
-		return true
-	}
-	parts := strings.Split(pattern, "*")
-	if len(parts) == 1 {
-		return pattern == value
-	}
-	if !strings.HasPrefix(value, parts[0]) {
-		return false
-	}
-	offset := len(parts[0])
-	for i := 1; i < len(parts)-1; i++ {
-		part := parts[i]
-		if part == "" {
-			continue
-		}
-		pos := strings.Index(value[offset:], part)
-		if pos < 0 {
-			return false
-		}
-		offset += pos + len(part)
-	}
-	return strings.HasSuffix(value, parts[len(parts)-1])
-}
-
-func principalHasLoggingService(principal any) bool {
-	switch p := principal.(type) {
-	case string:
-		return p == "*" // permissive for tests
-	case map[string]any:
-		if service, ok := p["Service"]; ok {
-			for _, s := range policyValueToStrings(service) {
-				if s == "logging.s3.amazonaws.com" {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 func splitQualifiedBucketName(name string) (string, string) {
 	if idx := strings.Index(name, ":"); idx >= 0 {
 		return name[:idx], name[idx+1:]
@@ -3024,120 +2930,25 @@ func (h *Handler) bucketLoggingTargetPolicyAllowed(
 		return false, "NoSuchKey"
 	}
 
-	targetResources := []string{qualifiedBucketObjectARN(targetBucketName, targetPrefix)}
-	sourceArns := []string{qualifiedBucketARN(sourceBucketName, "")}
-
 	if strings.TrimSpace(targetBucket.Policy) == "" {
 		return false, "AccessDenied"
 	}
 
-	var policy map[string]any
-	if err := json.Unmarshal([]byte(targetBucket.Policy), &policy); err != nil {
+	// The log objects are written by the logging service principal, so the
+	// target bucket policy must allow it to PutObject under the prefix.
+	ctx := backend.PolicyEvalContext{
+		Action:    "s3:PutObject",
+		Resource:  qualifiedBucketObjectARN(targetBucketName, targetPrefix),
+		Principal: &backend.PolicyPrincipal{Service: backend.LoggingServicePrincipal},
+		ConditionKeys: map[string][]string{
+			"aws:sourcearn":     {qualifiedBucketARN(sourceBucketName, "")},
+			"aws:sourceaccount": {sourceAccount},
+		},
+	}
+	if backend.EvaluateBucketPolicyAccess(targetBucket.Policy, ctx) != backend.PolicyEffectAllow {
 		return false, "AccessDenied"
 	}
-
-	statementsRaw, ok := policy["Statement"]
-	if !ok {
-		return false, "AccessDenied"
-	}
-
-	var statements []any
-	switch s := statementsRaw.(type) {
-	case []any:
-		statements = s
-	case map[string]any:
-		statements = []any{s}
-	default:
-		return false, "AccessDenied"
-	}
-
-	for _, stmtRaw := range statements {
-		stmt, ok := stmtRaw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if !strings.EqualFold(fmt.Sprintf("%v", stmt["Effect"]), "Allow") {
-			continue
-		}
-		if !principalHasLoggingService(stmt["Principal"]) {
-			continue
-		}
-
-		actionOK := false
-		for _, action := range policyValueToStrings(stmt["Action"]) {
-			if strings.EqualFold(action, "s3:PutObject") || action == "*" {
-				actionOK = true
-				break
-			}
-		}
-		if !actionOK {
-			continue
-		}
-
-		resourceOK := false
-		for _, resource := range policyValueToStrings(stmt["Resource"]) {
-			for _, expected := range targetResources {
-				if wildcardMatch(strings.TrimSpace(resource), expected) {
-					resourceOK = true
-					break
-				}
-			}
-			if resourceOK {
-				break
-			}
-		}
-		if !resourceOK {
-			continue
-		}
-
-		conditions, _ := stmt["Condition"].(map[string]any)
-		if len(conditions) > 0 {
-			arnPatterns, hasArnCondition := loggingConditionValues(
-				conditions,
-				[]string{"ArnLike", "ArnEquals"},
-				"aws:SourceArn",
-			)
-			if hasArnCondition {
-				arnLikeOK := false
-				for _, pattern := range arnPatterns {
-					for _, sourceArn := range sourceArns {
-						if wildcardMatch(strings.TrimSpace(pattern), sourceArn) {
-							arnLikeOK = true
-							break
-						}
-					}
-					if arnLikeOK {
-						break
-					}
-				}
-				if !arnLikeOK {
-					continue
-				}
-			}
-
-			sourceAccountPatterns, hasSourceAccountCondition := loggingConditionValues(
-				conditions,
-				[]string{"StringEquals", "StringLike"},
-				"aws:SourceAccount",
-			)
-			if hasSourceAccountCondition {
-				accountOK := false
-				for _, pattern := range sourceAccountPatterns {
-					if wildcardMatch(strings.TrimSpace(pattern), sourceAccount) {
-						accountOK = true
-						break
-					}
-				}
-				if !accountOK {
-					continue
-				}
-			}
-		}
-
-		return true, ""
-	}
-
-	return false, "AccessDenied"
+	return true, ""
 }
 
 func sourceAccountIDForLogging(accessKey string) string {

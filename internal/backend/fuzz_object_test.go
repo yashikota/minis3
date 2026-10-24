@@ -1,6 +1,9 @@
 package backend
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func FuzzParseDeletePreconditionTime(f *testing.F) {
 	f.Add("2024-01-01T00:00:00Z")
@@ -35,29 +38,7 @@ func FuzzMatchesDeleteETag(f *testing.F) {
 	})
 }
 
-func FuzzIsValidJSON(f *testing.F) {
-	f.Add(`{"key": "value"}`)
-	f.Add(`[]`)
-	f.Add(`null`)
-	f.Add("")
-	f.Add("{")
-	f.Add(`{"nested": {"deep": [1,2,3]}}`)
-	f.Add(`"string"`)
-	f.Add(`12345`)
-	f.Add(`true`)
-	f.Add(`false`)
-	f.Add(`[1, "two", null, true, {"five": 5}]`)
-	f.Add(
-		`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:*","Resource":"*"}]}`,
-	)
-	f.Add("\xff\xfe")
-
-	f.Fuzz(func(t *testing.T, s string) {
-		_ = isValidJSON(s)
-	})
-}
-
-func FuzzIsSupportedBucketPolicy(f *testing.F) {
+func FuzzValidateBucketPolicy(f *testing.F) {
 	f.Add(`{"Version":"2012-10-17","Statement":[]}`)
 	f.Add(
 		`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bucket/*"}]}`,
@@ -74,6 +55,37 @@ func FuzzIsSupportedBucketPolicy(f *testing.F) {
 	f.Add(`{"Version":"2008-10-17","Statement":[]}`)
 
 	f.Fuzz(func(t *testing.T, policy string) {
-		_ = isSupportedBucketPolicy(policy)
+		if err := ValidateBucketPolicy(policy, "bucket"); err != nil {
+			if !errors.Is(err, ErrMalformedPolicy) {
+				t.Fatalf("validation error %v does not match ErrMalformedPolicy", err)
+			}
+			return
+		}
+		// Oracle: an accepted policy decodes for evaluation and every
+		// statement carries exactly one principal and action element and
+		// at most one resource element.
+		parsed, ok := parseBucketPolicy(policy)
+		if !ok || len(parsed.Statement) == 0 {
+			t.Fatalf("accepted policy does not decode: %q", policy)
+		}
+		for _, stmt := range parsed.Statement {
+			if (stmt.Principal == nil) == (stmt.NotPrincipal == nil) ||
+				(stmt.Action == nil) == (stmt.NotAction == nil) ||
+				(stmt.Resource != nil && stmt.NotResource != nil) {
+				t.Fatalf("accepted statement lacks a required element: %+v", stmt)
+			}
+			if stmt.Effect != "Allow" && stmt.Effect != "Deny" {
+				t.Fatalf("accepted statement has effect %q", stmt.Effect)
+			}
+			for operator := range stmt.Condition {
+				if _, ok := parseConditionOperator(operator); !ok {
+					t.Fatalf("accepted unknown condition operator %q", operator)
+				}
+			}
+		}
+		_ = EvaluateBucketPolicyAccess(policy, PolicyEvalContext{
+			Action:   "s3:GetObject",
+			Resource: "arn:aws:s3:::bucket/key",
+		})
 	})
 }
