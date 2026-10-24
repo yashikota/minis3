@@ -8,6 +8,7 @@ import (
 )
 
 func TestObjectVersionHelpersBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("getLatestVersion returns nil when only delete markers", func(t *testing.T) {
 		ov := &ObjectVersions{Versions: []*Object{{IsDeleteMarker: true}, {IsDeleteMarker: true}}}
 		if got := ov.getLatestVersion(); got != nil {
@@ -82,6 +83,7 @@ func TestObjectVersionHelpersBranches(t *testing.T) {
 }
 
 func TestPutObjectBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.PutObject("missing", "k", []byte("x"), PutObjectOptions{}); !errors.Is(
 		err,
@@ -219,6 +221,7 @@ func TestPutObjectBranches(t *testing.T) {
 }
 
 func TestDeleteObjectVersionBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.DeleteObjectVersion("missing", "k", "", false); !errors.Is(
 		err,
@@ -307,6 +310,7 @@ func TestDeleteObjectVersionBranches(t *testing.T) {
 }
 
 func TestCopyObjectBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("src-copy-branches"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -601,6 +605,7 @@ func TestCopyObjectBranches(t *testing.T) {
 }
 
 func TestDeleteObjectsAndListObjectVersionsBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.DeleteObjects("missing", nil, false); !errors.Is(err, ErrBucketNotFound) {
 		t.Fatalf("expected ErrBucketNotFound, got %v", err)
@@ -761,6 +766,7 @@ func TestDeleteObjectsAndListObjectVersionsBranches(t *testing.T) {
 }
 
 func TestObjectTaggingBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.PutObjectTagging("missing", "k", "", map[string]string{"a": "b"}); !errors.Is(
 		err,
@@ -854,6 +860,7 @@ func TestObjectTaggingBranches(t *testing.T) {
 }
 
 func TestListObjectsHidesKeysWithCurrentDeleteMarker(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("list-delete-marker"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

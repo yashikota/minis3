@@ -9,6 +9,7 @@ import (
 )
 
 func TestACLHelpersAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	acl := &backend.AccessControlPolicy{
 		AccessControlList: backend.AccessControlList{
 			Grants: []backend.Grant{
@@ -55,6 +56,7 @@ func TestACLHelpersAdditionalBranches(t *testing.T) {
 }
 
 func TestCheckAccessAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("access-branch"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -140,6 +142,7 @@ func TestCheckAccessAdditionalBranches(t *testing.T) {
 }
 
 func TestCheckAccessWithContextAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("ctx-branch"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

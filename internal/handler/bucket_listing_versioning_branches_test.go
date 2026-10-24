@@ -12,6 +12,7 @@ import (
 )
 
 func TestBucketCreateAndListingAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 
 	t.Run("create bucket body read error", func(t *testing.T) {
@@ -75,6 +76,7 @@ func TestBucketCreateAndListingAdditionalBranches(t *testing.T) {
 }
 
 func TestBucketVersioningAndListVersionsAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "versioning-branch")
 	b.SetBucketOwner("versioning-branch", "owner-ak")

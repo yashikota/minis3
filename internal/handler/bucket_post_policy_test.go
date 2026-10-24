@@ -26,6 +26,7 @@ func encodePolicy(t *testing.T, policy map[string]any) string {
 }
 
 func TestValidatePostPolicy(t *testing.T) {
+	t.Parallel()
 	expiration := time.Now().UTC().Add(10 * time.Minute).Format("2006-01-02T15:04:05Z")
 	expired := time.Now().UTC().Add(-10 * time.Minute).Format("2006-01-02T15:04:05Z")
 
@@ -165,6 +166,7 @@ func TestValidatePostPolicy(t *testing.T) {
 }
 
 func TestValidatePostObjectChecksums(t *testing.T) {
+	t.Parallel()
 	body := []byte("bar")
 
 	t.Run("valid sha256 checksum", func(t *testing.T) {
@@ -265,6 +267,7 @@ func TestValidatePostObjectChecksums(t *testing.T) {
 }
 
 func TestValidatePostPolicyAdditionalScenarios(t *testing.T) {
+	t.Parallel()
 	expiration := time.Now().UTC().Add(10 * time.Minute).Format("2006-01-02T15:04:05Z")
 
 	tests := []struct {
@@ -480,6 +483,7 @@ func TestValidatePostPolicyAdditionalScenarios(t *testing.T) {
 }
 
 func TestPostPolicyHelperFunctions(t *testing.T) {
+	t.Parallel()
 	t.Run("postPolicyFieldConditionExempt", func(t *testing.T) {
 		for _, tc := range []struct {
 			field string
@@ -513,6 +517,7 @@ func TestPostPolicyHelperFunctions(t *testing.T) {
 }
 
 func TestValidatePostPolicyRejectsInvalidBase64(t *testing.T) {
+	t.Parallel()
 	status, ok := validatePostPolicy(
 		"%%invalid%%",
 		"bucket-a",
@@ -530,6 +535,7 @@ func TestValidatePostPolicyRejectsInvalidBase64(t *testing.T) {
 }
 
 func TestValidatePostPolicyAdditionalInvalidShapes(t *testing.T) {
+	t.Parallel()
 	expiration := time.Now().UTC().Add(10 * time.Minute).Format("2006-01-02T15:04:05Z")
 
 	t.Run("invalid json", func(t *testing.T) {
@@ -656,6 +662,7 @@ func TestValidatePostPolicyAdditionalInvalidShapes(t *testing.T) {
 }
 
 func TestParsePostTaggingXML(t *testing.T) {
+	t.Parallel()
 	t.Run("valid xml", func(t *testing.T) {
 		tags, errCode, errMsg := parsePostTaggingXML(
 			"<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag><Tag><Key>b</Key><Value>2</Value></Tag></TagSet></Tagging>",
@@ -699,6 +706,7 @@ func TestParsePostTaggingXML(t *testing.T) {
 }
 
 func TestExtractPostFormMetadata(t *testing.T) {
+	t.Parallel()
 	metadata := extractPostFormMetadata(map[string]string{
 		"x-amz-meta-foo": "bar",
 		"x-amz-meta-baz": "qux",
@@ -718,6 +726,7 @@ func TestExtractPostFormMetadata(t *testing.T) {
 }
 
 func TestVerifyPostPolicySignature(t *testing.T) {
+	t.Parallel()
 	policy := base64.StdEncoding.EncodeToString(
 		[]byte(`{"expiration":"2099-01-01T00:00:00Z","conditions":[]}`),
 	)
@@ -746,6 +755,7 @@ func TestVerifyPostPolicySignature(t *testing.T) {
 }
 
 func TestResolvePostPolicyFieldValue(t *testing.T) {
+	t.Parallel()
 	form := map[string]string{
 		"success_action_redirect": "http://example.test/ok",
 		"x-amz-meta-project":      "alpha",
@@ -784,6 +794,8 @@ func TestResolvePostPolicyFieldValue(t *testing.T) {
 }
 
 func TestParseMultipartFormFields(t *testing.T) {
+	t.Parallel()
+	h := New(backend.New())
 	body := &strings.Builder{}
 	writer := multipart.NewWriter(body)
 	if err := writer.WriteField("AWSAccessKeyId", "minis3-access-key"); err != nil {
@@ -820,7 +832,7 @@ func TestParseMultipartFormFields(t *testing.T) {
 		t.Fatalf("ParseMultipartForm failed: %v", err)
 	}
 
-	fields := parseMultipartFormFields(req)
+	fields := h.parseMultipartFormFields(req)
 	if fields["awsaccesskeyid"] != "minis3-access-key" {
 		t.Fatalf("unexpected awsaccesskeyid: %q", fields["awsaccesskeyid"])
 	}

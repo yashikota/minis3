@@ -19,6 +19,7 @@ func setupCopyHandler(t *testing.T) (*Handler, *backend.Backend) {
 }
 
 func TestCopyObjectAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("source access denied", func(t *testing.T) {
 		h, b := setupCopyHandler(t)
 		b.SetBucketOwner("src", "src-owner")

@@ -10,84 +10,90 @@ import (
 
 func patchGetObjectLockConfigurationForTest(
 	t *testing.T,
+	h *Handler,
 	fn func(*Handler, string) (*backend.ObjectLockConfiguration, error),
 ) {
 	t.Helper()
-	orig := getObjectLockConfigurationFn
-	getObjectLockConfigurationFn = fn
+	orig := h.hooks.getObjectLockConfiguration
+	h.hooks.getObjectLockConfiguration = fn
 	t.Cleanup(func() {
-		getObjectLockConfigurationFn = orig
+		h.hooks.getObjectLockConfiguration = orig
 	})
 }
 
 func patchPutObjectLockConfigurationForTest(
 	t *testing.T,
+	h *Handler,
 	fn func(*Handler, string, *backend.ObjectLockConfiguration) error,
 ) {
 	t.Helper()
-	orig := putObjectLockConfigurationFn
-	putObjectLockConfigurationFn = fn
+	orig := h.hooks.putObjectLockConfiguration
+	h.hooks.putObjectLockConfiguration = fn
 	t.Cleanup(func() {
-		putObjectLockConfigurationFn = orig
+		h.hooks.putObjectLockConfiguration = orig
 	})
 }
 
 func patchGetObjectRetentionForTest(
 	t *testing.T,
+	h *Handler,
 	fn func(*Handler, string, string, string) (*backend.ObjectLockRetention, error),
 ) {
 	t.Helper()
-	orig := getObjectRetentionFn
-	getObjectRetentionFn = fn
+	orig := h.hooks.getObjectRetention
+	h.hooks.getObjectRetention = fn
 	t.Cleanup(func() {
-		getObjectRetentionFn = orig
+		h.hooks.getObjectRetention = orig
 	})
 }
 
 func patchPutObjectRetentionForTest(
 	t *testing.T,
+	h *Handler,
 	fn func(*Handler, string, string, string, *backend.ObjectLockRetention, bool) error,
 ) {
 	t.Helper()
-	orig := putObjectRetentionFn
-	putObjectRetentionFn = fn
+	orig := h.hooks.putObjectRetention
+	h.hooks.putObjectRetention = fn
 	t.Cleanup(func() {
-		putObjectRetentionFn = orig
+		h.hooks.putObjectRetention = orig
 	})
 }
 
 func patchGetObjectLegalHoldForTest(
 	t *testing.T,
+	h *Handler,
 	fn func(*Handler, string, string, string) (*backend.ObjectLockLegalHold, error),
 ) {
 	t.Helper()
-	orig := getObjectLegalHoldFn
-	getObjectLegalHoldFn = fn
+	orig := h.hooks.getObjectLegalHold
+	h.hooks.getObjectLegalHold = fn
 	t.Cleanup(func() {
-		getObjectLegalHoldFn = orig
+		h.hooks.getObjectLegalHold = orig
 	})
 }
 
 func patchPutObjectLegalHoldForTest(
 	t *testing.T,
+	h *Handler,
 	fn func(*Handler, string, string, string, *backend.ObjectLockLegalHold) error,
 ) {
 	t.Helper()
-	orig := putObjectLegalHoldFn
-	putObjectLegalHoldFn = fn
+	orig := h.hooks.putObjectLegalHold
+	h.hooks.putObjectLegalHold = fn
 	t.Cleanup(func() {
-		putObjectLegalHoldFn = orig
+		h.hooks.putObjectLegalHold = orig
 	})
 }
 
 func TestObjectLockInternalErrorBranchesWithHooks(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "hook-lock-errors")
 	mustPutObject(t, b, "hook-lock-errors", "obj", "value")
 
 	t.Run("get object lock configuration internal error", func(t *testing.T) {
-		patchGetObjectLockConfigurationForTest(
-			t,
+		patchGetObjectLockConfigurationForTest(t, h,
 			func(*Handler, string) (*backend.ObjectLockConfiguration, error) {
 				return nil, errors.New("lock get boom")
 			},
@@ -101,8 +107,7 @@ func TestObjectLockInternalErrorBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("put object lock configuration internal error", func(t *testing.T) {
-		patchPutObjectLockConfigurationForTest(
-			t,
+		patchPutObjectLockConfigurationForTest(t, h,
 			func(*Handler, string, *backend.ObjectLockConfiguration) error {
 				return errors.New("lock put boom")
 			},
@@ -122,8 +127,7 @@ func TestObjectLockInternalErrorBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("get retention internal error", func(t *testing.T) {
-		patchGetObjectRetentionForTest(
-			t,
+		patchGetObjectRetentionForTest(t, h,
 			func(*Handler, string, string, string) (*backend.ObjectLockRetention, error) {
 				return nil, errors.New("retention get boom")
 			},
@@ -142,8 +146,7 @@ func TestObjectLockInternalErrorBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("put retention internal error", func(t *testing.T) {
-		patchPutObjectRetentionForTest(
-			t,
+		patchPutObjectRetentionForTest(t, h,
 			func(
 				*Handler,
 				string,
@@ -170,8 +173,7 @@ func TestObjectLockInternalErrorBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("get legal hold internal error", func(t *testing.T) {
-		patchGetObjectLegalHoldForTest(
-			t,
+		patchGetObjectLegalHoldForTest(t, h,
 			func(*Handler, string, string, string) (*backend.ObjectLockLegalHold, error) {
 				return nil, errors.New("legalhold get boom")
 			},
@@ -190,8 +192,7 @@ func TestObjectLockInternalErrorBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("put legal hold internal error", func(t *testing.T) {
-		patchPutObjectLegalHoldForTest(
-			t,
+		patchPutObjectLegalHoldForTest(t, h,
 			func(*Handler, string, string, string, *backend.ObjectLockLegalHold) error {
 				return errors.New("legalhold put boom")
 			},

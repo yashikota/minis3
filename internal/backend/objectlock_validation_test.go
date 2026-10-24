@@ -7,6 +7,7 @@ import (
 )
 
 func TestObjectLockRetentionModeValidation(t *testing.T) {
+	t.Parallel()
 	future := time.Now().UTC().Add(24 * time.Hour)
 
 	t.Run("validateRetentionMode helper", func(t *testing.T) {
@@ -265,6 +266,7 @@ func TestObjectLockRetentionModeValidation(t *testing.T) {
 // retention override), and CompleteMultipartUpload must reject retention
 // settings with ErrInvalidRequest instead of silently storing them.
 func TestRetentionRequiresObjectLockEnabled(t *testing.T) {
+	t.Parallel()
 	future := time.Now().UTC().Add(24 * time.Hour)
 
 	setupPlainBucket := func(t *testing.T, name string) *Backend {

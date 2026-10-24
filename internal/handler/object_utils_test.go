@@ -10,6 +10,7 @@ import (
 )
 
 func TestStripAWSChunkedContentEncoding(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -44,6 +45,7 @@ func TestStripAWSChunkedContentEncoding(t *testing.T) {
 }
 
 func TestMatchesETag(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		header  string
@@ -68,6 +70,7 @@ func TestMatchesETag(t *testing.T) {
 }
 
 func TestEvaluateConditionalHeaders(t *testing.T) {
+	t.Parallel()
 	lastModified := time.Date(2026, 1, 2, 15, 4, 5, 0, time.UTC)
 	obj := &backend.Object{
 		ETag:         "\"etag-1\"",
@@ -130,6 +133,7 @@ func TestEvaluateConditionalHeaders(t *testing.T) {
 }
 
 func TestEvaluateCopySourceConditionals(t *testing.T) {
+	t.Parallel()
 	lastModified := time.Date(2026, 1, 2, 15, 4, 5, 0, time.UTC)
 	obj := &backend.Object{
 		ETag:         "\"etag-1\"",
@@ -176,6 +180,7 @@ func TestEvaluateCopySourceConditionals(t *testing.T) {
 }
 
 func TestParseExpires(t *testing.T) {
+	t.Parallel()
 	t.Run("empty value", func(t *testing.T) {
 		if got := parseExpires(""); got != nil {
 			t.Fatalf("expected nil, got %v", got)

@@ -7,6 +7,7 @@ import (
 )
 
 func TestValidateBucketPolicy(t *testing.T) {
+	t.Parallel()
 	const ok = ""
 	stmt := func(body string) string {
 		return `{"Version":"2012-10-17","Statement":[{` + body + `}]}`
@@ -389,6 +390,7 @@ func TestValidateBucketPolicy(t *testing.T) {
 }
 
 func TestValidateBucketPolicyWithoutBucketSkipsResourceBucketCheck(t *testing.T) {
+	t.Parallel()
 	policy := `{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::any/*"}]}`
 	if err := ValidateBucketPolicy(policy, ""); err != nil {
 		t.Fatalf("ValidateBucketPolicy without bucket = %v", err)
@@ -399,6 +401,7 @@ func TestValidateBucketPolicyWithoutBucketSkipsResourceBucketCheck(t *testing.T)
 }
 
 func TestPutBucketPolicyRejectsInvalidPolicyWithoutChangingState(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("bkt"); err != nil {
 		t.Fatal(err)
@@ -424,6 +427,7 @@ func TestPutBucketPolicyRejectsInvalidPolicyWithoutChangingState(t *testing.T) {
 }
 
 func TestKnownS3PolicyActions(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{
 		"s3:GetObject", "s3:PUTOBJECT", "s3:ListBucket", "s3:ListBucketVersions",
 		"s3:PutBucketPolicy", "s3:BypassGovernanceRetention", "s3:GetObjectVersionTagging",

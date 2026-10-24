@@ -22,6 +22,7 @@ func checksumUint32Base64(v uint32) string {
 }
 
 func TestValidateMFAHeaderAllBranches(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		header  string
@@ -63,6 +64,7 @@ func TestValidateMFAHeaderAllBranches(t *testing.T) {
 }
 
 func TestValidatePostObjectChecksumsAllAlgorithms(t *testing.T) {
+	t.Parallel()
 	body := []byte("checksum-branches")
 	crc32Value := checksumUint32Base64(crc32.ChecksumIEEE(body))
 	crc32cValue := checksumUint32Base64(crc32.Checksum(body, crc32.MakeTable(crc32.Castagnoli)))
@@ -159,6 +161,7 @@ func TestValidatePostObjectChecksumsAllAlgorithms(t *testing.T) {
 }
 
 func TestBucketConfigAndTaggingBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "cfg-branch")
 

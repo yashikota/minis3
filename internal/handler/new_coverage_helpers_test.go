@@ -13,6 +13,7 @@ import (
 )
 
 func TestAuthV4ReadsNonNilBodyWhenPayloadHashMissing(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"http://example.test/bucket/key",
@@ -40,6 +41,7 @@ func TestAuthV4ReadsNonNilBodyWhenPayloadHashMissing(t *testing.T) {
 }
 
 func TestServiceIAMBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "svc-iam")
 
@@ -79,11 +81,11 @@ func TestServiceIAMBranches(t *testing.T) {
 	})
 
 	t.Run("iam root arn by display name fallback", func(t *testing.T) {
-		origOwnerForAccessKeyFn := ownerForAccessKeyFn
+		origOwnerForAccessKeyFn := h.hooks.ownerForAccessKey
 		t.Cleanup(func() {
-			ownerForAccessKeyFn = origOwnerForAccessKeyFn
+			h.hooks.ownerForAccessKey = origOwnerForAccessKeyFn
 		})
-		ownerForAccessKeyFn = func(string) *backend.Owner {
+		h.hooks.ownerForAccessKey = func(string) *backend.Owner {
 			return &backend.Owner{ID: "custom-account", DisplayName: "root"}
 		}
 
@@ -129,6 +131,7 @@ func TestServiceIAMBranches(t *testing.T) {
 }
 
 func TestMultipartChecksumHelpers(t *testing.T) {
+	t.Parallel()
 	part := backend.CompletePart{
 		ChecksumCRC32:     "crc32",
 		ChecksumCRC32C:    "crc32c",
@@ -200,6 +203,7 @@ func TestMultipartChecksumHelpers(t *testing.T) {
 }
 
 func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
+	t.Parallel()
 	t.Run("parseTimestampFlexible variants", func(t *testing.T) {
 		now := time.Now().UTC()
 		cases := []string{
@@ -391,6 +395,7 @@ func TestObjectHelperAdditionalBranchesForCoverage(t *testing.T) {
 }
 
 func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "attr-bkt")
 	mustPutObject(t, b, "attr-bkt", "k", "hello")
@@ -506,12 +511,12 @@ func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
 	})
 
 	t.Run("xml marshal failure branch", func(t *testing.T) {
-		origMarshal := xmlMarshalFn
-		xmlMarshalFn = func(v any) ([]byte, error) {
+		origMarshal := h.hooks.xmlMarshal
+		h.hooks.xmlMarshal = func(v any) ([]byte, error) {
 			return nil, io.ErrUnexpectedEOF
 		}
 		t.Cleanup(func() {
-			xmlMarshalFn = origMarshal
+			h.hooks.xmlMarshal = origMarshal
 		})
 
 		w := doRequest(
@@ -527,7 +532,7 @@ func TestGetObjectAttributesAdditionalBranches(t *testing.T) {
 		if !strings.Contains(w.Body.String(), "<Code>InternalError</Code>") {
 			t.Fatalf("expected InternalError in body, got: %s", w.Body.String())
 		}
-		xmlMarshalFn = origMarshal
+		h.hooks.xmlMarshal = origMarshal
 	})
 
 	t.Run("object parts success path", func(t *testing.T) {

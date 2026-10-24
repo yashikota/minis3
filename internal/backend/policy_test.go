@@ -15,6 +15,7 @@ func mustPolicyJSON(t *testing.T, policy map[string]any) string {
 }
 
 func TestEvaluateBucketPolicy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		policy   string
@@ -256,6 +257,7 @@ func TestEvaluateBucketPolicy(t *testing.T) {
 }
 
 func TestEvaluateBucketPolicyAccess(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		policy     string
@@ -430,6 +432,7 @@ func TestEvaluateBucketPolicyAccess(t *testing.T) {
 }
 
 func TestHasAllowStatementForRequest(t *testing.T) {
+	t.Parallel()
 	policy := mustPolicyJSON(t, map[string]any{
 		"Version": "2012-10-17",
 		"Statement": []any{
@@ -511,6 +514,7 @@ func TestHasAllowStatementForRequest(t *testing.T) {
 }
 
 func TestConditionKeySupportedForAction(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		condKey string

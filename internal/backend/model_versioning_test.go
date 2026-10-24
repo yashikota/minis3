@@ -338,6 +338,7 @@ func runVersioningModel(t *testing.T, steps int, r *rand.Rand) {
 }
 
 func TestVersioningModelRandomSequences(t *testing.T) {
+	t.Parallel()
 	for seed := range uint64(200) {
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
 			runVersioningModel(t, 120, rand.New(rand.NewPCG(seed, 0x5eed)))

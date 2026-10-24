@@ -25,6 +25,7 @@ func setupPolicyBucket(t *testing.T, policy string) *Handler {
 }
 
 func TestPutBucketPolicyReportsValidationMessage(t *testing.T) {
+	t.Parallel()
 	h := setupPolicyBucket(t, "")
 	owner := map[string]string{"Authorization": authHeader("minis3-access-key")}
 	tests := []struct {
@@ -67,6 +68,7 @@ func TestPutBucketPolicyReportsValidationMessage(t *testing.T) {
 }
 
 func TestBucketPolicyNotPrincipalDenyOverHTTP(t *testing.T) {
+	t.Parallel()
 	ownerARN := backend.PrincipalForAccessKey("minis3-access-key").ARN
 	h := setupPolicyBucket(t, `{"Statement":[
 		{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::pol/*"},
@@ -96,6 +98,7 @@ func TestBucketPolicyNotPrincipalDenyOverHTTP(t *testing.T) {
 }
 
 func TestBucketPolicySourceIPCondition(t *testing.T) {
+	t.Parallel()
 	h := setupPolicyBucket(
 		t,
 		`{"Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject",
@@ -118,6 +121,7 @@ func TestBucketPolicySourceIPCondition(t *testing.T) {
 }
 
 func TestBucketPolicySecureTransportCondition(t *testing.T) {
+	t.Parallel()
 	h := setupPolicyBucket(t, `{"Statement":[
 		{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::pol/*"},
 		{"Effect":"Deny","Principal":"*","Action":"s3:*","Resource":"arn:aws:s3:::pol/*","Condition":{"Bool":{"aws:SecureTransport":"false"}}}]}`)
@@ -133,6 +137,7 @@ func TestBucketPolicySecureTransportCondition(t *testing.T) {
 }
 
 func TestBucketPolicyListPrefixCondition(t *testing.T) {
+	t.Parallel()
 	h := setupPolicyBucket(t, `{"Statement":[{"Effect":"Allow","Principal":{"AWS":"`+
 		backend.PrincipalForAccessKey("minis3-alt-access-key").ARN+
 		`"},"Action":"s3:ListBucket","Resource":"arn:aws:s3:::pol","Condition":{"StringLike":{"s3:prefix":"public/*"}}}]}`)
@@ -158,6 +163,7 @@ func TestBucketPolicyListPrefixCondition(t *testing.T) {
 }
 
 func TestBucketPolicyAccountPrincipal(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "acct")
 	b.SetBucketOwner("acct", "minis3-access-key")
@@ -194,6 +200,7 @@ func TestBucketPolicyAccountPrincipal(t *testing.T) {
 }
 
 func TestRequestConditionKeys(t *testing.T) {
+	t.Parallel()
 	req := newRequest(
 		http.MethodGet,
 		"http://example.test/b?prefix=p/&delimiter=/&max-keys=5&versionId=v1",
@@ -253,6 +260,7 @@ func TestRequestConditionKeys(t *testing.T) {
 }
 
 func TestExtractPolicyHeadersIncludesAllAmzHeaders(t *testing.T) {
+	t.Parallel()
 	req := newRequest(http.MethodPut, "http://example.test/b/k", "", map[string]string{
 		"X-Amz-Storage-Class":    "STANDARD_IA",
 		"X-Amz-Object-Lock-Mode": "GOVERNANCE",
@@ -281,6 +289,7 @@ func TestExtractPolicyHeadersIncludesAllAmzHeaders(t *testing.T) {
 }
 
 func TestFillPolicyContextKeepsCallerValues(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 	req := newRequest(http.MethodGet, "http://example.test/b/k?prefix=x", "", map[string]string{
 		"Authorization": authHeader("minis3-alt-access-key"),

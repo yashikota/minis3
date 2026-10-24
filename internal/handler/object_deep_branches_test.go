@@ -20,6 +20,7 @@ func (failingReader) Read(_ []byte) (int, error) {
 }
 
 func TestHandleObjectQueryMethodNotAllowedBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-query-branches")
 	mustPutObject(t, b, "obj-query-branches", "k", "v")
@@ -61,6 +62,7 @@ func TestHandleObjectQueryMethodNotAllowedBranches(t *testing.T) {
 }
 
 func TestHandleObjectPutAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "put-branches")
 
@@ -187,6 +189,7 @@ func TestHandleObjectPutAdditionalBranches(t *testing.T) {
 }
 
 func TestHandleObjectSSECAndPartBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-ssec")
 
@@ -331,6 +334,7 @@ func TestHandleObjectSSECAndPartBranches(t *testing.T) {
 }
 
 func TestHandleObjectDeleteAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "delete-branches")
 	if err := b.SetBucketVersioning(
@@ -427,6 +431,7 @@ func TestHandleObjectDeleteAdditionalBranches(t *testing.T) {
 }
 
 func TestPutObjectRetainUntilDateTruncatesFractionalSeconds(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "lock-retain-truncate")
 

@@ -8,6 +8,7 @@ import (
 )
 
 func TestValidateLifecycleConfiguration(t *testing.T) {
+	t.Parallel()
 	t.Run("rejects invalid status", func(t *testing.T) {
 		cfg := &backend.LifecycleConfiguration{
 			Rules: []backend.LifecycleRule{

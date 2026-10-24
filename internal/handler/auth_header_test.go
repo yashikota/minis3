@@ -67,6 +67,7 @@ func requirePresignedErrCode(t *testing.T, err error, want string) {
 }
 
 func TestVerifyAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	t.Run("no authorization", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
 		if err := verifyAuthorizationHeader(req); err != nil {

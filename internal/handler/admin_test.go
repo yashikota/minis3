@@ -9,6 +9,7 @@ import (
 )
 
 func TestHandleAdmin_ForceDeleteBucket(t *testing.T) {
+	t.Parallel()
 	t.Run("deletes empty bucket", func(t *testing.T) {
 		h, b := newTestHandler(t)
 		mustCreateBucket(t, b, "test-bucket")

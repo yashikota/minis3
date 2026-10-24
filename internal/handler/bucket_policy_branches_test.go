@@ -9,6 +9,7 @@ import (
 )
 
 func TestBucketPolicyBranchCoverage(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "policy-branch")
 	b.SetBucketOwner("policy-branch", "minis3-access-key")
@@ -124,6 +125,7 @@ func TestBucketPolicyBranchCoverage(t *testing.T) {
 }
 
 func TestGetDeleteBucketPolicyDenySelf(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "deny-policy")
 	b.SetBucketOwner("deny-policy", "minis3-access-key")
@@ -215,6 +217,7 @@ func TestGetDeleteBucketPolicyDenySelf(t *testing.T) {
 }
 
 func TestBucketPolicyStatusBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "policy-status")
 	b.SetBucketOwner("policy-status", "minis3-access-key")

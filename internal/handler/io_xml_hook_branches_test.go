@@ -11,32 +11,33 @@ import (
 	"github.com/yashikota/minis3/internal/backend"
 )
 
-func patchReadAllForTest(t *testing.T, fn func(io.Reader) ([]byte, error)) {
+func patchReadAllForTest(t *testing.T, h *Handler, fn func(io.Reader) ([]byte, error)) {
 	t.Helper()
-	orig := readAllFn
-	readAllFn = fn
+	orig := h.hooks.readAll
+	h.hooks.readAll = fn
 	t.Cleanup(func() {
-		readAllFn = orig
+		h.hooks.readAll = orig
 	})
 }
 
-func patchXMLMarshalForTest(t *testing.T, fn func(any) ([]byte, error)) {
+func patchXMLMarshalForTest(t *testing.T, h *Handler, fn func(any) ([]byte, error)) {
 	t.Helper()
-	orig := xmlMarshalFn
-	xmlMarshalFn = fn
+	orig := h.hooks.xmlMarshal
+	h.hooks.xmlMarshal = fn
 	t.Cleanup(func() {
-		xmlMarshalFn = orig
+		h.hooks.xmlMarshal = orig
 	})
 }
 
 func TestReadAllErrorHookBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "hook-bucket")
 	mustPutObject(t, b, "hook-bucket", "obj", "value")
 	mustCreateObjectLockBucket(t, b, "hook-lock")
 	mustPutObject(t, b, "hook-lock", "obj", "value")
 
-	patchReadAllForTest(t, func(io.Reader) ([]byte, error) {
+	patchReadAllForTest(t, h, func(io.Reader) ([]byte, error) {
 		return nil, errors.New("read boom")
 	})
 
@@ -160,6 +161,7 @@ func TestReadAllErrorHookBranches(t *testing.T) {
 }
 
 func TestXMLMarshalErrorHookBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "marshal-bucket")
 	mustCreateBucket(t, b, "marshal-src")
@@ -317,7 +319,7 @@ func TestXMLMarshalErrorHookBranches(t *testing.T) {
 		t.Fatalf("PutObjectLegalHold failed: %v", err)
 	}
 
-	patchXMLMarshalForTest(t, func(any) ([]byte, error) {
+	patchXMLMarshalForTest(t, h, func(any) ([]byte, error) {
 		return nil, errors.New("marshal boom")
 	})
 

@@ -6,6 +6,7 @@ import (
 )
 
 func TestBucketHTTPBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 
 	t.Run("bucket acl get and acl method not allowed", func(t *testing.T) {
@@ -158,6 +159,7 @@ func TestBucketHTTPBranches(t *testing.T) {
 }
 
 func TestPublicAccessBlockAccessBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "pab-branch")
 	b.SetBucketOwner("pab-branch", "minis3-access-key")

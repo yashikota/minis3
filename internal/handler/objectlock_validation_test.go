@@ -10,6 +10,7 @@ import (
 )
 
 func TestPutObjectObjectLockValidation(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "lock-bucket")
 	b.SetBucketOwner("lock-bucket", "minis3-access-key")
@@ -88,6 +89,7 @@ func TestPutObjectObjectLockValidation(t *testing.T) {
 }
 
 func TestCreateMultipartObjectLockValidation(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "lock-mpu")
 	b.SetBucketOwner("lock-mpu", "minis3-access-key")
@@ -167,6 +169,7 @@ func TestCreateMultipartObjectLockValidation(t *testing.T) {
 }
 
 func TestCopyObjectObjectLockValidation(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "lock-src")
 	mustCreateObjectLockBucket(t, b, "lock-dst")

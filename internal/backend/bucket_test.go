@@ -7,6 +7,7 @@ import (
 )
 
 func TestValidateBucketName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		bucket  string
@@ -87,6 +88,7 @@ func TestValidateBucketName(t *testing.T) {
 }
 
 func TestGetBucketLocation(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
@@ -130,6 +132,7 @@ func TestGetBucketLocation(t *testing.T) {
 }
 
 func TestBucketTagging(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
@@ -178,6 +181,7 @@ func TestBucketTagging(t *testing.T) {
 }
 
 func TestBucketPolicy(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
@@ -238,6 +242,7 @@ func TestBucketPolicy(t *testing.T) {
 }
 
 func TestGetBucketUsage(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	t.Run("non-existent bucket", func(t *testing.T) {
@@ -327,6 +332,7 @@ func TestGetBucketUsage(t *testing.T) {
 }
 
 func TestForceDeleteBucket(t *testing.T) {
+	t.Parallel()
 	t.Run("deletes empty bucket", func(t *testing.T) {
 		b := New()
 		if err := b.CreateBucket("test-bucket"); err != nil {

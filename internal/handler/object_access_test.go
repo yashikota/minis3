@@ -12,6 +12,7 @@ import (
 )
 
 func TestHandleObjectAnonymousPutWithoutPolicyIsDenied(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-private"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -34,6 +35,7 @@ func TestHandleObjectAnonymousPutWithoutPolicyIsDenied(t *testing.T) {
 }
 
 func TestHandleObjectAnonymousPutAllowedOnPublicWriteBucket(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-public-write"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -64,6 +66,7 @@ func TestHandleObjectAnonymousPutAllowedOnPublicWriteBucket(t *testing.T) {
 }
 
 func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-acl"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -121,6 +124,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 }
 
 func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-acl-roundtrip"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -194,6 +198,7 @@ func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
 }
 
 func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-owner-read-test"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -240,6 +245,7 @@ func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
 }
 
 func TestExtractAccessKey(t *testing.T) {
+	t.Parallel()
 	t.Run("sigv4 header", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/bucket/obj", nil)
 		req.Header.Set(
@@ -283,6 +289,7 @@ func TestExtractAccessKey(t *testing.T) {
 }
 
 func TestCheckAccessPolicyEvaluation(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("policy-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -333,6 +340,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 }
 
 func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("policy-context-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -391,6 +399,7 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 }
 
 func TestCheckAccessWithContextStringLikeIfExistsRefererMismatch(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("policy-referer-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -421,6 +430,7 @@ func TestCheckAccessWithContextStringLikeIfExistsRefererMismatch(t *testing.T) {
 }
 
 func TestCheckAccessBucketACLCanonicalUserPermissions(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-acl-canonical"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -487,6 +497,7 @@ func TestCheckAccessBucketACLCanonicalUserPermissions(t *testing.T) {
 }
 
 func TestHandlePutBucketACLRejectsUnknownCanonicalUser(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-acl-invalid-user"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -528,6 +539,7 @@ func TestHandlePutBucketACLRejectsUnknownCanonicalUser(t *testing.T) {
 }
 
 func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-object-grants"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -603,6 +615,7 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 }
 
 func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	h := New(b)
 	alt := backend.OwnerForAccessKey("minis3-alt-access-key")
@@ -670,6 +683,7 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 }
 
 func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-copy-acl"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -707,6 +721,7 @@ func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
 }
 
 func TestExtractPolicyHeaders(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodPut, "/bucket/obj", nil)
 	req.Header.Set("x-amz-acl", "private")
 	req.Header.Set("x-amz-copy-source", "/bucket/src")
@@ -733,6 +748,7 @@ func TestExtractPolicyHeaders(t *testing.T) {
 }
 
 func TestHandleRequestOptionsPreflightValidation(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	h := New(b)
 

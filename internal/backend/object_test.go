@@ -8,6 +8,7 @@ import (
 )
 
 func TestObjectTagging(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 	_, _ = b.PutObject("test-bucket", "test-key", []byte("test data"), PutObjectOptions{})
@@ -94,6 +95,7 @@ func TestObjectTagging(t *testing.T) {
 }
 
 func TestObjectTaggingWithVersioning(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("versioned-bucket")
 	_ = b.SetBucketVersioning("versioned-bucket", VersioningEnabled, MFADeleteDisabled)
@@ -158,6 +160,7 @@ func TestObjectTaggingWithVersioning(t *testing.T) {
 }
 
 func TestCopyPart(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("src-bucket")
 	_ = b.CreateBucket("dst-bucket")
@@ -308,6 +311,7 @@ func TestCopyPart(t *testing.T) {
 }
 
 func TestPutObjectWithTags(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
@@ -330,6 +334,7 @@ func TestPutObjectWithTags(t *testing.T) {
 }
 
 func TestPutObjectWithObjectLock(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucketWithObjectLock("lock-bucket")
 
@@ -365,6 +370,7 @@ func TestPutObjectWithObjectLock(t *testing.T) {
 }
 
 func TestDeleteObjectRespectsObjectLock(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucketWithObjectLock("lock-bucket")
 	_ = b.SetBucketVersioning("lock-bucket", VersioningEnabled, MFADeleteDisabled)
@@ -443,6 +449,7 @@ func TestDeleteObjectRespectsObjectLock(t *testing.T) {
 }
 
 func TestDeleteObjectsRespectsObjectLock(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucketWithObjectLock("lock-bucket")
 	_ = b.SetBucketVersioning("lock-bucket", VersioningEnabled, MFADeleteDisabled)
@@ -478,6 +485,7 @@ func TestDeleteObjectsRespectsObjectLock(t *testing.T) {
 }
 
 func TestCopyObjectCopiesObjectLock(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucketWithObjectLock("lock-bucket")
 	_ = b.CreateBucket("normal-bucket")
@@ -593,6 +601,7 @@ func TestCopyObjectCopiesObjectLock(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadAppliesAttributes(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucketWithObjectLock("mp-bucket")
 
@@ -670,6 +679,7 @@ func TestCompleteMultipartUploadAppliesAttributes(t *testing.T) {
 }
 
 func TestStorageClass(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
@@ -697,6 +707,7 @@ func TestStorageClass(t *testing.T) {
 }
 
 func TestServerSideEncryptionFields(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
@@ -730,6 +741,7 @@ func TestServerSideEncryptionFields(t *testing.T) {
 }
 
 func TestContentTypeDefault(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
@@ -801,6 +813,7 @@ func TestContentTypeDefault(t *testing.T) {
 }
 
 func TestCopyObjectWithTaggingDirective(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("bucket")
 
@@ -881,6 +894,7 @@ func objectKeys(objects []*Object) []string {
 }
 
 func TestListObjectsV1DelimiterMarkerPagination(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("list-v1-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -1029,6 +1043,7 @@ func TestListObjectsV1DelimiterMarkerPagination(t *testing.T) {
 }
 
 func TestListObjectsV1EdgeCases(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("list-v1-edge"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -1117,6 +1132,7 @@ func TestListObjectsV1EdgeCases(t *testing.T) {
 }
 
 func TestListObjectsV2EdgeCases(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("list-v2-edge"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -1221,6 +1237,7 @@ func TestListObjectsV2EdgeCases(t *testing.T) {
 }
 
 func TestListObjectVersionsStableSort(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("versions-stable-sort"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

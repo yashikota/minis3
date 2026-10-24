@@ -8,6 +8,7 @@ import (
 )
 
 func TestObjectLockReadErrorAndMissingBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "plain-lock-extra")
 	mustCreateObjectLockBucket(t, b, "lock-extra")
@@ -169,6 +170,7 @@ func TestObjectLockReadErrorAndMissingBranches(t *testing.T) {
 }
 
 func TestPutObjectLockConfigurationMissingBucketBranch(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 	payload := `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
 	w := doRequest(
@@ -185,6 +187,7 @@ func TestPutObjectLockConfigurationMissingBucketBranch(t *testing.T) {
 }
 
 func TestPutObjectLockConfigurationMalformedXMLBranch(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 	w := doRequest(
 		h,
@@ -200,6 +203,7 @@ func TestPutObjectLockConfigurationMalformedXMLBranch(t *testing.T) {
 }
 
 func TestPutObjectLockConfigurationInvalidStateBranch(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "plain-lock-invalid-state")
 	payload := `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
@@ -217,6 +221,7 @@ func TestPutObjectLockConfigurationInvalidStateBranch(t *testing.T) {
 }
 
 func TestPutObjectLockConfigurationInvalidRetentionPeriodBranch(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "lock-invalid-retention")
 	payload := `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>0</Days></DefaultRetention></Rule></ObjectLockConfiguration>`
@@ -234,6 +239,7 @@ func TestPutObjectLockConfigurationInvalidRetentionPeriodBranch(t *testing.T) {
 }
 
 func TestPutObjectLockConfigurationInvalidConfigBranch(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "lock-invalid-config")
 	payload := `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>INVALID</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>`
@@ -251,6 +257,7 @@ func TestPutObjectLockConfigurationInvalidConfigBranch(t *testing.T) {
 }
 
 func TestPutObjectRetentionInvalidConfigBranch(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "retention-invalid-config")
 	mustPutObject(t, b, "retention-invalid-config", "obj", "data")
@@ -268,6 +275,7 @@ func TestPutObjectRetentionInvalidConfigBranch(t *testing.T) {
 }
 
 func TestPutObjectLegalHoldInvalidConfigBranch(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "legalhold-invalid-config")
 	mustPutObject(t, b, "legalhold-invalid-config", "obj", "data")

@@ -9,6 +9,7 @@ import (
 // AWS behavior it pins down.
 
 func TestListObjectVersionsNotTruncatedAtExactPageBoundary(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateVersionedBucket(t, b, "lov-boundary")
 	for range 3 {
@@ -30,6 +31,7 @@ func TestListObjectVersionsNotTruncatedAtExactPageBoundary(t *testing.T) {
 }
 
 func TestListObjectVersionsPagesCommonPrefixes(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateVersionedBucket(t, b, "lov-prefixes")
 	for _, k := range []string{"a/1", "b", "c/1", "d"} {
@@ -69,6 +71,7 @@ func TestListObjectVersionsPagesCommonPrefixes(t *testing.T) {
 }
 
 func TestPutObjectLockConfigurationRejectedLeavesLockDisabled(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateVersionedBucket(t, b, "lock-atomic")
 	err := b.PutObjectLockConfiguration("lock-atomic", &ObjectLockConfiguration{
@@ -92,6 +95,7 @@ func TestPutObjectLockConfigurationRejectedLeavesLockDisabled(t *testing.T) {
 }
 
 func TestDeleteBucketDropsMultipartUploads(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("mpu-purge"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -133,6 +137,7 @@ func TestDeleteBucketDropsMultipartUploads(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadReportsMissingBucketFirst(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.CompleteMultipartUpload(
 		"no-such-bucket",
@@ -148,6 +153,7 @@ func TestCompleteMultipartUploadReportsMissingBucketFirst(t *testing.T) {
 }
 
 func TestCompletedUploadLookup(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("mpu-done"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -204,6 +210,7 @@ func TestCompletedUploadLookup(t *testing.T) {
 }
 
 func TestUpdateUpload(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.UpdateUpload(
 		"missing",
@@ -229,6 +236,7 @@ func TestUpdateUpload(t *testing.T) {
 }
 
 func TestListMultipartUploadsSameKeyInInitiationOrder(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("mpu-order")
 	var ids []string
@@ -245,6 +253,7 @@ func TestListMultipartUploadsSameKeyInInitiationOrder(t *testing.T) {
 }
 
 func TestCopyPartFromDeleteMarkerAndMissingVersion(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateVersionedBucket(t, b, "copypart-dm")
 	if _, err := b.PutObject(
@@ -303,6 +312,7 @@ func TestCopyPartFromDeleteMarkerAndMissingVersion(t *testing.T) {
 }
 
 func TestCopyObjectOwnershipAndETag(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("copy-owner")
 	u, _ := b.CreateMultipartUpload("copy-owner", "mp", CreateMultipartUploadOptions{})
@@ -342,6 +352,7 @@ func TestCopyObjectOwnershipAndETag(t *testing.T) {
 }
 
 func TestSetBucketVersioningWithoutStatusKeepsState(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateVersionedBucket(t, b, "versioning-keep")
 	if err := b.SetBucketVersioning(
@@ -358,6 +369,7 @@ func TestSetBucketVersioningWithoutStatusKeepsState(t *testing.T) {
 }
 
 func TestPutObjectRetentionRequiresModeAndDateTogether(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("retention-pair"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock: %v", err)
@@ -385,6 +397,7 @@ func TestPutObjectRetentionRequiresModeAndDateTogether(t *testing.T) {
 }
 
 func TestDeleteIAMAccessKeyRequiresOwningUser(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_, _ = b.CreateIAMUser("alice", "/")
 	_, _ = b.CreateIAMUser("bob", "/")
@@ -407,6 +420,7 @@ func TestDeleteIAMAccessKeyRequiresOwningUser(t *testing.T) {
 }
 
 func TestDeletePreconditionTarget(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateVersionedBucket(t, b, "delete-target")
 	if b.DeletePreconditionTarget("missing-bucket", "k") != nil ||
@@ -436,6 +450,7 @@ func TestDeletePreconditionTarget(t *testing.T) {
 }
 
 func TestPolicyConditionValueLists(t *testing.T) {
+	t.Parallel()
 	deny := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*",` +
 		`"Action":"s3:GetObject","Resource":"arn:aws:s3:::bkt/*",` +
 		`"Condition":{"StringEquals":{"s3:x-amz-acl":["public-read","private"]}}}]}`
@@ -474,6 +489,7 @@ func TestPolicyConditionValueLists(t *testing.T) {
 }
 
 func TestPolicyStringOrSliceRejectsMalformedJSON(t *testing.T) {
+	t.Parallel()
 	var p PolicyStringOrSlice
 	if err := p.UnmarshalJSON([]byte("[")); err == nil {
 		t.Fatal("expected error for malformed JSON")
@@ -481,6 +497,7 @@ func TestPolicyStringOrSliceRejectsMalformedJSON(t *testing.T) {
 }
 
 func TestPolicyResourceWildcardsSpanSlashes(t *testing.T) {
+	t.Parallel()
 	policy := `{"Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject",` +
 		`"Resource":["arn:aws:s3:::bkt/home/*/private","arn:aws:s3:::bkt/pre*"]}]}`
 	for target, want := range map[string]PolicyEffect{

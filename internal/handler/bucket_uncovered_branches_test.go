@@ -102,6 +102,8 @@ func encodePolicyForTest(t *testing.T, payload map[string]any) string {
 }
 
 func TestBucketHelperUncoveredBranches(t *testing.T) {
+	t.Parallel()
+	h := New(backend.New())
 	t.Run("parseMultipartFormFields skips file when read fails", func(t *testing.T) {
 		req := makeMultipartReqWithFilename(
 			t,
@@ -115,13 +117,13 @@ func TestBucketHelperUncoveredBranches(t *testing.T) {
 			t.Fatalf("ParseMultipartForm failed: %v", err)
 		}
 
-		origReadAll := readAllFn
-		readAllFn = func(io.Reader) ([]byte, error) {
+		origReadAll := h.hooks.readAll
+		h.hooks.readAll = func(io.Reader) ([]byte, error) {
 			return nil, errors.New("read boom")
 		}
-		defer func() { readAllFn = origReadAll }()
+		defer func() { h.hooks.readAll = origReadAll }()
 
-		got := parseMultipartFormFields(req)
+		got := h.parseMultipartFormFields(req)
 		if _, ok := got["x-amz-signature"]; ok {
 			t.Fatalf("x-amz-signature should be omitted on read error: %+v", got)
 		}
@@ -257,6 +259,7 @@ func TestBucketHelperUncoveredBranches(t *testing.T) {
 }
 
 func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 
 	t.Run("create bucket object lock enabled and existing-bucket branches", func(t *testing.T) {
@@ -300,21 +303,21 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 	})
 
 	t.Run("create bucket backend and acl error branches", func(t *testing.T) {
-		origCreate := createBucketFn
-		origPutACL := putBucketACLFn
+		origCreate := h.hooks.createBucket
+		origPutACL := h.hooks.putBucketACL
 		defer func() {
-			createBucketFn = origCreate
-			putBucketACLFn = origPutACL
+			h.hooks.createBucket = origCreate
+			h.hooks.putBucketACL = origPutACL
 		}()
 
-		createBucketFn = func(*Handler, string) error { return backend.ErrBucketAlreadyOwnedByYou }
+		h.hooks.createBucket = func(*Handler, string) error { return backend.ErrBucketAlreadyOwnedByYou }
 		wOwned := doRequest(
 			h,
 			newRequest(http.MethodPut, "http://example.test/create-owned", "", nil),
 		)
 		requireStatus(t, wOwned, http.StatusOK)
 
-		createBucketFn = func(*Handler, string) error { return backend.ErrBucketAlreadyExists }
+		h.hooks.createBucket = func(*Handler, string) error { return backend.ErrBucketAlreadyExists }
 		wExists := doRequest(
 			h,
 			newRequest(http.MethodPut, "http://example.test/create-exists", "", nil),
@@ -322,7 +325,7 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		requireStatus(t, wExists, http.StatusConflict)
 		requireS3ErrorCode(t, wExists, "BucketAlreadyExists")
 
-		createBucketFn = func(*Handler, string) error { return errors.New("create boom") }
+		h.hooks.createBucket = func(*Handler, string) error { return errors.New("create boom") }
 		wInternal := doRequest(
 			h,
 			newRequest(http.MethodPut, "http://example.test/create-internal", "", nil),
@@ -330,7 +333,7 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		requireStatus(t, wInternal, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wInternal, "InternalError")
 
-		createBucketFn = origCreate
+		h.hooks.createBucket = origCreate
 		wACLParse := doRequest(
 			h,
 			newRequest(
@@ -345,7 +348,7 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		requireStatus(t, wACLParse, http.StatusBadRequest)
 		requireS3ErrorCode(t, wACLParse, "InvalidArgument")
 
-		putBucketACLFn = func(*Handler, string, *backend.AccessControlPolicy) error {
+		h.hooks.putBucketACL = func(*Handler, string, *backend.AccessControlPolicy) error {
 			return errors.New("put acl boom")
 		}
 		wACLInternal := doRequest(
@@ -356,7 +359,7 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		requireS3ErrorCode(t, wACLInternal, "InternalError")
 
 		count := 0
-		putBucketACLFn = func(*Handler, string, *backend.AccessControlPolicy) error {
+		h.hooks.putBucketACL = func(*Handler, string, *backend.AccessControlPolicy) error {
 			count++
 			return nil
 		}
@@ -379,15 +382,15 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 
 	t.Run("delete and head additional error branches", func(t *testing.T) {
 		mustCreateBucket(t, b, "delete-internal")
-		origDeleteBucket := deleteBucketFn
-		deleteBucketFn = func(*Handler, string) error { return errors.New("delete bucket boom") }
+		origDeleteBucket := h.hooks.deleteBucket
+		h.hooks.deleteBucket = func(*Handler, string) error { return errors.New("delete bucket boom") }
 		wDelete := doRequest(
 			h,
 			newRequest(http.MethodDelete, "http://example.test/delete-internal", "", nil),
 		)
 		requireStatus(t, wDelete, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDelete, "InternalError")
-		deleteBucketFn = origDeleteBucket
+		h.hooks.deleteBucket = origDeleteBucket
 
 		mustCreateBucket(t, b, "head-denied")
 		b.SetBucketOwner("head-denied", "owner-ak")
@@ -399,8 +402,8 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		requireS3ErrorCode(t, wDenied, "AccessDenied")
 
 		mustCreateBucket(t, b, "head-stats-error")
-		origUsage := getBucketUsageFn
-		getBucketUsageFn = func(*Handler, string) (int, int64, error) {
+		origUsage := h.hooks.getBucketUsage
+		h.hooks.getBucketUsage = func(*Handler, string) (int, int64, error) {
 			return 0, 0, errors.New("usage boom")
 		}
 		wUsage := doRequest(
@@ -414,7 +417,7 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		)
 		requireStatus(t, wUsage, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wUsage, "InternalError")
-		getBucketUsageFn = origUsage
+		h.hooks.getBucketUsage = origUsage
 	})
 
 	t.Run("post form additional branches", func(t *testing.T) {
@@ -477,8 +480,8 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		wTagging := doRequest(h, reqTagging)
 		requireStatus(t, wTagging, http.StatusNoContent)
 
-		origPostPut := postObjectPutFn
-		postObjectPutFn = func(
+		origPostPut := h.hooks.postObjectPut
+		h.hooks.postObjectPut = func(
 			*Handler,
 			string,
 			string,
@@ -498,7 +501,7 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		)
 		requireStatus(t, wPostPutInternal, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPostPutInternal, "InternalError")
-		postObjectPutFn = func(
+		h.hooks.postObjectPut = func(
 			*Handler,
 			string,
 			string,
@@ -518,10 +521,10 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		)
 		requireStatus(t, wPostPutNoBucket, http.StatusNotFound)
 		requireS3ErrorCode(t, wPostPutNoBucket, "NoSuchBucket")
-		postObjectPutFn = origPostPut
+		h.hooks.postObjectPut = origPostPut
 
-		origPostPutACL := postObjectPutACLFn
-		postObjectPutACLFn = func(
+		origPostPutACL := h.hooks.postObjectPutACL
+		h.hooks.postObjectPutACL = func(
 			*Handler,
 			string,
 			string,
@@ -544,7 +547,7 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 		)
 		requireStatus(t, wPostACL, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPostACL, "InternalError")
-		postObjectPutACLFn = origPostPutACL
+		h.hooks.postObjectPutACL = origPostPutACL
 
 		wRedirectWithQuery := doRequest(
 			h,
@@ -594,6 +597,7 @@ func TestBucketCreateHeadAndPostUncoveredBranches(t *testing.T) {
 }
 
 func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "cfg-err")
 
@@ -674,8 +678,8 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		requireStatus(t, wLockSuspend, http.StatusConflict)
 		requireS3ErrorCode(t, wLockSuspend, "InvalidBucketState")
 
-		origSetVersioning := setBucketVersioningFn
-		setBucketVersioningFn = func(
+		origSetVersioning := h.hooks.setBucketVersioning
+		h.hooks.setBucketVersioning = func(
 			*Handler,
 			string,
 			backend.VersioningStatus,
@@ -694,7 +698,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wInternal, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wInternal, "InternalError")
-		setBucketVersioningFn = origSetVersioning
+		h.hooks.setBucketVersioning = origSetVersioning
 
 		wOK := doRequest(
 			h,
@@ -712,18 +716,18 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		ownerHeaders := map[string]string{"Authorization": authHeader("minis3-access-key")}
 		b.SetBucketOwner("cfg-err", "minis3-access-key")
 
-		origGetLocation := getBucketLocationFn
-		getBucketLocationFn = func(*Handler, string) (string, error) { return "", errors.New("location boom") }
+		origGetLocation := h.hooks.getBucketLocation
+		h.hooks.getBucketLocation = func(*Handler, string) (string, error) { return "", errors.New("location boom") }
 		wLocation := doRequest(
 			h,
 			newRequest(http.MethodGet, "http://example.test/cfg-err?location", "", ownerHeaders),
 		)
 		requireStatus(t, wLocation, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wLocation, "InternalError")
-		getBucketLocationFn = origGetLocation
+		h.hooks.getBucketLocation = origGetLocation
 
-		origGetTagging := getBucketTaggingFn
-		getBucketTaggingFn = func(*Handler, string) (map[string]string, error) {
+		origGetTagging := h.hooks.getBucketTagging
+		h.hooks.getBucketTagging = func(*Handler, string) (map[string]string, error) {
 			return nil, errors.New("tagging get boom")
 		}
 		wGetTag := doRequest(
@@ -732,10 +736,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wGetTag, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetTag, "InternalError")
-		getBucketTaggingFn = origGetTagging
+		h.hooks.getBucketTagging = origGetTagging
 
-		origPutTagging := putBucketTaggingFn
-		putBucketTaggingFn = func(*Handler, string, map[string]string) error {
+		origPutTagging := h.hooks.putBucketTagging
+		h.hooks.putBucketTagging = func(*Handler, string, map[string]string) error {
 			return errors.New("tagging put boom")
 		}
 		wPutTag := doRequest(
@@ -749,30 +753,30 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutTag, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutTag, "InternalError")
-		putBucketTaggingFn = origPutTagging
+		h.hooks.putBucketTagging = origPutTagging
 
-		origDeleteTagging := deleteBucketTaggingFn
-		deleteBucketTaggingFn = func(*Handler, string) error { return errors.New("tagging del boom") }
+		origDeleteTagging := h.hooks.deleteBucketTagging
+		h.hooks.deleteBucketTagging = func(*Handler, string) error { return errors.New("tagging del boom") }
 		wDeleteTag := doRequest(
 			h,
 			newRequest(http.MethodDelete, "http://example.test/cfg-err?tagging", "", ownerHeaders),
 		)
 		requireStatus(t, wDeleteTag, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteTag, "InternalError")
-		deleteBucketTaggingFn = origDeleteTagging
+		h.hooks.deleteBucketTagging = origDeleteTagging
 
-		origGetPolicy := getBucketPolicyFn
-		getBucketPolicyFn = func(*Handler, string) (string, error) { return "", errors.New("policy get boom") }
+		origGetPolicy := h.hooks.getBucketPolicy
+		h.hooks.getBucketPolicy = func(*Handler, string) (string, error) { return "", errors.New("policy get boom") }
 		wGetPolicy := doRequest(
 			h,
 			newRequest(http.MethodGet, "http://example.test/cfg-err?policy", "", ownerHeaders),
 		)
 		requireStatus(t, wGetPolicy, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetPolicy, "InternalError")
-		getBucketPolicyFn = origGetPolicy
+		h.hooks.getBucketPolicy = origGetPolicy
 
-		origPutPolicy := putBucketPolicyFn
-		putBucketPolicyFn = func(*Handler, string, string, bool) error { return errors.New("policy put boom") }
+		origPutPolicy := h.hooks.putBucketPolicy
+		h.hooks.putBucketPolicy = func(*Handler, string, string, bool) error { return errors.New("policy put boom") }
 		wPutPolicy := doRequest(
 			h,
 			newRequest(
@@ -784,17 +788,17 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutPolicy, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutPolicy, "InternalError")
-		putBucketPolicyFn = origPutPolicy
+		h.hooks.putBucketPolicy = origPutPolicy
 
-		origDeletePolicy := deleteBucketPolicyFn
-		deleteBucketPolicyFn = func(*Handler, string) error { return errors.New("policy del boom") }
+		origDeletePolicy := h.hooks.deleteBucketPolicy
+		h.hooks.deleteBucketPolicy = func(*Handler, string) error { return errors.New("policy del boom") }
 		wDeletePolicy := doRequest(
 			h,
 			newRequest(http.MethodDelete, "http://example.test/cfg-err?policy", "", ownerHeaders),
 		)
 		requireStatus(t, wDeletePolicy, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeletePolicy, "InternalError")
-		deleteBucketPolicyFn = origDeletePolicy
+		h.hooks.deleteBucketPolicy = origDeletePolicy
 
 		wGetACLDenied := doRequest(
 			h,
@@ -803,8 +807,8 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		requireStatus(t, wGetACLDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wGetACLDenied, "AccessDenied")
 
-		origGetACL := getBucketACLFn
-		getBucketACLFn = func(*Handler, string) (*backend.AccessControlPolicy, error) {
+		origGetACL := h.hooks.getBucketACL
+		h.hooks.getBucketACL = func(*Handler, string) (*backend.AccessControlPolicy, error) {
 			return nil, errors.New("acl get boom")
 		}
 		wGetACLInternal := doRequest(
@@ -813,10 +817,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wGetACLInternal, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetACLInternal, "InternalError")
-		getBucketACLFn = origGetACL
+		h.hooks.getBucketACL = origGetACL
 
-		origPutACL := putBucketACLFn
-		putBucketACLFn = func(*Handler, string, *backend.AccessControlPolicy) error {
+		origPutACL := h.hooks.putBucketACL
+		h.hooks.putBucketACL = func(*Handler, string, *backend.AccessControlPolicy) error {
 			return errors.New("acl put boom")
 		}
 		wPutACLCanned := doRequest(
@@ -834,7 +838,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		requireStatus(t, wPutACLCanned, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutACLCanned, "InternalError")
 
-		putBucketACLFn = func(*Handler, string, *backend.AccessControlPolicy) error {
+		h.hooks.putBucketACL = func(*Handler, string, *backend.AccessControlPolicy) error {
 			return backend.ErrBucketNotFound
 		}
 		wPutACLNoBucket := doRequest(
@@ -849,7 +853,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		requireStatus(t, wPutACLNoBucket, http.StatusNotFound)
 		requireS3ErrorCode(t, wPutACLNoBucket, "NoSuchBucket")
 
-		putBucketACLFn = func(*Handler, string, *backend.AccessControlPolicy) error {
+		h.hooks.putBucketACL = func(*Handler, string, *backend.AccessControlPolicy) error {
 			return errors.New("acl put body boom")
 		}
 		wPutACLBodyInternal := doRequest(
@@ -863,10 +867,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutACLBodyInternal, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutACLBodyInternal, "InternalError")
-		putBucketACLFn = origPutACL
+		h.hooks.putBucketACL = origPutACL
 
-		origGetLifecycle := getBucketLifecycleConfigurationFn
-		getBucketLifecycleConfigurationFn = func(
+		origGetLifecycle := h.hooks.getBucketLifecycleConfiguration
+		h.hooks.getBucketLifecycleConfiguration = func(
 			*Handler,
 			string,
 		) (*backend.LifecycleConfiguration, error) {
@@ -878,7 +882,7 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wGetLC, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetLC, "InternalError")
-		getBucketLifecycleConfigurationFn = origGetLifecycle
+		h.hooks.getBucketLifecycleConfiguration = origGetLifecycle
 
 		wPutLCInvalid := doRequest(
 			h,
@@ -891,8 +895,8 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutLCInvalid, http.StatusBadRequest)
 
-		origPutLifecycle := putBucketLifecycleConfigurationFn
-		putBucketLifecycleConfigurationFn = func(*Handler, string, *backend.LifecycleConfiguration) error {
+		origPutLifecycle := h.hooks.putBucketLifecycleConfiguration
+		h.hooks.putBucketLifecycleConfiguration = func(*Handler, string, *backend.LifecycleConfiguration) error {
 			return errors.New("lc put boom")
 		}
 		wPutLCInternal := doRequest(
@@ -906,10 +910,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutLCInternal, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutLCInternal, "InternalError")
-		putBucketLifecycleConfigurationFn = origPutLifecycle
+		h.hooks.putBucketLifecycleConfiguration = origPutLifecycle
 
-		origDeleteLifecycle := deleteBucketLifecycleConfigurationFn
-		deleteBucketLifecycleConfigurationFn = func(*Handler, string) error {
+		origDeleteLifecycle := h.hooks.deleteBucketLifecycleConfiguration
+		h.hooks.deleteBucketLifecycleConfiguration = func(*Handler, string) error {
 			return errors.New("lc del boom")
 		}
 		wDeleteLC := doRequest(
@@ -923,10 +927,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wDeleteLC, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteLC, "InternalError")
-		deleteBucketLifecycleConfigurationFn = origDeleteLifecycle
+		h.hooks.deleteBucketLifecycleConfiguration = origDeleteLifecycle
 
-		origGetEnc := getBucketEncryptionFn
-		getBucketEncryptionFn = func(*Handler, string) (*backend.ServerSideEncryptionConfiguration, error) {
+		origGetEnc := h.hooks.getBucketEncryption
+		h.hooks.getBucketEncryption = func(*Handler, string) (*backend.ServerSideEncryptionConfiguration, error) {
 			return nil, errors.New("enc get boom")
 		}
 		wGetEnc := doRequest(
@@ -935,10 +939,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wGetEnc, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetEnc, "InternalError")
-		getBucketEncryptionFn = origGetEnc
+		h.hooks.getBucketEncryption = origGetEnc
 
-		origPutEnc := putBucketEncryptionFn
-		putBucketEncryptionFn = func(
+		origPutEnc := h.hooks.putBucketEncryption
+		h.hooks.putBucketEncryption = func(
 			*Handler,
 			string,
 			*backend.ServerSideEncryptionConfiguration,
@@ -956,10 +960,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutEnc, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutEnc, "InternalError")
-		putBucketEncryptionFn = origPutEnc
+		h.hooks.putBucketEncryption = origPutEnc
 
-		origDeleteEnc := deleteBucketEncryptionFn
-		deleteBucketEncryptionFn = func(*Handler, string) error { return errors.New("enc del boom") }
+		origDeleteEnc := h.hooks.deleteBucketEncryption
+		h.hooks.deleteBucketEncryption = func(*Handler, string) error { return errors.New("enc del boom") }
 		wDeleteEnc := doRequest(
 			h,
 			newRequest(
@@ -971,10 +975,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wDeleteEnc, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteEnc, "InternalError")
-		deleteBucketEncryptionFn = origDeleteEnc
+		h.hooks.deleteBucketEncryption = origDeleteEnc
 
-		origGetCORS := getBucketCORSFn
-		getBucketCORSFn = func(*Handler, string) (*backend.CORSConfiguration, error) {
+		origGetCORS := h.hooks.getBucketCORS
+		h.hooks.getBucketCORS = func(*Handler, string) (*backend.CORSConfiguration, error) {
 			return nil, errors.New("cors get boom")
 		}
 		wGetCORS := doRequest(
@@ -983,10 +987,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wGetCORS, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetCORS, "InternalError")
-		getBucketCORSFn = origGetCORS
+		h.hooks.getBucketCORS = origGetCORS
 
-		origPutCORS := putBucketCORSFn
-		putBucketCORSFn = func(*Handler, string, *backend.CORSConfiguration) error {
+		origPutCORS := h.hooks.putBucketCORS
+		h.hooks.putBucketCORS = func(*Handler, string, *backend.CORSConfiguration) error {
 			return errors.New("cors put boom")
 		}
 		wPutCORS := doRequest(
@@ -1000,20 +1004,20 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutCORS, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutCORS, "InternalError")
-		putBucketCORSFn = origPutCORS
+		h.hooks.putBucketCORS = origPutCORS
 
-		origDeleteCORS := deleteBucketCORSFn
-		deleteBucketCORSFn = func(*Handler, string) error { return errors.New("cors del boom") }
+		origDeleteCORS := h.hooks.deleteBucketCORS
+		h.hooks.deleteBucketCORS = func(*Handler, string) error { return errors.New("cors del boom") }
 		wDeleteCORS := doRequest(
 			h,
 			newRequest(http.MethodDelete, "http://example.test/cfg-err?cors", "", ownerHeaders),
 		)
 		requireStatus(t, wDeleteCORS, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteCORS, "InternalError")
-		deleteBucketCORSFn = origDeleteCORS
+		h.hooks.deleteBucketCORS = origDeleteCORS
 
-		origGetWebsite := getBucketWebsiteFn
-		getBucketWebsiteFn = func(*Handler, string) (*backend.WebsiteConfiguration, error) {
+		origGetWebsite := h.hooks.getBucketWebsite
+		h.hooks.getBucketWebsite = func(*Handler, string) (*backend.WebsiteConfiguration, error) {
 			return nil, errors.New("website get boom")
 		}
 		wGetWebsite := doRequest(
@@ -1022,10 +1026,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wGetWebsite, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetWebsite, "InternalError")
-		getBucketWebsiteFn = origGetWebsite
+		h.hooks.getBucketWebsite = origGetWebsite
 
-		origPutWebsite := putBucketWebsiteFn
-		putBucketWebsiteFn = func(*Handler, string, *backend.WebsiteConfiguration) error {
+		origPutWebsite := h.hooks.putBucketWebsite
+		h.hooks.putBucketWebsite = func(*Handler, string, *backend.WebsiteConfiguration) error {
 			return errors.New("website put boom")
 		}
 		wPutWebsite := doRequest(
@@ -1039,20 +1043,20 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutWebsite, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutWebsite, "InternalError")
-		putBucketWebsiteFn = origPutWebsite
+		h.hooks.putBucketWebsite = origPutWebsite
 
-		origDeleteWebsite := deleteBucketWebsiteFn
-		deleteBucketWebsiteFn = func(*Handler, string) error { return errors.New("website del boom") }
+		origDeleteWebsite := h.hooks.deleteBucketWebsite
+		h.hooks.deleteBucketWebsite = func(*Handler, string) error { return errors.New("website del boom") }
 		wDeleteWebsite := doRequest(
 			h,
 			newRequest(http.MethodDelete, "http://example.test/cfg-err?website", "", ownerHeaders),
 		)
 		requireStatus(t, wDeleteWebsite, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteWebsite, "InternalError")
-		deleteBucketWebsiteFn = origDeleteWebsite
+		h.hooks.deleteBucketWebsite = origDeleteWebsite
 
-		origGetPAB := getPublicAccessBlockFn
-		getPublicAccessBlockFn = func(*Handler, string) (*backend.PublicAccessBlockConfiguration, error) {
+		origGetPAB := h.hooks.getPublicAccessBlock
+		h.hooks.getPublicAccessBlock = func(*Handler, string) (*backend.PublicAccessBlockConfiguration, error) {
 			return nil, errors.New("pab get boom")
 		}
 		wGetPAB := doRequest(
@@ -1066,10 +1070,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wGetPAB, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetPAB, "InternalError")
-		getPublicAccessBlockFn = origGetPAB
+		h.hooks.getPublicAccessBlock = origGetPAB
 
-		origPutPAB := putPublicAccessBlockFn
-		putPublicAccessBlockFn = func(
+		origPutPAB := h.hooks.putPublicAccessBlock
+		h.hooks.putPublicAccessBlock = func(
 			*Handler,
 			string,
 			*backend.PublicAccessBlockConfiguration,
@@ -1087,10 +1091,10 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutPAB, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutPAB, "InternalError")
-		putPublicAccessBlockFn = origPutPAB
+		h.hooks.putPublicAccessBlock = origPutPAB
 
-		origDeletePAB := deletePublicAccessBlockFn
-		deletePublicAccessBlockFn = func(*Handler, string) error { return errors.New("pab del boom") }
+		origDeletePAB := h.hooks.deletePublicAccessBlock
+		h.hooks.deletePublicAccessBlock = func(*Handler, string) error { return errors.New("pab del boom") }
 		wDeletePAB := doRequest(
 			h,
 			newRequest(
@@ -1102,6 +1106,6 @@ func TestBucketListVersioningAndConfigInternalBranches(t *testing.T) {
 		)
 		requireStatus(t, wDeletePAB, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeletePAB, "InternalError")
-		deletePublicAccessBlockFn = origDeletePAB
+		h.hooks.deletePublicAccessBlock = origDeletePAB
 	})
 }

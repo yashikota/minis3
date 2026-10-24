@@ -87,6 +87,7 @@ func sigV2VectorRequest(method, target string, headers map[string]string) (*http
 }
 
 func TestSigV2KnownAnswers(t *testing.T) {
+	t.Parallel()
 	for _, v := range sigV2Vectors {
 		t.Run(v.name, func(t *testing.T) {
 			secret := v.secretKey
@@ -123,6 +124,7 @@ func TestSigV2KnownAnswers(t *testing.T) {
 }
 
 func TestSigV2PresignedKnownAnswer(t *testing.T) {
+	t.Parallel()
 	// botocore HmacV1QueryAuth with Expires 1800000000.
 	target := "/bucket/key?AWSAccessKeyId=minis3-access-key&Signature=QZUF06n9IU8iFqLxPNLYkWtg4iQ%3D&Expires=1800000000"
 	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9000"+target, nil)
@@ -155,6 +157,7 @@ func TestSigV2PresignedKnownAnswer(t *testing.T) {
 }
 
 func TestCanonicalizedAmzHeaders(t *testing.T) {
+	t.Parallel()
 	h := http.Header{}
 	h.Add("X-Amz-Meta-B", " two ")
 	h.Add("X-Amz-Meta-B", "three")
@@ -170,6 +173,7 @@ func TestCanonicalizedAmzHeaders(t *testing.T) {
 }
 
 func TestCanonicalizedSubresources(t *testing.T) {
+	t.Parallel()
 	q, _ := url.ParseQuery("versionId=v1&acl&prefix=p&uploadId=u&partNumber=3")
 	want := "?acl&partNumber=3&uploadId=u&versionId=v1"
 	if got := canonicalizedSubresources(q, sigV2Subresources); got != want {
@@ -181,6 +185,7 @@ func TestCanonicalizedSubresources(t *testing.T) {
 }
 
 func TestSigV2AuthorizationHeaderThroughHandler(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "sigv2")
 	b.SetBucketOwner("sigv2", "minis3-access-key")
@@ -264,6 +269,7 @@ func TestSigV2AuthorizationHeaderThroughHandler(t *testing.T) {
 }
 
 func TestSigV2PresignedURLThroughHandler(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "sigv2")
 	b.SetBucketOwner("sigv2", "minis3-access-key")

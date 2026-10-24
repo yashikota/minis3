@@ -9,6 +9,7 @@ import (
 )
 
 func TestHandleObjectPutConditionalAndChunkedBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-put-branch")
 
@@ -86,6 +87,7 @@ func TestHandleObjectPutConditionalAndChunkedBranches(t *testing.T) {
 }
 
 func TestHandleObjectGetAdditionalErrorBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 
 	t.Run("get missing bucket returns no such bucket", func(t *testing.T) {

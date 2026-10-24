@@ -22,44 +22,6 @@ import (
 	"github.com/yashikota/minis3/internal/backend"
 )
 
-var (
-	putObjectFn = func(
-		h *Handler,
-		bucketName, key string,
-		data []byte,
-		opts backend.PutObjectOptions,
-	) (*backend.Object, error) {
-		return h.backend.PutObject(bucketName, key, data, opts)
-	}
-	putObjectACLFn = func(
-		h *Handler,
-		bucketName, key, versionID string,
-		acl *backend.AccessControlPolicy,
-	) error {
-		return h.backend.PutObjectACL(bucketName, key, versionID, acl)
-	}
-	copyObjectFn = func(
-		h *Handler,
-		srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
-		opts backend.CopyObjectOptions,
-	) (*backend.Object, string, error) {
-		return h.backend.CopyObject(srcBucket, srcKey, srcVersionID, dstBucket, dstKey, opts)
-	}
-	getObjectACLFn = func(
-		h *Handler,
-		bucketName, key, versionID string,
-	) (*backend.AccessControlPolicy, error) {
-		return h.backend.GetObjectACL(bucketName, key, versionID)
-	}
-	restoreObjectFn = func(
-		h *Handler,
-		bucketName, key, versionID string,
-		days int,
-	) (*backend.RestoreObjectResult, error) {
-		return h.backend.RestoreObject(bucketName, key, versionID, days)
-	}
-)
-
 // Inverted NVME polynomial value used by Go's crc64 implementation.
 const crc64NVME = 0x9a6c9329ac4bc9b5
 
@@ -1042,7 +1004,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if isAWSChunkedEncoding(contentEncoding) {
 			data, err = decodeAWSChunkedBody(r.Body)
 		} else {
-			data, err = readAllFn(r.Body)
+			data, err = h.hooks.readAll(r.Body)
 		}
 		if err != nil {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -1210,7 +1172,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.ChecksumSHA256 = v
 		}
 
-		requestOwner := requesterOwner(r)
+		requestOwner := h.requesterOwner(r)
 		bucketOwner := h.bucketOwner(bucketName)
 		bucketOwnership := backend.ObjectOwnershipObjectWriter
 		if bucket, ok := h.backend.GetBucket(bucketName); ok && bucket.ObjectOwnership != "" {
@@ -1275,7 +1237,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
-		obj, err := putObjectFn(h, bucketName, key, data, opts)
+		obj, err := h.hooks.putObject(h, bucketName, key, data, opts)
 		if err != nil {
 			if errors.Is(err, backend.ErrInvalidRequest) {
 				backend.WriteError(
@@ -1304,7 +1266,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		if !strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
-			if err := putObjectACLFn(h, bucketName, key, obj.VersionId, requestedACL); err != nil {
+			if err := h.hooks.putObjectACL(
+				h,
+				bucketName,
+				key,
+				obj.VersionId,
+				requestedACL,
+			); err != nil {
 				if errors.Is(err, backend.ErrAccessControlListNotSupported) {
 					backend.WriteError(
 						w,
@@ -1875,7 +1843,7 @@ func (h *Handler) mfaDeleteSatisfied(r *http.Request, bucketName string) bool {
 
 // handleDeleteObjects handles batch delete operations.
 func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucketName string) {
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2032,7 +2000,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2298,7 +2266,7 @@ func (h *Handler) handleCopyObject(
 		opts.ChecksumAlgorithm = checksumAlgo
 	}
 
-	requestOwner := requesterOwner(r)
+	requestOwner := h.requesterOwner(r)
 	bucketOwner := h.bucketOwner(dstBucket)
 	dstOwnership := backend.ObjectOwnershipObjectWriter
 	if bucket, ok := h.backend.GetBucket(dstBucket); ok && bucket.ObjectOwnership != "" {
@@ -2352,7 +2320,7 @@ func (h *Handler) handleCopyObject(
 	}
 
 	opts.Owner = aclOwner
-	obj, srcVersionIdUsed, err := copyObjectFn(
+	obj, srcVersionIdUsed, err := h.hooks.copyObject(
 		h,
 		srcBucket,
 		srcKey,
@@ -2404,7 +2372,13 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 	if !strings.EqualFold(dstOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
-		if err := putObjectACLFn(h, dstBucket, dstKey, obj.VersionId, requestedACL); err != nil {
+		if err := h.hooks.putObjectACL(
+			h,
+			dstBucket,
+			dstKey,
+			obj.VersionId,
+			requestedACL,
+		); err != nil {
 			if errors.Is(err, backend.ErrAccessControlListNotSupported) {
 				backend.WriteError(
 					w,
@@ -2438,7 +2412,7 @@ func (h *Handler) handleCopyObject(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2453,7 +2427,7 @@ func (h *Handler) handleGetObjectACL(
 	bucketName, key string,
 ) {
 	versionId := r.URL.Query().Get("versionId")
-	acl, err := getObjectACLFn(h, bucketName, key, versionId)
+	acl, err := h.hooks.getObjectACL(h, bucketName, key, versionId)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2488,7 +2462,7 @@ func (h *Handler) handleGetObjectACL(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(acl)
+	output, err := h.hooks.xmlMarshal(acl)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2512,7 +2486,7 @@ func (h *Handler) handlePutObjectACL(
 			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid canned ACL.")
 			return
 		}
-		requestOwner := requesterOwner(r)
+		requestOwner := h.requesterOwner(r)
 		bucketOwner := h.bucketOwner(bucketName)
 		acl := backend.CannedACLToPolicyForOwner(cannedACL, requestOwner, bucketOwner)
 		if config != nil && config.BlockPublicAcls && isPublicACL(acl) {
@@ -2529,7 +2503,7 @@ func (h *Handler) handlePutObjectACL(
 
 	// Parse ACL from request body
 	defer func() { _ = r.Body.Close() }()
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2553,11 +2527,11 @@ func (h *Handler) handlePutObjectACL(
 
 	skipACLValidation := false
 	if acl.Owner == nil && len(acl.AccessControlList.Grants) == 0 {
-		owner := requesterOwner(r)
+		owner := h.requesterOwner(r)
 		acl = *backend.NewDefaultACLForOwner(owner)
 		skipACLValidation = true
 	} else if acl.Owner == nil || acl.Owner.ID == "" {
-		acl.Owner = requesterOwner(r)
+		acl.Owner = h.requesterOwner(r)
 	}
 	if !skipACLValidation {
 		if aclErr := normalizeAndValidateACL(&acl); aclErr != nil {
@@ -2649,7 +2623,7 @@ func (h *Handler) handleGetObjectTagging(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2666,7 +2640,7 @@ func (h *Handler) handlePutObjectTagging(
 	versionId := r.URL.Query().Get("versionId")
 
 	defer func() { _ = r.Body.Close() }()
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -3023,7 +2997,7 @@ func (h *Handler) handleGetObjectAttributes(
 	w.Header().Set("Content-Type", "application/xml")
 	w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -3039,7 +3013,7 @@ func (h *Handler) handleRestoreObject(
 ) {
 	versionId := r.URL.Query().Get("versionId")
 
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -3058,7 +3032,7 @@ func (h *Handler) handleRestoreObject(
 		}
 	}
 
-	result, err := restoreObjectFn(h, bucketName, key, versionId, restoreReq.Days)
+	result, err := h.hooks.restoreObject(h, bucketName, key, versionId, restoreReq.Days)
 	if err != nil {
 		switch {
 		case errors.Is(err, backend.ErrBucketNotFound):

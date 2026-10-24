@@ -18,82 +18,6 @@ import (
 	"github.com/yashikota/minis3/internal/backend"
 )
 
-var (
-	createMultipartUploadFn = func(
-		h *Handler,
-		bucketName, key string,
-		opts backend.CreateMultipartUploadOptions,
-	) (*backend.MultipartUpload, error) {
-		return h.backend.CreateMultipartUpload(bucketName, key, opts)
-	}
-	uploadPartFn = func(
-		h *Handler,
-		bucketName, key, uploadID string,
-		partNumber int,
-		data []byte,
-	) (*backend.PartInfo, error) {
-		return h.backend.UploadPart(bucketName, key, uploadID, partNumber, data)
-	}
-	completeMultipartUploadFn = func(
-		h *Handler,
-		bucketName, key, uploadID string,
-		parts []backend.CompletePart,
-	) (*backend.Object, error) {
-		return h.backend.CompleteMultipartUpload(bucketName, key, uploadID, parts)
-	}
-	getObjectForMultipartCompletionFn = func(
-		h *Handler,
-		bucketName, key string,
-	) (*backend.Object, error) {
-		return h.backend.GetObject(bucketName, key)
-	}
-	getCompletedUploadObjectFn = func(
-		h *Handler,
-		bucketName, key, uploadID string,
-	) (*backend.Object, bool) {
-		return h.backend.GetCompletedUploadObject(bucketName, key, uploadID)
-	}
-	abortMultipartUploadFn = func(
-		h *Handler,
-		bucketName, key, uploadID string,
-	) error {
-		return h.backend.AbortMultipartUpload(bucketName, key, uploadID)
-	}
-	listMultipartUploadsFn = func(
-		h *Handler,
-		bucketName string,
-		opts backend.ListMultipartUploadsOptions,
-	) (*backend.ListMultipartUploadsInternalResult, error) {
-		return h.backend.ListMultipartUploads(bucketName, opts)
-	}
-	listPartsFn = func(
-		h *Handler,
-		bucketName, key, uploadID string,
-		opts backend.ListPartsOptions,
-	) (*backend.ListPartsInternalResult, *backend.MultipartUpload, error) {
-		return h.backend.ListParts(bucketName, key, uploadID, opts)
-	}
-	copyPartFn = func(
-		h *Handler,
-		srcBucket, srcKey, srcVersionID, dstBucket, dstKey, uploadID string,
-		partNumber int,
-		rangeStart, rangeEnd int64,
-	) (*backend.PartInfo, error) {
-		return h.backend.CopyPart(
-			srcBucket,
-			srcKey,
-			srcVersionID,
-			dstBucket,
-			dstKey,
-			uploadID,
-			partNumber,
-			rangeStart,
-			rangeEnd,
-		)
-	}
-	decodeURIFn = decodeURI
-)
-
 func normalizeChecksumType(algorithm, checksumType string) string {
 	algorithm = strings.ToUpper(strings.TrimSpace(algorithm))
 	checksumType = strings.ToUpper(strings.TrimSpace(checksumType))
@@ -281,7 +205,7 @@ func (h *Handler) handleCreateMultipartUpload(
 ) {
 	opts := backend.CreateMultipartUploadOptions{
 		ContentType:        r.Header.Get("Content-Type"),
-		Owner:              requesterOwner(r),
+		Owner:              h.requesterOwner(r),
 		Metadata:           extractMetadata(r),
 		Tags:               parseTaggingHeader(r.Header.Get("x-amz-tagging")),
 		CacheControl:       r.Header.Get("Cache-Control"),
@@ -393,7 +317,7 @@ func (h *Handler) handleCreateMultipartUpload(
 		opts.SSECustomerKeyMD5 = sseCKMD5
 	}
 
-	upload, err := createMultipartUploadFn(h, bucketName, key, opts)
+	upload, err := h.hooks.createMultipartUpload(h, bucketName, key, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -447,7 +371,7 @@ func (h *Handler) handleCreateMultipartUpload(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -488,14 +412,14 @@ func (h *Handler) handleUploadPart(
 		}
 	}
 
-	data, err := readAllFn(r.Body)
+	data, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
 	defer func() { _ = r.Body.Close() }()
 
-	part, err := uploadPartFn(h, bucketName, key, uploadId, partNumber, data)
+	part, err := h.hooks.uploadPart(h, bucketName, key, uploadId, partNumber, data)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
 			backend.WriteError(
@@ -562,7 +486,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 		}
 	}
 
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -585,7 +509,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 		return
 	}
 
-	existingObj, getObjErr := getObjectForMultipartCompletionFn(h, bucketName, key)
+	existingObj, getObjErr := h.hooks.getObjectForMultipartCompletion(h, bucketName, key)
 	bucketExists := !errors.Is(getObjErr, backend.ErrBucketNotFound)
 	objectExists := getObjErr == nil && existingObj != nil && !existingObj.IsDeleteMarker
 	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" && bucketExists {
@@ -637,13 +561,13 @@ func (h *Handler) handleCompleteMultipartUpload(
 		return
 	}
 
-	obj, err := completeMultipartUploadFn(h, bucketName, key, uploadId, completeReq.Parts)
+	obj, err := h.hooks.completeMultipartUpload(h, bucketName, key, uploadId, completeReq.Parts)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
 			// S3 treats repeated completion of the same upload as idempotent
 			// success while the object it produced still exists. Unknown
 			// upload IDs stay NoSuchUpload even if the key exists.
-			if completed, ok := getCompletedUploadObjectFn(h, bucketName, key, uploadId); ok {
+			if completed, ok := h.hooks.getCompletedUploadObject(h, bucketName, key, uploadId); ok {
 				obj = completed
 			} else {
 				backend.WriteError(
@@ -736,7 +660,7 @@ func (h *Handler) handleCompleteMultipartUpload(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -752,7 +676,7 @@ func (h *Handler) handleAbortMultipartUpload(
 ) {
 	uploadId := r.URL.Query().Get("uploadId")
 
-	err := abortMultipartUploadFn(h, bucketName, key, uploadId)
+	err := h.hooks.abortMultipartUpload(h, bucketName, key, uploadId)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
 			backend.WriteError(
@@ -801,7 +725,7 @@ func (h *Handler) handleListMultipartUploads(
 		MaxUploads:     maxUploads,
 	}
 
-	result, err := listMultipartUploadsFn(h, bucketName, opts)
+	result, err := h.hooks.listMultipartUploads(h, bucketName, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -860,7 +784,7 @@ func (h *Handler) handleListMultipartUploads(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -912,7 +836,7 @@ func (h *Handler) handleListParts(
 		MaxParts:         maxParts,
 	}
 
-	result, upload, err := listPartsFn(h, bucketName, key, uploadId, opts)
+	result, upload, err := h.hooks.listParts(h, bucketName, key, uploadId, opts)
 	if err != nil {
 		if errors.Is(err, backend.ErrNoSuchUpload) {
 			backend.WriteError(
@@ -969,7 +893,7 @@ func (h *Handler) handleListParts(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1010,7 +934,7 @@ func (h *Handler) handleUploadPartCopy(
 	}
 
 	// Decode copy source
-	decodedCopySource, err := decodeAndParseCopySource(copySource)
+	decodedCopySource, err := h.decodeAndParseCopySource(copySource)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1057,7 +981,7 @@ func (h *Handler) handleUploadPartCopy(
 		}
 	}
 
-	part, err := copyPartFn(
+	part, err := h.hooks.copyPart(
 		h,
 		decodedCopySource.bucket,
 		decodedCopySource.key,
@@ -1150,7 +1074,7 @@ func (h *Handler) handleUploadPartCopy(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	copyPartOutput, err := xmlMarshalFn(copyPartResp)
+	copyPartOutput, err := h.hooks.xmlMarshal(copyPartResp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -1192,7 +1116,7 @@ func (h *Handler) loadCopySourceObjectForUploadPart(
 }
 
 // decodeAndParseCopySource decodes and parses x-amz-copy-source header.
-func decodeAndParseCopySource(copySource string) (*copySourceInfo, error) {
+func (h *Handler) decodeAndParseCopySource(copySource string) (*copySourceInfo, error) {
 	// Extract versionId query parameter BEFORE URL-decoding
 	var versionId string
 	pathPart := copySource
@@ -1205,7 +1129,7 @@ func decodeAndParseCopySource(copySource string) (*copySourceInfo, error) {
 	}
 
 	// URL decode the path part only
-	decoded, err := decodeURIFn(pathPart)
+	decoded, err := h.hooks.decodeURI(pathPart)
 	if err != nil {
 		return nil, err
 	}

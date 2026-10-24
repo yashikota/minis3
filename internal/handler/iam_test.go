@@ -10,6 +10,7 @@ import (
 )
 
 func TestIAMCreateUserAndAccessKey(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 
 	rootHeaders := map[string]string{"Authorization": authHeader("root-access-key")}
@@ -115,6 +116,7 @@ func TestIAMCreateUserAndAccessKey(t *testing.T) {
 }
 
 func TestIAMStubActions(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 
 	rootHeaders := map[string]string{"Authorization": authHeader("root-access-key")}
@@ -145,6 +147,7 @@ func TestIAMStubActions(t *testing.T) {
 }
 
 func TestIAMCreateUserConflict(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 
 	// Create user first time
@@ -171,6 +174,7 @@ func TestIAMCreateUserConflict(t *testing.T) {
 }
 
 func TestIAMCreateAccessKeyUserNotFound(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 
 	w := doRequest(h, newRequest(
@@ -186,6 +190,7 @@ func TestIAMCreateAccessKeyUserNotFound(t *testing.T) {
 }
 
 func TestBucketPolicyDenySelfE2E(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "deny-self-bucket")
 	b.SetBucketOwner("deny-self-bucket", "root-access-key")
@@ -274,6 +279,7 @@ func TestBucketPolicyDenySelfE2E(t *testing.T) {
 }
 
 func TestBucketPolicyDenySelfWithIAMUser(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "iam-deny-bucket")
 	b.SetBucketOwner("iam-deny-bucket", "root-access-key")
@@ -339,6 +345,7 @@ func TestBucketPolicyDenySelfWithIAMUser(t *testing.T) {
 }
 
 func TestIsBucketPolicyAction(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		action string
 		want   bool
@@ -361,6 +368,7 @@ func TestIsBucketPolicyAction(t *testing.T) {
 }
 
 func TestIAMUserPolicyHandlers(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	if _, err := b.CreateIAMUser("poluser", "/"); err != nil {
 		t.Fatalf("CreateIAMUser failed: %v", err)

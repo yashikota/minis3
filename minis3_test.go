@@ -13,6 +13,7 @@ import (
 )
 
 func TestMinis3(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -102,6 +103,7 @@ func TestMinis3(t *testing.T) {
 }
 
 func TestDeleteObjects(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -188,6 +190,7 @@ func TestDeleteObjects(t *testing.T) {
 }
 
 func TestDeleteObjectsQuietMode(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -240,6 +243,7 @@ func TestDeleteObjectsQuietMode(t *testing.T) {
 }
 
 func TestDeleteObjectsNoSuchBucket(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -276,6 +280,7 @@ func TestDeleteObjectsNoSuchBucket(t *testing.T) {
 }
 
 func TestDeleteObjectsMalformedXML(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -321,6 +326,7 @@ func TestDeleteObjectsMalformedXML(t *testing.T) {
 }
 
 func TestMinis3RunAndAccessors(t *testing.T) {
+	t.Parallel()
 	s, err := Run()
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
@@ -346,6 +352,7 @@ func TestMinis3RunAndAccessors(t *testing.T) {
 }
 
 func TestMinis3RunAddrAndStartAddr(t *testing.T) {
+	t.Parallel()
 	s, err := RunAddr("127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("RunAddr failed: %v", err)
@@ -371,6 +378,7 @@ func TestMinis3RunAddrAndStartAddr(t *testing.T) {
 }
 
 func TestMinis3CloseAndAddrBeforeStart(t *testing.T) {
+	t.Parallel()
 	s := New()
 	if got := s.Addr(); got != "" {
 		t.Fatalf("Addr() before start = %q, want empty", got)
@@ -384,13 +392,13 @@ func TestMinis3CloseAndAddrBeforeStart(t *testing.T) {
 }
 
 func TestMinis3StartListenError(t *testing.T) {
-	origListenFn := listenFn
-	listenFn = func(_, _ string) (net.Listener, error) {
+	t.Parallel()
+	failListen := func(_, _ string) (net.Listener, error) {
 		return nil, errors.New("boom")
 	}
-	defer func() { listenFn = origListenFn }()
 
 	s := New()
+	s.listen = failListen
 	err := s.Start()
 	if err == nil {
 		t.Fatal("expected Start() to fail")
@@ -401,13 +409,13 @@ func TestMinis3StartListenError(t *testing.T) {
 }
 
 func TestMinis3StartAddrListenError(t *testing.T) {
-	origListenFn := listenFn
-	listenFn = func(_, _ string) (net.Listener, error) {
+	t.Parallel()
+	failListen := func(_, _ string) (net.Listener, error) {
 		return nil, errors.New("boom-addr")
 	}
-	defer func() { listenFn = origListenFn }()
 
 	s := New()
+	s.listen = failListen
 	err := s.StartAddr("127.0.0.1:9191")
 	if err == nil {
 		t.Fatal("expected StartAddr() to fail")
@@ -418,13 +426,14 @@ func TestMinis3StartAddrListenError(t *testing.T) {
 }
 
 func TestRunReturnsStartError(t *testing.T) {
-	origListenFn := listenFn
-	listenFn = func(_, _ string) (net.Listener, error) {
+	t.Parallel()
+	failListen := func(_, _ string) (net.Listener, error) {
 		return nil, errors.New("run-boom")
 	}
-	defer func() { listenFn = origListenFn }()
 
-	s, err := Run()
+	failing := New()
+	failing.listen = failListen
+	s, err := startNew(failing, "127.0.0.1:0")
 	if err == nil {
 		t.Fatal("expected Run() to fail")
 	}
@@ -437,13 +446,14 @@ func TestRunReturnsStartError(t *testing.T) {
 }
 
 func TestRunAddrReturnsStartError(t *testing.T) {
-	origListenFn := listenFn
-	listenFn = func(_, _ string) (net.Listener, error) {
+	t.Parallel()
+	failListen := func(_, _ string) (net.Listener, error) {
 		return nil, errors.New("run-addr-boom")
 	}
-	defer func() { listenFn = origListenFn }()
 
-	s, err := RunAddr("127.0.0.1:9191")
+	failing := New()
+	failing.listen = failListen
+	s, err := startNew(failing, "127.0.0.1:9191")
 	if err == nil {
 		t.Fatal("expected RunAddr() to fail")
 	}
@@ -456,23 +466,16 @@ func TestRunAddrReturnsStartError(t *testing.T) {
 }
 
 func TestMinis3StartServeErrorCallsFatal(t *testing.T) {
-	origListenFn := listenFn
-	origFatalFn := fatalFn
-	defer func() {
-		listenFn = origListenFn
-		fatalFn = origFatalFn
-	}()
-
-	listenFn = func(_, _ string) (net.Listener, error) {
+	t.Parallel()
+	s := New()
+	s.listen = func(_, _ string) (net.Listener, error) {
 		return failingListener{acceptErr: errors.New("accept failed")}, nil
 	}
-
 	called := make(chan string, 1)
-	fatalFn = func(v ...any) {
+	s.fatal = func(v ...any) {
 		called <- fmt.Sprint(v...)
 	}
 
-	s := New()
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -486,7 +489,7 @@ func TestMinis3StartServeErrorCallsFatal(t *testing.T) {
 			t.Fatalf("expected accept error in fatal message: %q", msg)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("expected fatalFn to be called")
+		t.Fatal("expected fatal to be called")
 	}
 }
 

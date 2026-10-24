@@ -9,49 +9,52 @@ import (
 	"github.com/yashikota/minis3/internal/backend"
 )
 
-func patchVerifyPresignedURLForTest(t *testing.T, fn func(*http.Request) error) {
+func patchVerifyPresignedURLForTest(t *testing.T, h *Handler, fn func(*http.Request) error) {
 	t.Helper()
-	orig := verifyPresignedURLFn
-	verifyPresignedURLFn = fn
+	orig := h.hooks.verifyPresignedURL
+	h.hooks.verifyPresignedURL = fn
 	t.Cleanup(func() {
-		verifyPresignedURLFn = orig
+		h.hooks.verifyPresignedURL = orig
 	})
 }
 
-func patchVerifyAuthorizationHeaderForTest(t *testing.T, fn func(*http.Request) error) {
+func patchVerifyAuthorizationHeaderForTest(t *testing.T, h *Handler, fn func(*http.Request) error) {
 	t.Helper()
-	orig := verifyAuthorizationHeaderFn
-	verifyAuthorizationHeaderFn = fn
+	orig := h.hooks.verifyAuthorizationHeader
+	h.hooks.verifyAuthorizationHeader = fn
 	t.Cleanup(func() {
-		verifyAuthorizationHeaderFn = orig
+		h.hooks.verifyAuthorizationHeader = orig
 	})
 }
 
 func patchBucketACLForAccessCheckForTest(
 	t *testing.T,
+	h *Handler,
 	fn func(*Handler, string) (*backend.AccessControlPolicy, error),
 ) {
 	t.Helper()
-	orig := getBucketACLForAccessCheckFn
-	getBucketACLForAccessCheckFn = fn
+	orig := h.hooks.getBucketACLForAccessCheck
+	h.hooks.getBucketACLForAccessCheck = fn
 	t.Cleanup(func() {
-		getBucketACLForAccessCheckFn = orig
+		h.hooks.getBucketACLForAccessCheck = orig
 	})
 }
 
 func patchObjectACLForAccessCheckForTest(
 	t *testing.T,
+	h *Handler,
 	fn func(*Handler, string, string, string) (*backend.AccessControlPolicy, error),
 ) {
 	t.Helper()
-	orig := getObjectACLForAccessCheckFn
-	getObjectACLForAccessCheckFn = fn
+	orig := h.hooks.getObjectACLForAccessCheck
+	h.hooks.getObjectACLForAccessCheck = fn
 	t.Cleanup(func() {
-		getObjectACLForAccessCheckFn = orig
+		h.hooks.getObjectACLForAccessCheck = orig
 	})
 }
 
 func TestHandleRequestAuthAndCORSBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "req-branch")
 
@@ -79,7 +82,7 @@ func TestHandleRequestAuthAndCORSBranches(t *testing.T) {
 	})
 
 	t.Run("presigned verification returns presigned error", func(t *testing.T) {
-		patchVerifyPresignedURLForTest(t, func(*http.Request) error {
+		patchVerifyPresignedURLForTest(t, h, func(*http.Request) error {
 			return &presignedError{
 				code:    "SignatureDoesNotMatch",
 				message: "signature mismatch",
@@ -97,7 +100,7 @@ func TestHandleRequestAuthAndCORSBranches(t *testing.T) {
 	})
 
 	t.Run("presigned verification returns generic error", func(t *testing.T) {
-		patchVerifyPresignedURLForTest(t, func(*http.Request) error {
+		patchVerifyPresignedURLForTest(t, h, func(*http.Request) error {
 			return errors.New("presigned boom")
 		})
 		req := newRequest(
@@ -112,7 +115,7 @@ func TestHandleRequestAuthAndCORSBranches(t *testing.T) {
 	})
 
 	t.Run("authorization verification returns presigned error", func(t *testing.T) {
-		patchVerifyAuthorizationHeaderForTest(t, func(*http.Request) error {
+		patchVerifyAuthorizationHeaderForTest(t, h, func(*http.Request) error {
 			return &presignedError{
 				code:    "InvalidAccessKeyId",
 				message: "missing key",
@@ -125,7 +128,7 @@ func TestHandleRequestAuthAndCORSBranches(t *testing.T) {
 	})
 
 	t.Run("authorization verification returns generic error", func(t *testing.T) {
-		patchVerifyAuthorizationHeaderForTest(t, func(*http.Request) error {
+		patchVerifyAuthorizationHeaderForTest(t, h, func(*http.Request) error {
 			return errors.New("auth boom")
 		})
 		req := newRequest(http.MethodGet, "http://example.test/req-branch", "", nil)
@@ -153,6 +156,7 @@ func TestHandleRequestAuthAndCORSBranches(t *testing.T) {
 }
 
 func TestExtractAccessKeyAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	reqV4NoCredential := httptest.NewRequest(http.MethodGet, "/", nil)
 	reqV4NoCredential.Header.Set("Authorization", "AWS4-HMAC-SHA256 SignedHeaders=host")
 	if got := extractAccessKey(reqV4NoCredential); got != "" {
@@ -167,6 +171,7 @@ func TestExtractAccessKeyAdditionalBranches(t *testing.T) {
 }
 
 func TestCheckAccessErrorBranchesWithHooks(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "acl-branch")
 	b.SetBucketOwner("acl-branch", "owner-ak")
@@ -176,8 +181,7 @@ func TestCheckAccessErrorBranchesWithHooks(t *testing.T) {
 	req.Header.Set("Authorization", authHeader("other-ak"))
 
 	t.Run("bucket acl lookups return errors", func(t *testing.T) {
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("bucket acl boom")
 			},
@@ -197,8 +201,7 @@ func TestCheckAccessErrorBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("object acl lookups return errors", func(t *testing.T) {
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("object acl boom")
 			},
@@ -222,14 +225,12 @@ func TestCheckAccessErrorBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("missing object fallback fails when bucket acl lookup fails", func(t *testing.T) {
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, backend.ErrObjectNotFound
 			},
 		)
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("bucket acl fallback boom")
 			},
@@ -242,6 +243,7 @@ func TestCheckAccessErrorBranchesWithHooks(t *testing.T) {
 }
 
 func TestACLAndGrantHelperEdgeBranches(t *testing.T) {
+	t.Parallel()
 	aclWithNilGrantee := &backend.AccessControlPolicy{
 		AccessControlList: backend.AccessControlList{
 			Grants: []backend.Grant{{
@@ -337,6 +339,7 @@ func TestACLAndGrantHelperEdgeBranches(t *testing.T) {
 }
 
 func TestCORSHelperEdgeBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "cors-branch")
 
