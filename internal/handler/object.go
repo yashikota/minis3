@@ -1343,14 +1343,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 	case http.MethodGet:
 		versionId := r.URL.Query().Get("versionId")
 
-		// Check bucket policy for GetObject
-		if !h.checkAccessWithContext(r, bucketName, "s3:GetObject", key, backend.PolicyEvalContext{
-			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
-		}) {
-			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-			return
-		}
-
 		// Reject SSE write-headers on read operations
 		if r.Header.Get("x-amz-server-side-encryption") != "" {
 			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
@@ -1595,12 +1587,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		_, _ = w.Write(obj.Data)
 
 	case http.MethodDelete:
-		// Check bucket policy for DeleteObject
-		if !h.checkAccess(r, bucketName, "s3:DeleteObject", key) {
-			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-			return
-		}
-
 		versionId := r.URL.Query().Get("versionId")
 		if versionId != "" && !h.mfaDeleteSatisfied(r, bucketName) {
 			backend.WriteError(
@@ -1621,10 +1607,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			backend.WriteError(w, status, code, msg)
 			return
 		}
-		bypassGovernance := strings.EqualFold(
-			r.Header.Get("x-amz-bypass-governance-retention"),
-			"true",
-		)
+		bypassGovernance := h.bypassGovernanceAllowed(r, bucketName, key)
 		var result *backend.DeleteObjectVersionResult
 		var err error
 
@@ -1684,14 +1667,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 	case http.MethodHead:
 		versionId := r.URL.Query().Get("versionId")
-
-		// Check bucket policy for HeadObject
-		if !h.checkAccessWithContext(r, bucketName, "s3:GetObject", key, backend.PolicyEvalContext{
-			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
-		}) {
-			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-			return
-		}
 
 		// Reject SSE write-headers on read operations
 		if r.Header.Get("x-amz-server-side-encryption") != "" {
@@ -1968,7 +1943,28 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		deleteReq.Objects = allowed
 	}
 
+	// Each key is authorized on its own, like a single DeleteObject; denied
+	// keys fail individually with AccessDenied.
+	var accessDenied []backend.ObjectIdentifier
+	authorized := deleteReq.Objects[:0:0]
 	bypassGovernance := strings.EqualFold(r.Header.Get("x-amz-bypass-governance-retention"), "true")
+	for _, obj := range deleteReq.Objects {
+		action := "s3:DeleteObject"
+		if obj.VersionId != "" {
+			action = "s3:DeleteObjectVersion"
+		}
+		if !h.checkAccessWithContext(r, bucketName, action, obj.Key, backend.PolicyEvalContext{
+			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, obj.Key, obj.VersionId),
+		}) {
+			accessDenied = append(accessDenied, obj)
+			continue
+		}
+		authorized = append(authorized, obj)
+		bypassGovernance = bypassGovernance &&
+			h.checkAccess(r, bucketName, "s3:BypassGovernanceRetention", obj.Key)
+	}
+	deleteReq.Objects = authorized
+
 	results, err := h.backend.DeleteObjects(bucketName, deleteReq.Objects, bypassGovernance)
 	if err != nil {
 		backend.WriteError(
@@ -1982,6 +1978,14 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 
 	resp := backend.DeleteResult{
 		Xmlns: backend.S3Xmlns,
+	}
+	for _, obj := range accessDenied {
+		resp.Errors = append(resp.Errors, backend.DeleteError{
+			Key:       obj.Key,
+			VersionId: obj.VersionId,
+			Code:      "AccessDenied",
+			Message:   "Access Denied",
+		})
 	}
 	for _, obj := range mfaDenied {
 		resp.Errors = append(resp.Errors, backend.DeleteError{
@@ -2094,8 +2098,7 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
-	// Check bucket policy on source bucket (GetObject)
-	if !h.checkAccess(r, srcBucket, "s3:GetObject", srcKey) {
+	if !h.authorizeCopySource(r, srcBucket, srcKey, srcVersionId) {
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
@@ -2450,13 +2453,6 @@ func (h *Handler) handleGetObjectACL(
 	bucketName, key string,
 ) {
 	versionId := r.URL.Query().Get("versionId")
-	if !h.checkAccessWithContext(r, bucketName, "s3:GetObjectAcl", key, backend.PolicyEvalContext{
-		ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
-	}) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	acl, err := getObjectACLFn(h, bucketName, key, versionId)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
@@ -2506,11 +2502,6 @@ func (h *Handler) handlePutObjectACL(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutObjectAcl", key) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	versionId := r.URL.Query().Get("versionId")
 	config := h.getBucketPublicAccessBlock(bucketName)
 
@@ -2629,19 +2620,6 @@ func (h *Handler) handleGetObjectTagging(
 	bucketName, key string,
 ) {
 	versionId := r.URL.Query().Get("versionId")
-	if !h.checkAccessWithContext(
-		r,
-		bucketName,
-		"s3:GetObjectTagging",
-		key,
-		backend.PolicyEvalContext{
-			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
-		},
-	) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	tags, actualVersionId, err := h.backend.GetObjectTagging(bucketName, key, versionId)
 	if err != nil {
 		h.writeObjectTaggingError(w, err)
@@ -2722,10 +2700,14 @@ func (h *Handler) handlePutObjectTagging(
 		tags[tag.Key] = tag.Value
 	}
 
+	action := "s3:PutObjectTagging"
+	if versionId != "" {
+		action = "s3:PutObjectVersionTagging"
+	}
 	if !h.checkAccessWithContext(
 		r,
 		bucketName,
-		"s3:PutObjectTagging",
+		action,
 		key,
 		backend.PolicyEvalContext{
 			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
@@ -2805,10 +2787,6 @@ func (h *Handler) handleGetObjectAttributes(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetObject", key) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	versionId := r.URL.Query().Get("versionId")
 
 	// Get the requested attributes from header
@@ -3059,11 +3037,6 @@ func (h *Handler) handleRestoreObject(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:RestoreObject", key) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	versionId := r.URL.Query().Get("versionId")
 
 	body, err := readAllFn(r.Body)

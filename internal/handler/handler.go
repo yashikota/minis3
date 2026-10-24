@@ -272,6 +272,12 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if op := resolveS3Operation(r, key); op.Auth == authRouter &&
+		!h.authorizeOperation(r, bucketName, key, op) {
+		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
 	if key == "" {
 		h.handleBucket(w, r, bucketName)
 	} else {
@@ -328,7 +334,24 @@ func (h *Handler) handleAdmin(w http.ResponseWriter, r *http.Request) {
 }
 
 // extractAccessKey extracts the AWS access key from the Authorization header.
+// callerAccessKeyContextKey overrides the caller identity of a request whose
+// credentials are not in its headers (a POST Object form's AWSAccessKeyId).
+type callerAccessKeyContextKey struct{}
+
+// withCallerAccessKey returns r with its caller identified by accessKey.
+func withCallerAccessKey(r *http.Request, accessKey string) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), callerAccessKeyContextKey{}, accessKey))
+}
+
+func callerAccessKeyOverride(r *http.Request) (string, bool) {
+	accessKey, ok := r.Context().Value(callerAccessKeyContextKey{}).(string)
+	return accessKey, ok
+}
+
 func extractAccessKey(r *http.Request) string {
+	if accessKey, ok := callerAccessKeyOverride(r); ok {
+		return accessKey
+	}
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
 		// Check query parameter for presigned URLs
@@ -1059,14 +1082,15 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 	}
 
 	switch action {
-	case "s3:ListBucket", "s3:ListBucketVersions":
+	case "s3:ListBucket", "s3:ListBucketVersions", "s3:ListBucketMultipartUploads",
+		"s3:ListMultipartUploadParts":
 		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsRead(acl, requesterCanonicalID, isAnonymous)
-	case "s3:PutObject":
+	case "s3:PutObject", "s3:AbortMultipartUpload":
 		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
 		if err != nil {
 			return false
@@ -1087,26 +1111,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionWriteACP)
-	case "s3:GetBucketOwnershipControls", "s3:GetBucketLogging", "s3:GetBucketRequestPayment",
-		"s3:GetBucketPolicy":
-		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
-		if err != nil {
-			return false
-		}
-		acl = effectiveACLForResponse(acl, ignorePublicACLs)
-		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
-	case "s3:PutBucketOwnershipControls",
-		"s3:DeleteBucketOwnershipControls",
-		"s3:PutBucketLogging",
-		"s3:PutBucketRequestPayment",
-		"s3:DeleteBucketPolicy":
-		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
-		if err != nil {
-			return false
-		}
-		acl = effectiveACLForResponse(acl, ignorePublicACLs)
-		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionWriteACP)
-	case "s3:GetObjectAcl":
+	case "s3:GetObjectAcl", "s3:GetObjectVersionAcl":
 		if key == "" {
 			return false
 		}
@@ -1130,7 +1135,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
-	case "s3:PutObjectAcl":
+	case "s3:PutObjectAcl", "s3:PutObjectVersionAcl":
 		if key == "" {
 			return false
 		}
@@ -1154,7 +1159,8 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionWriteACP)
-	case "s3:GetObject", "s3:GetObjectVersion":
+	case "s3:GetObject", "s3:GetObjectVersion",
+		"s3:GetObjectAttributes", "s3:GetObjectVersionAttributes":
 		if key == "" {
 			return false
 		}
@@ -1174,7 +1180,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 			return aclAllowsRead(bucketACL, requesterCanonicalID, isAnonymous)
 		}
 		return false
-	case "s3:GetObjectTagging":
+	case "s3:GetObjectTagging", "s3:GetObjectVersionTagging":
 		if key == "" {
 			return false
 		}
@@ -1203,7 +1209,9 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsWrite(acl, requesterCanonicalID, isAnonymous)
 	case "s3:PutObjectTagging",
+		"s3:PutObjectVersionTagging",
 		"s3:DeleteObjectTagging",
+		"s3:DeleteObjectVersionTagging",
 		"s3:DeleteObject",
 		"s3:DeleteObjectVersion":
 		if key == "" {
@@ -1228,6 +1236,23 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 	}
 }
 
+// authorizeOperation checks the IAM action of a router-authorized operation.
+// Object operations see the object's existing tags (s3:ExistingObjectTag).
+func (h *Handler) authorizeOperation(
+	r *http.Request,
+	bucketName, key string,
+	op s3Operation,
+) bool {
+	action := op.action(r.URL.Query())
+	if key == "" {
+		return h.checkAccess(r, bucketName, action, key)
+	}
+	versionID := r.URL.Query().Get("versionId")
+	return h.checkAccessWithContext(r, bucketName, action, key, backend.PolicyEvalContext{
+		ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionID),
+	})
+}
+
 func policyResourceARN(bucketName, key string) string {
 	bucketForPolicy := displayBucketName(bucketName)
 	if key != "" {
@@ -1238,7 +1263,7 @@ func policyResourceARN(bucketName, key string) string {
 
 func ownerBypassesObjectACL(action string) bool {
 	switch action {
-	case "s3:GetObjectAcl", "s3:PutObjectAcl":
+	case "s3:GetObjectAcl", "s3:PutObjectAcl", "s3:GetObjectVersionAcl", "s3:PutObjectVersionAcl":
 		return false
 	default:
 		return true

@@ -279,12 +279,6 @@ func (h *Handler) handleCreateMultipartUpload(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	// Check bucket policy for PutObject (CreateMultipartUpload is part of PutObject)
-	if !h.checkAccess(r, bucketName, "s3:PutObject", key) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	opts := backend.CreateMultipartUploadOptions{
 		ContentType:        r.Header.Get("Content-Type"),
 		Owner:              requesterOwner(r),
@@ -1037,8 +1031,12 @@ func (h *Handler) handleUploadPartCopy(
 		return
 	}
 
-	// Check bucket policy on source bucket (GetObject)
-	if !h.checkAccess(r, decodedCopySource.bucket, "s3:GetObject", decodedCopySource.key) {
+	if !h.authorizeCopySource(
+		r,
+		decodedCopySource.bucket,
+		decodedCopySource.key,
+		decodedCopySource.versionId,
+	) {
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
