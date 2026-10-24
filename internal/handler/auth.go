@@ -39,9 +39,19 @@ func defaultCredentialLookup(accessKey string) (string, bool) {
 	return secret, ok
 }
 
-// credentialLookupFn resolves an access key to its secret key.
-// Overridden at handler initialization to also check dynamic IAM credentials.
-var credentialLookupFn = defaultCredentialLookup
+// credentialLookupContextKey carries the serving handler's credential lookup
+// on the request, so several minis3 instances in one process each resolve
+// their own IAM access keys instead of sharing a package-level hook.
+type credentialLookupContextKey struct{}
+
+// lookupCredential resolves accessKey with the lookup of the handler serving
+// r, falling back to the default credentials.
+func lookupCredential(r *http.Request, accessKey string) (string, bool) {
+	if fn, ok := r.Context().Value(credentialLookupContextKey{}).(func(string) (string, bool)); ok {
+		return fn(accessKey)
+	}
+	return defaultCredentialLookup(accessKey)
+}
 
 // isPresignedURL checks if the request is a presigned URL request.
 func isPresignedURL(r *http.Request) bool {
@@ -58,7 +68,7 @@ func verifyAuthorizationHeader(r *http.Request) error {
 
 	if strings.HasPrefix(auth, "AWS4-HMAC-SHA256") {
 		accessKey := extractAccessKey(r)
-		secretKey, ok := credentialLookupFn(accessKey)
+		secretKey, ok := lookupCredential(r, accessKey)
 		if !ok {
 			return &presignedError{
 				code:    "InvalidAccessKeyId",
@@ -221,8 +231,11 @@ func verifyAuthorizationHeaderV2(r *http.Request, auth string) error {
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
 		return &presignedError{code: "AccessDenied", message: "Access Denied"}
 	}
-	// AWS validates the x-amz-date header when present on SigV2 requests.
-	// boto never sends it for SigV2, so only tampered requests reach here.
+	// AWS validates the x-amz-date header when present on SigV2 requests,
+	// and then signs an empty Date element; botocore still signs the Date
+	// header, so both are accepted.
+	date := r.Header.Get("Date")
+	dates := []string{date}
 	if values, present := r.Header["X-Amz-Date"]; present {
 		dateHeader := ""
 		if len(values) > 0 {
@@ -231,8 +244,20 @@ func verifyAuthorizationHeaderV2(r *http.Request, auth string) error {
 		if err := checkSigV2RequestDate(dateHeader); err != nil {
 			return err
 		}
+		dates = []string{"", date}
+	} else if err := checkSigV2RequestDate(date); err != nil {
+		return err
 	}
-	return nil
+	secretKey, ok := lookupCredential(r, parts[0])
+	if !ok {
+		return errInvalidAccessKeyID
+	}
+	for _, date := range dates {
+		if verifySigV2Signature(r, secretKey, date, parts[1]) {
+			return nil
+		}
+	}
+	return errSignatureDoesNotMatch
 }
 
 // checkSigV2RequestDate validates an x-amz-date header value on SigV2
@@ -387,7 +412,7 @@ func verifyPresignedURLV4(r *http.Request) error {
 	service := credParts[3]
 
 	// Look up secret key
-	secretKey, ok := credentialLookupFn(accessKey)
+	secretKey, ok := lookupCredential(r, accessKey)
 	if !ok {
 		return &presignedError{
 			code:    "InvalidAccessKeyId",
@@ -524,8 +549,18 @@ func verifyPresignedURLV2(r *http.Request) error {
 		return &presignedError{code: "AccessDenied", message: "Request has expired"}
 	}
 
-	// For V2, we'll accept any valid-looking signature for mock purposes
-	// A full implementation would verify the signature
+	accessKey := query.Get("AWSAccessKeyId")
+	if accessKey == "" {
+		return &presignedError{code: "AccessDenied", message: "Access Denied"}
+	}
+	secretKey, ok := lookupCredential(r, accessKey)
+	if !ok {
+		return errInvalidAccessKeyID
+	}
+	// The Expires value takes the place of the Date element.
+	if !verifySigV2Signature(r, secretKey, expiresStr, query.Get("Signature")) {
+		return errSignatureDoesNotMatch
+	}
 	return nil
 }
 

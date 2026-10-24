@@ -6,6 +6,7 @@ import (
 )
 
 func TestUnsupportedBucketSubresourcesReturn501(t *testing.T) {
+	t.Parallel()
 	unsupportedQueries := []string{
 		"notification",
 		"replication",
@@ -42,6 +43,7 @@ func TestUnsupportedBucketSubresourcesReturn501(t *testing.T) {
 }
 
 func TestUnsupportedBucketSubresourcesWithValueReturn501(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "notimpl-bucket")
 	cases := []struct {
@@ -78,6 +80,7 @@ func TestUnsupportedBucketSubresourcesWithValueReturn501(t *testing.T) {
 }
 
 func TestUnsupportedObjectSubresourcesReturn501(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		method string
@@ -103,6 +106,7 @@ func TestUnsupportedObjectSubresourcesReturn501(t *testing.T) {
 }
 
 func TestObjectTorrentReturns404NoSuchKey(t *testing.T) {
+	t.Parallel()
 	// GetObjectTorrent cannot be served (no torrent generation), and the
 	// s3-tests suite (test_get_object_torrent) accepts 404/NoSuchKey as the
 	// "torrent not configured" signal.
@@ -127,6 +131,7 @@ func TestObjectTorrentReturns404NoSuchKey(t *testing.T) {
 }
 
 func TestSupportedBucketOperationsUnaffectedByNotImplementedGuard(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "notimpl-bucket")
 	mustPutObject(t, b, "notimpl-bucket", "k", "v")

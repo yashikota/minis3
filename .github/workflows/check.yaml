@@ -9,6 +9,7 @@ on:
       - "go.mod"
       - "go.sum"
       - ".golangci.yaml"
+      - "formal/**"
       - "taskfile.yaml"
       - ".github/workflows/check.yaml"
   pull_request:
@@ -64,6 +65,30 @@ jobs:
         run: |
           task unit-test &&
           task sdk-test
+
+  formal:
+    name: formal
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+            path: ~/.local/share/aquaproj-aqua
+            key: v2-aqua-installer-${{runner.os}}-${{runner.arch}}-${{hashFiles('aqua.yaml')}}
+            restore-keys: |
+              v2-aqua-installer-${{runner.os}}-${{runner.arch}}-
+
+      - uses: aquaproj/aqua-installer@82d0e83878a8657c4a6f2ff1755d3bfbfc67f329 # v4.1.0
+        with:
+            aqua_version: v2.64.0
+
+      # check.sh downloads the pinned static TLC binary
+      # (github.com/yashikota/tlc-static); no Java is needed.
+      - name: Run formal verification
+        run: task formal
 
   fuzz:
     name: fuzz

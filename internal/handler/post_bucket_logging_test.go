@@ -10,6 +10,7 @@ import (
 )
 
 func TestPostBucketLoggingFlush(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "src-log")
 	mustCreateBucket(t, b, "tgt-log")

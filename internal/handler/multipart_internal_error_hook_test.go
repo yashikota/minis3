@@ -9,28 +9,31 @@ import (
 )
 
 func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "mp-hook")
 
-	restoreCreate := createMultipartUploadFn
-	restoreUploadPart := uploadPartFn
-	restoreComplete := completeMultipartUploadFn
-	restoreGetObject := getObjectForMultipartCompletionFn
-	restoreAbort := abortMultipartUploadFn
-	restoreListUploads := listMultipartUploadsFn
-	restoreListParts := listPartsFn
-	restoreCopyPart := copyPartFn
-	restoreDecodeURI := decodeURIFn
+	restoreCreate := h.hooks.createMultipartUpload
+	restoreUploadPart := h.hooks.uploadPart
+	restoreComplete := h.hooks.completeMultipartUpload
+	restoreGetObject := h.hooks.getObjectForMultipartCompletion
+	restoreCompleted := h.hooks.getCompletedUploadObject
+	restoreAbort := h.hooks.abortMultipartUpload
+	restoreListUploads := h.hooks.listMultipartUploads
+	restoreListParts := h.hooks.listParts
+	restoreCopyPart := h.hooks.copyPart
+	restoreDecodeURI := h.hooks.decodeURI
 	t.Cleanup(func() {
-		createMultipartUploadFn = restoreCreate
-		uploadPartFn = restoreUploadPart
-		completeMultipartUploadFn = restoreComplete
-		getObjectForMultipartCompletionFn = restoreGetObject
-		abortMultipartUploadFn = restoreAbort
-		listMultipartUploadsFn = restoreListUploads
-		listPartsFn = restoreListParts
-		copyPartFn = restoreCopyPart
-		decodeURIFn = restoreDecodeURI
+		h.hooks.createMultipartUpload = restoreCreate
+		h.hooks.uploadPart = restoreUploadPart
+		h.hooks.completeMultipartUpload = restoreComplete
+		h.hooks.getObjectForMultipartCompletion = restoreGetObject
+		h.hooks.getCompletedUploadObject = restoreCompleted
+		h.hooks.abortMultipartUpload = restoreAbort
+		h.hooks.listMultipartUploads = restoreListUploads
+		h.hooks.listParts = restoreListParts
+		h.hooks.copyPart = restoreCopyPart
+		h.hooks.decodeURI = restoreDecodeURI
 	})
 
 	t.Run("create multipart consumes legal-hold and storage-class headers", func(t *testing.T) {
@@ -48,7 +51,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("create multipart unexpected backend error", func(t *testing.T) {
-		createMultipartUploadFn = func(
+		h.hooks.createMultipartUpload = func(
 			*Handler,
 			string,
 			string,
@@ -65,7 +68,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		createMultipartUploadFn = restoreCreate
+		h.hooks.createMultipartUpload = restoreCreate
 	})
 
 	t.Run("upload part invalid sse-c headers", func(t *testing.T) {
@@ -88,7 +91,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("upload part unexpected backend error", func(t *testing.T) {
-		uploadPartFn = func(
+		h.hooks.uploadPart = func(
 			*Handler,
 			string,
 			string,
@@ -107,11 +110,11 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		uploadPartFn = restoreUploadPart
+		h.hooks.uploadPart = restoreUploadPart
 	})
 
 	t.Run("complete multipart idempotent no-such-upload fallback", func(t *testing.T) {
-		completeMultipartUploadFn = func(
+		h.hooks.completeMultipartUpload = func(
 			*Handler,
 			string,
 			string,
@@ -120,8 +123,8 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		) (*backend.Object, error) {
 			return nil, backend.ErrNoSuchUpload
 		}
-		getObjectForMultipartCompletionFn = func(*Handler, string, string) (*backend.Object, error) {
-			return &backend.Object{ETag: "\"etag-idempotent\""}, nil
+		h.hooks.getCompletedUploadObject = func(*Handler, string, string, string) (*backend.Object, bool) {
+			return &backend.Object{ETag: "\"etag-idempotent\""}, true
 		}
 		body := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"x"</ETag></Part></CompleteMultipartUpload>`
 		req := newRequest(
@@ -132,12 +135,12 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusOK)
-		completeMultipartUploadFn = restoreComplete
-		getObjectForMultipartCompletionFn = restoreGetObject
+		h.hooks.completeMultipartUpload = restoreComplete
+		h.hooks.getCompletedUploadObject = restoreCompleted
 	})
 
 	t.Run("complete multipart unexpected backend error", func(t *testing.T) {
-		completeMultipartUploadFn = func(
+		h.hooks.completeMultipartUpload = func(
 			*Handler,
 			string,
 			string,
@@ -156,11 +159,11 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		completeMultipartUploadFn = restoreComplete
+		h.hooks.completeMultipartUpload = restoreComplete
 	})
 
 	t.Run("abort multipart unexpected backend error", func(t *testing.T) {
-		abortMultipartUploadFn = func(*Handler, string, string, string) error {
+		h.hooks.abortMultipartUpload = func(*Handler, string, string, string) error {
 			return errors.New("abort boom")
 		}
 		req := newRequest(
@@ -172,11 +175,11 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		abortMultipartUploadFn = restoreAbort
+		h.hooks.abortMultipartUpload = restoreAbort
 	})
 
 	t.Run("list multipart uploads unexpected backend error", func(t *testing.T) {
-		listMultipartUploadsFn = func(
+		h.hooks.listMultipartUploads = func(
 			*Handler,
 			string,
 			backend.ListMultipartUploadsOptions,
@@ -187,11 +190,11 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		listMultipartUploadsFn = restoreListUploads
+		h.hooks.listMultipartUploads = restoreListUploads
 	})
 
 	t.Run("list multipart uploads defaults owner and includes common prefixes", func(t *testing.T) {
-		listMultipartUploadsFn = func(
+		h.hooks.listMultipartUploads = func(
 			*Handler,
 			string,
 			backend.ListMultipartUploadsOptions,
@@ -207,7 +210,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		req := newRequest(http.MethodGet, "http://example.test/mp-hook?uploads", "", nil)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusOK)
-		listMultipartUploadsFn = restoreListUploads
+		h.hooks.listMultipartUploads = restoreListUploads
 	})
 
 	t.Run("list parts parses part-number-marker", func(t *testing.T) {
@@ -223,7 +226,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 	})
 
 	t.Run("list parts unexpected backend error", func(t *testing.T) {
-		listPartsFn = func(
+		h.hooks.listParts = func(
 			*Handler,
 			string,
 			string,
@@ -241,11 +244,11 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		listPartsFn = restoreListParts
+		h.hooks.listParts = restoreListParts
 	})
 
 	t.Run("list parts defaults owner and initiator", func(t *testing.T) {
-		listPartsFn = func(
+		h.hooks.listParts = func(
 			*Handler,
 			string,
 			string,
@@ -270,7 +273,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		)
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusOK)
-		listPartsFn = restoreListParts
+		h.hooks.listParts = restoreListParts
 	})
 
 	t.Run("copy part unexpected backend error", func(t *testing.T) {
@@ -284,7 +287,7 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		); err != nil {
 			t.Fatalf("PutObjectACL failed: %v", err)
 		}
-		copyPartFn = func(
+		h.hooks.copyPart = func(
 			*Handler,
 			string,
 			string,
@@ -310,17 +313,17 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		copyPartFn = restoreCopyPart
+		h.hooks.copyPart = restoreCopyPart
 	})
 
 	t.Run("decodeAndParseCopySource decode error branch", func(t *testing.T) {
-		decodeURIFn = func(string) (string, error) {
+		h.hooks.decodeURI = func(string) (string, error) {
 			return "", errors.New("decode boom")
 		}
-		if _, err := decodeAndParseCopySource("/bucket/key"); err == nil {
+		if _, err := h.decodeAndParseCopySource("/bucket/key"); err == nil {
 			t.Fatal("decodeAndParseCopySource should fail when decode fails")
 		}
-		decodeURIFn = restoreDecodeURI
+		h.hooks.decodeURI = restoreDecodeURI
 	})
 
 	t.Run("parseByteRange invalid prefix", func(t *testing.T) {
@@ -334,13 +337,14 @@ func TestMultipartAdditionalBranchesWithHooks(t *testing.T) {
 // mapping of backend.ErrInvalidRequest (retention set on an upload whose bucket
 // has no Object Lock configuration) to 400 InvalidRequest.
 func TestCompleteMultipartUploadObjectLockMapping(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 
-	restoreComplete := completeMultipartUploadFn
+	restoreComplete := h.hooks.completeMultipartUpload
 	t.Cleanup(func() {
-		completeMultipartUploadFn = restoreComplete
+		h.hooks.completeMultipartUpload = restoreComplete
 	})
-	completeMultipartUploadFn = func(
+	h.hooks.completeMultipartUpload = func(
 		*Handler,
 		string,
 		string,

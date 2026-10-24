@@ -10,6 +10,7 @@ import (
 )
 
 func TestPutObjectSetsLifecycleExpirationHeader(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "lifecycle-header-put")
 
@@ -48,6 +49,7 @@ func TestPutObjectSetsLifecycleExpirationHeader(t *testing.T) {
 }
 
 func TestHeadObjectLifecycleExpirationHeaderRespectsTagFilter(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "lifecycle-header-head")
 	if _, err := b.PutObject(
@@ -142,6 +144,7 @@ func TestHeadObjectLifecycleExpirationHeaderRespectsTagFilter(t *testing.T) {
 }
 
 func TestLifecycleHeaderHelperBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("lifecycleExpiryDate branches", func(t *testing.T) {
 		base := time.Date(2026, 2, 7, 12, 0, 0, 0, time.UTC)
 

@@ -22,6 +22,7 @@ func checksumUint32Base64(v uint32) string {
 }
 
 func TestValidateMFAHeaderAllBranches(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		header  string
@@ -63,6 +64,7 @@ func TestValidateMFAHeaderAllBranches(t *testing.T) {
 }
 
 func TestValidatePostObjectChecksumsAllAlgorithms(t *testing.T) {
+	t.Parallel()
 	body := []byte("checksum-branches")
 	crc32Value := checksumUint32Base64(crc32.ChecksumIEEE(body))
 	crc32cValue := checksumUint32Base64(crc32.Checksum(body, crc32.MakeTable(crc32.Castagnoli)))
@@ -116,49 +118,22 @@ func TestValidatePostObjectChecksumsAllAlgorithms(t *testing.T) {
 		})
 	}
 
-	t.Run("crc32 mismatch", func(t *testing.T) {
-		ok := validatePostObjectChecksums(
-			map[string]string{"x-amz-checksum-crc32": "wrong"},
-			body,
-			&backend.PutObjectOptions{},
-		)
-		if ok {
-			t.Fatal("expected crc32 mismatch to fail validation")
-		}
-	})
-	t.Run("crc32c mismatch", func(t *testing.T) {
-		ok := validatePostObjectChecksums(
-			map[string]string{"x-amz-checksum-crc32c": "wrong"},
-			body,
-			&backend.PutObjectOptions{},
-		)
-		if ok {
-			t.Fatal("expected crc32c mismatch to fail validation")
-		}
-	})
-	t.Run("sha1 mismatch", func(t *testing.T) {
-		ok := validatePostObjectChecksums(
-			map[string]string{"x-amz-checksum-sha1": "wrong"},
-			body,
-			&backend.PutObjectOptions{},
-		)
-		if ok {
-			t.Fatal("expected sha1 mismatch to fail validation")
-		}
-	})
-	t.Run("sha256 mismatch", func(t *testing.T) {
-		ok := validatePostObjectChecksums(
-			map[string]string{"x-amz-checksum-sha256": "wrong"},
-			body,
-			&backend.PutObjectOptions{},
-		)
-		if ok {
-			t.Fatal("expected sha256 mismatch to fail validation")
-		}
-	})
+	// The same fields with a wrong value fail validation.
+	for _, tc := range tests {
+		t.Run(tc.wantAlgo+" mismatch", func(t *testing.T) {
+			if validatePostObjectChecksums(
+				map[string]string{tc.fieldName: "wrong"},
+				body,
+				&backend.PutObjectOptions{},
+			) {
+				t.Fatalf("expected %s mismatch to fail validation", tc.fieldName)
+			}
+		})
+	}
 }
 
 func TestBucketConfigAndTaggingBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "cfg-branch")
 

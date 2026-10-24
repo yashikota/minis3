@@ -7,6 +7,7 @@ import (
 )
 
 func TestPutObjectLockConfigurationValidation(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("plain-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -110,6 +111,7 @@ func TestPutObjectLockConfigurationValidation(t *testing.T) {
 }
 
 func TestPutObjectRetentionValidation(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("lock-retention-bucket"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock failed: %v", err)
@@ -200,6 +202,7 @@ func TestPutObjectRetentionValidation(t *testing.T) {
 }
 
 func TestPutObjectLegalHoldValidation(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("lock-legalhold-bucket"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock failed: %v", err)
@@ -218,6 +221,7 @@ func TestPutObjectLegalHoldValidation(t *testing.T) {
 }
 
 func TestGetObjectLegalHoldDefaultOff(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("bucket-legalhold-default"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock failed: %v", err)
@@ -237,6 +241,7 @@ func TestGetObjectLegalHoldDefaultOff(t *testing.T) {
 }
 
 func TestGetObjectRetentionMissingConfiguration(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("bucket-retention-missing"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock failed: %v", err)
@@ -253,6 +258,7 @@ func TestGetObjectRetentionMissingConfiguration(t *testing.T) {
 }
 
 func TestPutObjectRetentionVersionNotFound(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("bucket-retention-version"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock failed: %v", err)
@@ -282,6 +288,7 @@ func TestPutObjectRetentionVersionNotFound(t *testing.T) {
 }
 
 func TestApplyDefaultRetentionOnPutObject(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("default-retention"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock: %v", err)
@@ -397,6 +404,7 @@ func TestApplyDefaultRetentionOnPutObject(t *testing.T) {
 }
 
 func TestApplyDefaultRetentionOnCopyObject(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("src-bucket"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -443,6 +451,7 @@ func TestApplyDefaultRetentionOnCopyObject(t *testing.T) {
 }
 
 func TestApplyDefaultRetentionOnCompleteMultipartUpload(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("mpu-bucket"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock: %v", err)

@@ -8,6 +8,7 @@ import (
 )
 
 func TestHandleRequestCORSPreflightRequestedHeaders(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "cors-bucket")
 
@@ -116,6 +117,7 @@ func TestHandleRequestCORSPreflightRequestedHeaders(t *testing.T) {
 }
 
 func TestCORSRequestHeadersAllowed(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		requestHeaders string

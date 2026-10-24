@@ -8,6 +8,7 @@ import (
 )
 
 func TestHandleService(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "svc-a")
 	mustCreateBucket(t, b, "svc-b")

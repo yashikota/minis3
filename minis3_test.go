@@ -13,6 +13,7 @@ import (
 )
 
 func TestMinis3(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -102,6 +103,7 @@ func TestMinis3(t *testing.T) {
 }
 
 func TestDeleteObjects(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -188,6 +190,7 @@ func TestDeleteObjects(t *testing.T) {
 }
 
 func TestDeleteObjectsQuietMode(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -240,6 +243,7 @@ func TestDeleteObjectsQuietMode(t *testing.T) {
 }
 
 func TestDeleteObjectsNoSuchBucket(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -276,6 +280,7 @@ func TestDeleteObjectsNoSuchBucket(t *testing.T) {
 }
 
 func TestDeleteObjectsMalformedXML(t *testing.T) {
+	t.Parallel()
 	s := New()
 	server := httptest.NewServer(s.handler())
 	defer server.Close()
@@ -321,6 +326,7 @@ func TestDeleteObjectsMalformedXML(t *testing.T) {
 }
 
 func TestMinis3RunAndAccessors(t *testing.T) {
+	t.Parallel()
 	s, err := Run()
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
@@ -346,6 +352,7 @@ func TestMinis3RunAndAccessors(t *testing.T) {
 }
 
 func TestMinis3RunAddrAndStartAddr(t *testing.T) {
+	t.Parallel()
 	s, err := RunAddr("127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("RunAddr failed: %v", err)
@@ -371,6 +378,7 @@ func TestMinis3RunAddrAndStartAddr(t *testing.T) {
 }
 
 func TestMinis3CloseAndAddrBeforeStart(t *testing.T) {
+	t.Parallel()
 	s := New()
 	if got := s.Addr(); got != "" {
 		t.Fatalf("Addr() before start = %q, want empty", got)
@@ -383,96 +391,46 @@ func TestMinis3CloseAndAddrBeforeStart(t *testing.T) {
 	}
 }
 
-func TestMinis3StartListenError(t *testing.T) {
-	origListenFn := listenFn
-	listenFn = func(_, _ string) (net.Listener, error) {
-		return nil, errors.New("boom")
+func TestStartListenErrors(t *testing.T) {
+	t.Parallel()
+	start := map[string]func(*testing.T, *Minis3) error{
+		"Start":     func(_ *testing.T, s *Minis3) error { return s.Start() },
+		"StartAddr": func(_ *testing.T, s *Minis3) error { return s.StartAddr("127.0.0.1:9191") },
+		// Run and RunAddr are startNew on a new server.
+		"startNew": func(t *testing.T, s *Minis3) error {
+			got, err := startNew(s, "127.0.0.1:0")
+			if got != nil {
+				t.Errorf("startNew server = %#v on error, want nil", got)
+			}
+			return err
+		},
 	}
-	defer func() { listenFn = origListenFn }()
-
-	s := New()
-	err := s.Start()
-	if err == nil {
-		t.Fatal("expected Start() to fail")
-	}
-	if !strings.Contains(err.Error(), "failed to listen: boom") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestMinis3StartAddrListenError(t *testing.T) {
-	origListenFn := listenFn
-	listenFn = func(_, _ string) (net.Listener, error) {
-		return nil, errors.New("boom-addr")
-	}
-	defer func() { listenFn = origListenFn }()
-
-	s := New()
-	err := s.StartAddr("127.0.0.1:9191")
-	if err == nil {
-		t.Fatal("expected StartAddr() to fail")
-	}
-	if !strings.Contains(err.Error(), "failed to listen: boom-addr") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunReturnsStartError(t *testing.T) {
-	origListenFn := listenFn
-	listenFn = func(_, _ string) (net.Listener, error) {
-		return nil, errors.New("run-boom")
-	}
-	defer func() { listenFn = origListenFn }()
-
-	s, err := Run()
-	if err == nil {
-		t.Fatal("expected Run() to fail")
-	}
-	if s != nil {
-		t.Fatalf("Run() server = %#v, want nil", s)
-	}
-	if !strings.Contains(err.Error(), "failed to listen: run-boom") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunAddrReturnsStartError(t *testing.T) {
-	origListenFn := listenFn
-	listenFn = func(_, _ string) (net.Listener, error) {
-		return nil, errors.New("run-addr-boom")
-	}
-	defer func() { listenFn = origListenFn }()
-
-	s, err := RunAddr("127.0.0.1:9191")
-	if err == nil {
-		t.Fatal("expected RunAddr() to fail")
-	}
-	if s != nil {
-		t.Fatalf("RunAddr() server = %#v, want nil", s)
-	}
-	if !strings.Contains(err.Error(), "failed to listen: run-addr-boom") {
-		t.Fatalf("unexpected error: %v", err)
+	for name, fn := range start {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s := New()
+			s.listen = func(_, _ string) (net.Listener, error) {
+				return nil, errors.New("boom-" + name)
+			}
+			err := fn(t, s)
+			if err == nil || !strings.Contains(err.Error(), "failed to listen: boom-"+name) {
+				t.Fatalf("%s() = %v, want the listen error", name, err)
+			}
+		})
 	}
 }
 
 func TestMinis3StartServeErrorCallsFatal(t *testing.T) {
-	origListenFn := listenFn
-	origFatalFn := fatalFn
-	defer func() {
-		listenFn = origListenFn
-		fatalFn = origFatalFn
-	}()
-
-	listenFn = func(_, _ string) (net.Listener, error) {
+	t.Parallel()
+	s := New()
+	s.listen = func(_, _ string) (net.Listener, error) {
 		return failingListener{acceptErr: errors.New("accept failed")}, nil
 	}
-
 	called := make(chan string, 1)
-	fatalFn = func(v ...any) {
+	s.fatal = func(v ...any) {
 		called <- fmt.Sprint(v...)
 	}
 
-	s := New()
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -486,7 +444,7 @@ func TestMinis3StartServeErrorCallsFatal(t *testing.T) {
 			t.Fatalf("expected accept error in fatal message: %q", msg)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("expected fatalFn to be called")
+		t.Fatal("expected fatal to be called")
 	}
 }
 

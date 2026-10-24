@@ -19,6 +19,7 @@ func setupCopyHandler(t *testing.T) (*Handler, *backend.Backend) {
 }
 
 func TestCopyObjectAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("source access denied", func(t *testing.T) {
 		h, b := setupCopyHandler(t)
 		b.SetBucketOwner("src", "src-owner")
@@ -181,8 +182,9 @@ func TestCopyObjectAdditionalBranches(t *testing.T) {
 				headers,
 			),
 		)
-		requireStatus(t, w, http.StatusNotFound)
-		requireS3ErrorCode(t, w, "NoSuchKey")
+		// AWS: a copy source versionId that names a delete marker is a 400.
+		requireStatus(t, w, http.StatusBadRequest)
+		requireS3ErrorCode(t, w, "InvalidRequest")
 	})
 
 	t.Run("no-conditional missing version at copy stage", func(t *testing.T) {

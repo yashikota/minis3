@@ -42,6 +42,16 @@ func newV4AuthHeaderRequest(t *testing.T, accessKey string, when time.Time) *htt
 	return req
 }
 
+// newV2AuthHeaderRequest returns a GET request signed with SigV2.
+func newV2AuthHeaderRequest(accessKey, secretKey string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
+	date := time.Now().UTC().Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+	req.Header.Set("Authorization", "AWS "+accessKey+":"+
+		sigV2Signature(secretKey, sigV2StringsToSign(req, date)[0]))
+	return req
+}
+
 func requirePresignedErrCode(t *testing.T, err error, want string) {
 	t.Helper()
 	if err == nil {
@@ -57,6 +67,7 @@ func requirePresignedErrCode(t *testing.T, err error, want string) {
 }
 
 func TestVerifyAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	t.Run("no authorization", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
 		if err := verifyAuthorizationHeader(req); err != nil {
@@ -75,12 +86,9 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "AccessDenied")
 	})
 
-	t.Run("v2 unknown access key is accepted", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
-		req.Header.Set("Authorization", "AWS unknown:sig")
-		if err := verifyAuthorizationHeader(req); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+	t.Run("v2 unknown access key", func(t *testing.T) {
+		req := newV2AuthHeaderRequest("unknown", "secret")
+		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "InvalidAccessKeyId")
 	})
 
 	t.Run("v2 malformed", func(t *testing.T) {
@@ -90,10 +98,31 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 	})
 
 	t.Run("v2 success", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
-		req.Header.Set("Authorization", "AWS minis3-access-key:sig")
+		req := newV2AuthHeaderRequest("minis3-access-key", "minis3-secret-key")
 		if err := verifyAuthorizationHeader(req); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("v2 signature mismatch", func(t *testing.T) {
+		req := newV2AuthHeaderRequest("minis3-access-key", "not-the-secret")
+		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "SignatureDoesNotMatch")
+	})
+
+	t.Run("v2 placeholder signature is rejected", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
+		req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
+		req.Header.Set("Authorization", "AWS minis3-access-key:sig")
+		requirePresignedErrCode(t, verifyAuthorizationHeader(req), "SignatureDoesNotMatch")
+	})
+
+	t.Run("v2 bad Date values", func(t *testing.T) {
+		for _, date := range []string{"", "Bad Date", "Tue, 07 Jul 2010 21:53:04 GMT"} {
+			req := newV2AuthHeaderRequest("minis3-access-key", "minis3-secret-key")
+			req.Header.Set("Date", date)
+			if verifyAuthorizationHeader(req) == nil {
+				t.Fatalf("Date %q accepted", date)
+			}
 		}
 	})
 
@@ -111,8 +140,7 @@ func TestVerifyAuthorizationHeader(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
-				req.Header.Set("Authorization", "AWS minis3-access-key:sig")
+				req := newV2AuthHeaderRequest("minis3-access-key", "minis3-secret-key")
 				req.Header["X-Amz-Date"] = []string{tc.date}
 				requirePresignedErrCode(t, verifyAuthorizationHeader(req), tc.wantErr)
 			})

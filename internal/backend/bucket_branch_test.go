@@ -6,6 +6,7 @@ import (
 )
 
 func TestBucketBranchCoverage(t *testing.T) {
+	t.Parallel()
 	t.Run("create bucket validates name", func(t *testing.T) {
 		b := New()
 		if err := b.CreateBucket("Invalid_Name"); !errors.Is(err, ErrInvalidBucketName) {
@@ -144,6 +145,7 @@ func TestBucketBranchCoverage(t *testing.T) {
 }
 
 func TestGetBucketUsageVisibleOnly(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		setup     func(t *testing.T, b *Backend, bucket string)

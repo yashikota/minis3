@@ -47,6 +47,7 @@ func postMultipartForm(
 }
 
 func TestBucketOperationHandlers(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "bucket")
 	mustPutObject(t, b, "bucket", "a/1.txt", "one")
@@ -247,7 +248,7 @@ func TestBucketOperationHandlers(t *testing.T) {
 	})
 
 	t.Run("policy put/get/status/delete", func(t *testing.T) {
-		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::bucket/*"}]}`
+		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bucket/*"}]}`
 		wPut := doRequest(
 			h,
 			newRequest(http.MethodPut, "http://example.test/bucket?policy", policy, nil),

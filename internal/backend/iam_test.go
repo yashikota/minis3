@@ -7,6 +7,7 @@ import (
 )
 
 func TestIAMUserCRUD(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	t.Run("create user", func(t *testing.T) {
@@ -69,6 +70,7 @@ func TestIAMUserCRUD(t *testing.T) {
 }
 
 func TestIAMAccessKeyCRUD(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_, _ = b.CreateIAMUser("testuser", "/")
 
@@ -161,14 +163,15 @@ func TestIAMAccessKeyCRUD(t *testing.T) {
 }
 
 func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
-	policy := `{"Version":"2012-10-17","Statement":[]}`
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`
 
 	t.Run("default denySelfAccess is false", func(t *testing.T) {
 		_ = b.PutBucketPolicy("test-bucket", policy, false)
-		bucket, _ := b.GetBucket("test-bucket")
+		bucket := liveBucket(t, b, "test-bucket")
 		if bucket.PolicyDenySelfAccess {
 			t.Fatal("PolicyDenySelfAccess should be false")
 		}
@@ -176,7 +179,7 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 
 	t.Run("denySelfAccess set to true", func(t *testing.T) {
 		_ = b.PutBucketPolicy("test-bucket", policy, true)
-		bucket, _ := b.GetBucket("test-bucket")
+		bucket := liveBucket(t, b, "test-bucket")
 		if !bucket.PolicyDenySelfAccess {
 			t.Fatal("PolicyDenySelfAccess should be true")
 		}
@@ -185,7 +188,7 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 	t.Run("delete policy resets denySelfAccess", func(t *testing.T) {
 		_ = b.PutBucketPolicy("test-bucket", policy, true)
 		_ = b.DeleteBucketPolicy("test-bucket")
-		bucket, _ := b.GetBucket("test-bucket")
+		bucket := liveBucket(t, b, "test-bucket")
 		if bucket.PolicyDenySelfAccess {
 			t.Fatal("PolicyDenySelfAccess should be false after delete")
 		}
@@ -193,6 +196,7 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 }
 
 func TestIAMUserPolicyCRUD(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.CreateIAMUser("poluser", "/"); err != nil {
 		t.Fatalf("CreateIAMUser failed: %v", err)
@@ -289,6 +293,7 @@ func TestIAMUserPolicyCRUD(t *testing.T) {
 }
 
 func TestValidateIAMUserPolicyDocument(t *testing.T) {
+	t.Parallel()
 	valid := []string{
 		`{"Version":"2012-10-17","Statement":{"Effect":"Allow","Action":"*","Resource":"*"}}`,
 		`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:GetObject","Resource":"*"}]}`,
@@ -317,6 +322,7 @@ func TestValidateIAMUserPolicyDocument(t *testing.T) {
 }
 
 func TestIsValidIAMPolicyName(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"AllAccessPolicy", "a", "a+b=c,d.e@f-g_h", strings.Repeat("x", 128)} {
 		if !IsValidIAMPolicyName(name) {
 			t.Fatalf("IsValidIAMPolicyName(%q) = false, want true", name)

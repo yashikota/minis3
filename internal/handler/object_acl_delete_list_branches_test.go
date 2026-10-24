@@ -14,6 +14,7 @@ import (
 )
 
 func TestDeleteObjectsResponseBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "delobj-branch")
 	if err := b.SetBucketVersioning(
@@ -133,6 +134,7 @@ func TestDeleteObjectsResponseBranches(t *testing.T) {
 }
 
 func TestObjectACLBranchExpansion(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-acl-branch")
 	b.SetBucketOwner("obj-acl-branch", "owner-ak")
@@ -372,6 +374,7 @@ func TestObjectACLBranchExpansion(t *testing.T) {
 }
 
 func TestListObjectsBranchExpansion(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "list-branch")
 	b.SetBucketOwner("list-branch", "owner-ak")
@@ -505,6 +508,7 @@ func TestListObjectsBranchExpansion(t *testing.T) {
 }
 
 func TestObjectTaggingAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "tag-branch")
 	b.SetBucketOwner("tag-branch", "owner-ak")

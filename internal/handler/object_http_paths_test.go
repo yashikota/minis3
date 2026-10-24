@@ -9,6 +9,7 @@ import (
 )
 
 func TestHandleObjectMainPaths(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-http")
 

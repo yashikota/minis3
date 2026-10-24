@@ -49,7 +49,7 @@ func (b *Backend) GetObjectLockConfiguration(bucketName string) (*ObjectLockConf
 		}, nil
 	}
 
-	return bucket.ObjectLockConfiguration, nil
+	return snapshot(bucket.ObjectLockConfiguration), nil
 }
 
 // PutObjectLockConfiguration sets the Object Lock configuration for a bucket.
@@ -66,12 +66,8 @@ func (b *Backend) PutObjectLockConfiguration(
 	}
 
 	// If Object Lock is not yet enabled, allow enabling it only if versioning is Enabled
-	if !bucket.ObjectLockEnabled {
-		if bucket.VersioningStatus != VersioningEnabled {
-			return ErrObjectLockNotEnabled
-		}
-		// Enable Object Lock on this versioned bucket
-		bucket.ObjectLockEnabled = true
+	if !bucket.ObjectLockEnabled && bucket.VersioningStatus != VersioningEnabled {
+		return ErrObjectLockNotEnabled
 	}
 
 	// ObjectLockEnabled must be "Enabled"
@@ -100,7 +96,10 @@ func (b *Backend) PutObjectLockConfiguration(
 		}
 	}
 
-	bucket.ObjectLockConfiguration = config
+	// Enable Object Lock only once the configuration is known to be valid:
+	// enabling is irreversible, so a rejected request must not flip it.
+	bucket.ObjectLockEnabled = true
+	bucket.ObjectLockConfiguration = snapshot(config)
 	return nil
 }
 
@@ -203,6 +202,13 @@ func (b *Backend) PutObjectRetention(
 	// Validate retention mode
 	if retention.Mode != "" && retention.Mode != RetentionModeGovernance &&
 		retention.Mode != RetentionModeCompliance {
+		return ErrInvalidObjectLockConfig
+	}
+
+	// Mode and RetainUntilDate go together: setting one without the other
+	// would leave a retention that can never expire (or has no mode).
+	// Both empty is the request that clears a governance retention.
+	if (retention.Mode == "") != (retention.RetainUntilDate == "") {
 		return ErrInvalidObjectLockConfig
 	}
 

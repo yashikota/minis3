@@ -20,6 +20,7 @@ func (failingReader) Read(_ []byte) (int, error) {
 }
 
 func TestHandleObjectQueryMethodNotAllowedBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-query-branches")
 	mustPutObject(t, b, "obj-query-branches", "k", "v")
@@ -61,6 +62,7 @@ func TestHandleObjectQueryMethodNotAllowedBranches(t *testing.T) {
 }
 
 func TestHandleObjectPutAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "put-branches")
 
@@ -187,6 +189,7 @@ func TestHandleObjectPutAdditionalBranches(t *testing.T) {
 }
 
 func TestHandleObjectSSECAndPartBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-ssec")
 
@@ -206,14 +209,12 @@ func TestHandleObjectSSECAndPartBranches(t *testing.T) {
 	)
 	requireStatus(t, wPut, http.StatusOK)
 
-	obj, err := b.GetObject("obj-ssec", "key")
-	if err != nil {
-		t.Fatalf("GetObject failed: %v", err)
-	}
-	obj.Parts = []backend.ObjectPart{
-		{PartNumber: 1, Size: 2, ETag: "\"p1\""},
-		{PartNumber: 2, Size: 2, ETag: "\"p2\""},
-	}
+	mustUpdateObject(t, b, "obj-ssec", "key", func(obj *backend.Object) {
+		obj.Parts = []backend.ObjectPart{
+			{PartNumber: 1, Size: 2, ETag: "\"p1\""},
+			{PartNumber: 2, Size: 2, ETag: "\"p2\""},
+		}
+	})
 
 	t.Run("get missing sse-c headers", func(t *testing.T) {
 		w := doRequest(h, newRequest(http.MethodGet, "http://example.test/obj-ssec/key", "", nil))
@@ -333,6 +334,7 @@ func TestHandleObjectSSECAndPartBranches(t *testing.T) {
 }
 
 func TestHandleObjectDeleteAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "delete-branches")
 	if err := b.SetBucketVersioning(
@@ -429,6 +431,7 @@ func TestHandleObjectDeleteAdditionalBranches(t *testing.T) {
 }
 
 func TestPutObjectRetainUntilDateTruncatesFractionalSeconds(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "lock-retain-truncate")
 

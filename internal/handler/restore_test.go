@@ -8,6 +8,7 @@ import (
 )
 
 func TestHandleRestoreObject(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "bucket")
 	_, err := b.PutObject("bucket", "glacier-key", []byte("data"), backend.PutObjectOptions{
@@ -101,6 +102,7 @@ func TestHandleRestoreObject(t *testing.T) {
 }
 
 func TestGetObjectGlacierAutoRestore(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "bucket")
 
@@ -176,6 +178,7 @@ func TestGetObjectArchivedReturnsForbidden(t *testing.T) {
 }
 
 func TestRestoreObjectVersionNotFound(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateObjectLockBucket(t, b, "bucket")
 

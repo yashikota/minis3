@@ -14,6 +14,7 @@ import (
 )
 
 func TestDefaultCredentialLookupAndSourceAccountBranches(t *testing.T) {
+	t.Parallel()
 	if secret, ok := defaultCredentialLookup("test"); !ok || secret != "test" {
 		t.Fatalf("defaultCredentialLookup(test) = (%q,%v), want (test,true)", secret, ok)
 	}
@@ -30,6 +31,7 @@ func TestDefaultCredentialLookupAndSourceAccountBranches(t *testing.T) {
 }
 
 func TestHandleIAMGetUserAltRootBranch(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 
 	w := doRequest(
@@ -48,6 +50,7 @@ func TestHandleIAMGetUserAltRootBranch(t *testing.T) {
 }
 
 func TestPutBucketOwnershipAndPostBucketLoggingRemainingBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("ownership controls reject enforced mode with non-private ACL", func(t *testing.T) {
 		h, b := newTestHandler(t)
 		mustCreateBucket(t, b, "own-branch")
@@ -91,7 +94,11 @@ func TestPutBucketOwnershipAndPostBucketLoggingRemainingBranches(t *testing.T) {
 		mustCreateBucket(t, b, "post-dst")
 		b.SetBucketOwner("post-src", "minis3-access-key")
 		b.SetBucketOwner("post-dst", "minis3-access-key")
-		if err := b.PutBucketPolicy("post-dst", `{"Statement":[]}`, false); err != nil {
+		if err := b.PutBucketPolicy(
+			"post-dst",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+			false,
+		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 
@@ -128,10 +135,10 @@ func TestPutBucketOwnershipAndPostBucketLoggingRemainingBranches(t *testing.T) {
 		mustCreateBucket(t, b, "post-marshal")
 		b.SetBucketOwner("post-marshal", "minis3-access-key")
 
-		origMarshal := xmlMarshalFn
-		xmlMarshalFn = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
+		origMarshal := h.hooks.xmlMarshal
+		h.hooks.xmlMarshal = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
 		t.Cleanup(func() {
-			xmlMarshalFn = origMarshal
+			h.hooks.xmlMarshal = origMarshal
 		})
 
 		w := doRequest(
@@ -148,37 +155,11 @@ func TestPutBucketOwnershipAndPostBucketLoggingRemainingBranches(t *testing.T) {
 	})
 }
 
-func TestLoggingConditionValuesAdditionalBranches(t *testing.T) {
-	values, found := loggingConditionValues(
-		map[string]any{"ArnLike": "not-a-map"},
-		[]string{"ArnLike"},
-		"aws:SourceArn",
-	)
-	if found || len(values) != 0 {
-		t.Fatalf(
-			"loggingConditionValues non-map operator = (%v,%v), want (false,empty)",
-			found,
-			values,
-		)
-	}
-
-	values, found = loggingConditionValues(
-		map[string]any{"ArnLike": map[string]any{"other": "x"}},
-		[]string{"ArnLike"},
-		"aws:SourceArn",
-	)
-	if found || len(values) != 0 {
-		t.Fatalf(
-			"loggingConditionValues missing condition key = (%v,%v), want (false,empty)",
-			found,
-			values,
-		)
-	}
-}
-
 func TestLoggingHelperRemainingBranches(t *testing.T) {
-	if got := normalizeBucketNameForRequestAccessKey(":bucket", ""); got != "bucket" {
-		t.Fatalf("normalizeBucketNameForRequestAccessKey(:bucket) = %q", got)
+	t.Parallel()
+	h := New(backend.New())
+	if got := h.normalizeBucketNameForRequestAccessKey(":bucket", ""); got != "bucket" {
+		t.Fatalf("h.normalizeBucketNameForRequestAccessKey(:bucket) = %q", got)
 	}
 	if queryHasInsensitive(nil, "x") {
 		t.Fatal("queryHasInsensitive(nil) must be false")
@@ -239,20 +220,21 @@ func TestLoggingHelperRemainingBranches(t *testing.T) {
 }
 
 func TestLoggingJournalMetadataAndHookDefaultBranch(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "journal-meta")
 	mustPutObject(t, b, "journal-meta", "k", "payload")
 
-	if _, err := getObjectVersionForLoggingFn(h, "journal-meta", "k", ""); err != nil {
-		t.Fatalf("getObjectVersionForLoggingFn default failed: %v", err)
+	if _, err := h.hooks.getObjectVersionForLogging(h, "journal-meta", "k", ""); err != nil {
+		t.Fatalf("h.hooks.getObjectVersionForLogging default failed: %v", err)
 	}
 
 	t.Run("fallback from specific version to latest", func(t *testing.T) {
-		orig := getObjectVersionForLoggingFn
-		defer func() { getObjectVersionForLoggingFn = orig }()
+		orig := h.hooks.getObjectVersionForLogging
+		defer func() { h.hooks.getObjectVersionForLogging = orig }()
 
 		calls := 0
-		getObjectVersionForLoggingFn = func(
+		h.hooks.getObjectVersionForLogging = func(
 			_ *Handler,
 			_ string,
 			_ string,
@@ -281,10 +263,10 @@ func TestLoggingJournalMetadataAndHookDefaultBranch(t *testing.T) {
 	})
 
 	t.Run("object lookup failure returns placeholders", func(t *testing.T) {
-		orig := getObjectVersionForLoggingFn
-		defer func() { getObjectVersionForLoggingFn = orig }()
+		orig := h.hooks.getObjectVersionForLogging
+		defer func() { h.hooks.getObjectVersionForLogging = orig }()
 
-		getObjectVersionForLoggingFn = func(*Handler, string, string, string) (*backend.Object, error) {
+		h.hooks.getObjectVersionForLogging = func(*Handler, string, string, string) (*backend.Object, error) {
 			return nil, errors.New("boom")
 		}
 		req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
@@ -300,10 +282,10 @@ func TestLoggingJournalMetadataAndHookDefaultBranch(t *testing.T) {
 	})
 
 	t.Run("returns explicit version and etag", func(t *testing.T) {
-		orig := getObjectVersionForLoggingFn
-		defer func() { getObjectVersionForLoggingFn = orig }()
+		orig := h.hooks.getObjectVersionForLogging
+		defer func() { h.hooks.getObjectVersionForLogging = orig }()
 
-		getObjectVersionForLoggingFn = func(*Handler, string, string, string) (*backend.Object, error) {
+		h.hooks.getObjectVersionForLogging = func(*Handler, string, string, string) (*backend.Object, error) {
 			return &backend.Object{Size: 9, VersionId: "v2", ETag: "\"etag\""}, nil
 		}
 		req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
@@ -320,6 +302,7 @@ func TestLoggingJournalMetadataAndHookDefaultBranch(t *testing.T) {
 }
 
 func TestEmitServerAccessLogJournalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "journal-src")
 	mustCreateBucket(t, b, "journal-dst")
@@ -395,13 +378,18 @@ func TestEmitServerAccessLogJournalBranches(t *testing.T) {
 }
 
 func TestFlushLogBatchAndForceFlushErrorBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("flush if due returns error when batch flush fails", func(t *testing.T) {
 		h, b := newTestHandler(t)
 		mustCreateBucket(t, b, "flush-src")
 		mustCreateBucket(t, b, "flush-dst")
 		b.SetBucketOwner("flush-src", "minis3-access-key")
 		b.SetBucketOwner("flush-dst", "minis3-access-key")
-		if err := b.PutBucketPolicy("flush-dst", `{"Statement":[]}`, false); err != nil {
+		if err := b.PutBucketPolicy(
+			"flush-dst",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+			false,
+		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 
@@ -443,7 +431,11 @@ func TestFlushLogBatchAndForceFlushErrorBranches(t *testing.T) {
 		mustCreateBucket(t, b, "force-dst")
 		b.SetBucketOwner("force-src", "minis3-access-key")
 		b.SetBucketOwner("force-dst", "minis3-access-key")
-		if err := b.PutBucketPolicy("force-dst", `{"Statement":[]}`, false); err != nil {
+		if err := b.PutBucketPolicy(
+			"force-dst",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+			false,
+		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
 
@@ -465,6 +457,7 @@ func TestFlushLogBatchAndForceFlushErrorBranches(t *testing.T) {
 }
 
 func TestMapRequestToLoggingOperationRemainingBranches(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		method string
 		target string
@@ -529,6 +522,7 @@ func TestMapRequestToLoggingOperationRemainingBranches(t *testing.T) {
 }
 
 func TestCheckAccessRemainingBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "access-remain")
 	b.SetBucketOwner("access-remain", "minis3-access-key")
@@ -540,7 +534,7 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 	reqOther.Header.Set("Authorization", authHeader("tenant-access-key"))
 
 	t.Run("allow statement mismatch denies before ACL fallback", func(t *testing.T) {
-		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::access-remain/*","Condition":{"StringEquals":{"aws:SourceIp":"192.0.2.1"}}}]}`
+		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::access-remain/*","Condition":{"StringEquals":{"aws:SourceIp":"198.51.100.7"}}}]}`
 		if err := b.PutBucketPolicy("access-remain", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
@@ -561,14 +555,12 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 		if err := b.DeleteBucketPolicy("access-remain"); err != nil {
 			t.Fatalf("DeleteBucketPolicy failed: %v", err)
 		}
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, backend.ErrObjectNotFound
 			},
 		)
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("bucket acl error")
 			},
@@ -589,14 +581,12 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 			t.Fatal("GetObjectTagging with empty key should be denied")
 		}
 
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, backend.ErrObjectNotFound
 			},
 		)
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("bucket acl error")
 			},
@@ -610,14 +600,12 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 		if err := b.DeleteBucketPolicy("access-remain"); err != nil {
 			t.Fatalf("DeleteBucketPolicy failed: %v", err)
 		}
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, backend.ErrObjectNotFound
 			},
 		)
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return backend.CannedACLToPolicy("public-read"), nil
 			},
@@ -626,8 +614,7 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 			t.Fatal("GetObjectTagging should allow when fallback bucket ACL grants read")
 		}
 
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("other object acl error")
 			},
@@ -645,8 +632,7 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 			t.Fatal("RestoreObject with empty key should be denied")
 		}
 
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("bucket acl error")
 			},
@@ -655,8 +641,7 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 			t.Fatal("RestoreObject should deny when bucket ACL lookup fails")
 		}
 
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return backend.CannedACLToPolicy("public-read-write"), nil
 			},
@@ -674,14 +659,12 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 			t.Fatal("DeleteObject with empty key should be denied")
 		}
 
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, backend.ErrObjectNotFound
 			},
 		)
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("bucket acl error")
 			},
@@ -690,14 +673,12 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 			t.Fatal("DeleteObject should deny when fallback bucket ACL lookup fails")
 		}
 
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, backend.ErrObjectNotFound
 			},
 		)
-		patchBucketACLForAccessCheckForTest(
-			t,
+		patchBucketACLForAccessCheckForTest(t, h,
 			func(*Handler, string) (*backend.AccessControlPolicy, error) {
 				return backend.CannedACLToPolicy("public-read-write"), nil
 			},
@@ -706,8 +687,7 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 			t.Fatal("DeleteObject should allow when fallback bucket ACL grants write")
 		}
 
-		patchObjectACLForAccessCheckForTest(
-			t,
+		patchObjectACLForAccessCheckForTest(t, h,
 			func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 				return nil, errors.New("object acl error")
 			},
@@ -719,6 +699,7 @@ func TestCheckAccessRemainingBranches(t *testing.T) {
 }
 
 func TestCheckAccessWithContextRestrictPublicBucketsBranch(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "ctx-restrict")
 	b.SetBucketOwner("ctx-restrict", "minis3-access-key")
@@ -749,6 +730,7 @@ func TestCheckAccessWithContextRestrictPublicBucketsBranch(t *testing.T) {
 }
 
 func TestBucketPolicyOwnerDenyExemptionBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "deny-owner-exempt")
 	b.SetBucketOwner("deny-owner-exempt", "minis3-access-key")
@@ -782,6 +764,7 @@ func TestBucketPolicyOwnerDenyExemptionBranches(t *testing.T) {
 }
 
 func TestACLFromGrantHeadersOwnerNilBranch(t *testing.T) {
+	t.Parallel()
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 	if owner == nil {
 		t.Fatal("owner must not be nil")
@@ -799,6 +782,7 @@ func TestACLFromGrantHeadersOwnerNilBranch(t *testing.T) {
 }
 
 func TestUploadPartCopyRemainingBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "src-remain")
 	mustPutObject(t, b, "src-remain", "src", "source-data")
@@ -920,8 +904,8 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			"source-bucket-missing",
 			map[string]string{"Authorization": authHeader("dst-owner")},
 		)
-		origCopyPart := copyPartFn
-		copyPartFn = func(
+		origCopyPart := h.hooks.copyPart
+		h.hooks.copyPart = func(
 			*Handler,
 			string,
 			string,
@@ -936,7 +920,7 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			return nil, backend.ErrSourceBucketNotFound
 		}
 		t.Cleanup(func() {
-			copyPartFn = origCopyPart
+			h.hooks.copyPart = origCopyPart
 		})
 
 		w := doRequest(
@@ -964,8 +948,8 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			"source-object-missing",
 			map[string]string{"Authorization": authHeader("dst-owner")},
 		)
-		origCopyPart := copyPartFn
-		copyPartFn = func(
+		origCopyPart := h.hooks.copyPart
+		h.hooks.copyPart = func(
 			*Handler,
 			string,
 			string,
@@ -980,7 +964,7 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			return nil, backend.ErrSourceObjectNotFound
 		}
 		t.Cleanup(func() {
-			copyPartFn = origCopyPart
+			h.hooks.copyPart = origCopyPart
 		})
 
 		w := doRequest(
@@ -1008,8 +992,8 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			"invalid-request-mapping",
 			map[string]string{"Authorization": authHeader("dst-owner")},
 		)
-		origCopyPart := copyPartFn
-		copyPartFn = func(
+		origCopyPart := h.hooks.copyPart
+		h.hooks.copyPart = func(
 			*Handler,
 			string,
 			string,
@@ -1024,7 +1008,7 @@ func TestUploadPartCopyRemainingBranches(t *testing.T) {
 			return nil, backend.ErrInvalidRequest
 		}
 		t.Cleanup(func() {
-			copyPartFn = origCopyPart
+			h.hooks.copyPart = origCopyPart
 		})
 
 		w := doRequest(
@@ -1110,7 +1094,7 @@ func TestObjectRemainingBranches(t *testing.T) {
 		b.SetBucketOwner("obj-remain-log-target", "minis3-access-key")
 		if err := b.PutBucketPolicy(
 			"obj-remain-log-target",
-			`{"Statement":[]}`,
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
 			false,
 		); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
@@ -1206,12 +1190,12 @@ func TestObjectRemainingBranches(t *testing.T) {
 		requireStatus(t, wReadErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wReadErr, "InternalError")
 
-		origRestore := restoreObjectFn
-		restoreObjectFn = func(*Handler, string, string, string, int) (*backend.RestoreObjectResult, error) {
+		origRestore := h.hooks.restoreObject
+		h.hooks.restoreObject = func(*Handler, string, string, string, int) (*backend.RestoreObjectResult, error) {
 			return nil, errors.New("restore boom")
 		}
 		t.Cleanup(func() {
-			restoreObjectFn = origRestore
+			h.hooks.restoreObject = origRestore
 		})
 		wInternal := doRequest(
 			h,

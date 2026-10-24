@@ -12,6 +12,7 @@ import (
 )
 
 func TestVerifyAuthorizationHeaderV4MixedCaseSignedHeaders(t *testing.T) {
+	t.Parallel()
 	req := newV4AuthHeaderRequest(t, "minis3-access-key", time.Now().UTC())
 	auth := req.Header.Get("Authorization")
 	const lower = "SignedHeaders=host;x-amz-content-sha256;x-amz-date"
@@ -26,6 +27,7 @@ func TestVerifyAuthorizationHeaderV4MixedCaseSignedHeaders(t *testing.T) {
 }
 
 func TestVerifyAuthorizationHeaderV4EmptySignedHeaderSegment(t *testing.T) {
+	t.Parallel()
 	req := newV4AuthHeaderRequest(t, "minis3-access-key", time.Now().UTC())
 	auth := req.Header.Get("Authorization")
 	const lower = "SignedHeaders=host;x-amz-content-sha256;x-amz-date"
@@ -40,6 +42,7 @@ func TestVerifyAuthorizationHeaderV4EmptySignedHeaderSegment(t *testing.T) {
 }
 
 func TestCalculatePresignedSignatureV4MixedCaseSignedHeaders(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodGet, "http://example.test/bucket/key?x=1", nil)
 	req.Host = "example.test"
 
@@ -65,6 +68,7 @@ func TestCalculatePresignedSignatureV4MixedCaseSignedHeaders(t *testing.T) {
 }
 
 func TestVerifyPresignedURLV4MixedCaseSignedHeaders(t *testing.T) {
+	t.Parallel()
 	requestTime := time.Now().UTC().Add(-1 * time.Minute)
 	dateStamp := requestTime.Format("20060102")
 	amzDate := requestTime.Format("20060102T150405Z")
@@ -95,6 +99,7 @@ func TestVerifyPresignedURLV4MixedCaseSignedHeaders(t *testing.T) {
 }
 
 func TestVerifyPresignedURLV4EmptySignedHeaderSegment(t *testing.T) {
+	t.Parallel()
 	requestTime := time.Now().UTC().Add(-1 * time.Minute)
 	dateStamp := requestTime.Format("20060102")
 	amzDate := requestTime.Format("20060102T150405Z")
@@ -136,6 +141,7 @@ func TestVerifyPresignedURLV4EmptySignedHeaderSegment(t *testing.T) {
 }
 
 func TestIso8601FromHTTPDateHeader(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value string
@@ -212,6 +218,7 @@ func signV4HeaderRequest(
 }
 
 func TestVerifyAuthorizationHeaderV4DateHeaderFallback(t *testing.T) {
+	t.Parallel()
 	when := time.Date(2026, time.October, 3, 17, 56, 2, 0, time.UTC)
 
 	t.Run("date only verifies", func(t *testing.T) {

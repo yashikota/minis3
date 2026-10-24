@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 )
 
 func TestExtractMetadata(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest(http.MethodPut, "http://example.test/bucket/key", nil)
 	r.Header.Set("X-Amz-Meta-User", "Alice")
 	r.Header.Set("x-amz-meta-note", "caf%C3%A9")
@@ -38,6 +41,7 @@ func TestExtractMetadata(t *testing.T) {
 }
 
 func TestSetMetadataHeadersAndEncoding(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	setMetadataHeaders(w, map[string]string{
 		"plain": "value",
@@ -76,6 +80,7 @@ func getHeaderValuesCaseInsensitive(h http.Header, key string) []string {
 }
 
 func TestParseTaggingAndValidation(t *testing.T) {
+	t.Parallel()
 	if got := parseTaggingHeader(""); got != nil {
 		t.Fatalf("expected nil for empty tagging header, got %+v", got)
 	}
@@ -120,6 +125,7 @@ func TestParseTaggingAndValidation(t *testing.T) {
 }
 
 func TestObjectResponseHeaderSetters(t *testing.T) {
+	t.Parallel()
 	obj := &backend.Object{
 		RetentionMode:        backend.RetentionModeGovernance,
 		RetainUntilDate:      ptrTime(time.Date(2026, 2, 7, 12, 0, 0, 0, time.UTC)),
@@ -189,6 +195,7 @@ func TestObjectResponseHeaderSetters(t *testing.T) {
 }
 
 func TestValidateSSEHeaders(t *testing.T) {
+	t.Parallel()
 	req := func() *http.Request {
 		return httptest.NewRequest(http.MethodPut, "http://example.test/bucket/key", nil)
 	}
@@ -292,6 +299,7 @@ func TestValidateSSEHeaders(t *testing.T) {
 }
 
 func TestValidateSSEHeaders_SSEKMSKeyIdOptional(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sse       string
@@ -361,6 +369,7 @@ func TestValidateSSEHeaders_SSEKMSKeyIdOptional(t *testing.T) {
 }
 
 func TestValidateSSECAccess(t *testing.T) {
+	t.Parallel()
 	obj := &backend.Object{SSECustomerAlgorithm: "AES256", SSECustomerKeyMD5: "expected-md5"}
 
 	t.Run("not sse-c object", func(t *testing.T) {
@@ -407,6 +416,7 @@ func TestValidateSSECAccess(t *testing.T) {
 }
 
 func TestInferChecksumAlgorithmFromTrailer(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		trailer string
 		want    string
@@ -430,6 +440,7 @@ func TestInferChecksumAlgorithmFromTrailer(t *testing.T) {
 }
 
 func TestGetPartData(t *testing.T) {
+	t.Parallel()
 	obj := &backend.Object{Data: []byte("hello"), Size: 5}
 	if data, size, _, ok := getPartData(obj, 1); !ok || string(data) != "hello" || size != 5 {
 		t.Fatalf(
@@ -473,15 +484,16 @@ func TestGetPartData(t *testing.T) {
 }
 
 func TestParseRangeHeader(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		header    string
 		size      int64
 		wantStart int64
 		wantEnd   int64
-		wantErr   bool
+		wantErr   error
 	}{
-		{name: "invalid prefix", header: "items=0-1", size: 10, wantErr: true},
+		{name: "other unit", header: "items=0-1", size: 10, wantErr: errRangeIgnored},
 		{name: "suffix range", header: "bytes=-3", size: 10, wantStart: 7, wantEnd: 9},
 		{
 			name:      "suffix larger than object",
@@ -493,21 +505,55 @@ func TestParseRangeHeader(t *testing.T) {
 		{name: "open ended", header: "bytes=3-", size: 10, wantStart: 3, wantEnd: 9},
 		{name: "closed range", header: "bytes=2-5", size: 10, wantStart: 2, wantEnd: 5},
 		{name: "end clamped", header: "bytes=7-100", size: 10, wantStart: 7, wantEnd: 9},
-		{name: "start greater than end", header: "bytes=6-2", size: 10, wantErr: true},
-		{name: "start out of range", header: "bytes=10-12", size: 10, wantErr: true},
-		{name: "invalid number", header: "bytes=a-1", size: 10, wantErr: true},
+		{name: "start greater than end", header: "bytes=6-2", size: 10, wantErr: errRangeIgnored},
+		{
+			name:    "start out of range",
+			header:  "bytes=10-12",
+			size:    10,
+			wantErr: backend.ErrInvalidRange,
+		},
+		{name: "invalid number", header: "bytes=a-1", size: 10, wantErr: errRangeIgnored},
+		{name: "signed number", header: "bytes=+1-2", size: 10, wantErr: errRangeIgnored},
+		{name: "spaces", header: "bytes= 1-2", size: 10, wantErr: errRangeIgnored},
+		{name: "no dash", header: "bytes=1", size: 10, wantErr: errRangeIgnored},
+		{name: "multiple ranges", header: "bytes=0-1,3-4", size: 10, wantErr: errRangeIgnored},
+		{name: "empty object", header: "bytes=0-0", size: 0, wantErr: backend.ErrInvalidRange},
+		{
+			name:    "empty object suffix",
+			header:  "bytes=-1",
+			size:    0,
+			wantErr: backend.ErrInvalidRange,
+		},
+		{
+			name:    "huge start saturates",
+			header:  "bytes=99999999999999999999-",
+			size:    10,
+			wantErr: backend.ErrInvalidRange,
+		},
+		{
+			name:      "huge suffix saturates",
+			header:    "bytes=-99999999999999999999",
+			size:      10,
+			wantStart: 0,
+			wantEnd:   9,
+		},
+		{
+			name:      "huge end saturates",
+			header:    "bytes=1-99999999999999999999",
+			size:      10,
+			wantStart: 1,
+			wantEnd:   9,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			start, end, err := parseRangeHeader(tt.header, tt.size)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("parseRangeHeader error = %v, wantErr %v", err, tt.wantErr)
+			if !errors.Is(err, tt.wantErr) || (tt.wantErr == nil && err != nil) {
+				t.Fatalf("parseRangeHeader(%q) error = %v, want %v", tt.header, err, tt.wantErr)
 			}
-			if tt.wantErr {
-				return
-			}
-			if start != tt.wantStart || end != tt.wantEnd {
+			if tt.wantErr == nil && (start != tt.wantStart || end != tt.wantEnd) {
 				t.Fatalf(
 					"parseRangeHeader(%q) = (%d, %d), want (%d, %d)",
 					tt.header,
@@ -516,6 +562,68 @@ func TestParseRangeHeader(t *testing.T) {
 					tt.wantStart,
 					tt.wantEnd,
 				)
+			}
+		})
+	}
+}
+
+// awsRangeResponses are Amazon S3's answers to GetObject with these Range
+// headers on the 10-byte object "0123456789", as recorded by LocalStack's
+// AWS-validated snapshot of test_get_object_range
+// (tests/aws/services/s3/test_s3_api.snapshot.json, recorded 2026-02-21).
+var awsRangeResponses = []struct {
+	header       string
+	status       int
+	contentRange string
+	body         string
+}{
+	{"bytes=0-8", 206, "bytes 0-8/10", "012345678"},
+	{"bytes=1-1", 206, "bytes 1-1/10", "1"},
+	{"bytes=1-0", 200, "", "0123456789"},
+	{"bytes=1-", 206, "bytes 1-9/10", "123456789"},
+	{"bytes=-1-", 200, "", "0123456789"},
+	{"bytes=-2", 206, "bytes 8-9/10", "89"},
+	{"bytes=-9", 206, "bytes 1-9/10", "123456789"},
+	{"bytes=-15", 206, "bytes 0-9/10", "0123456789"},
+	{"bytes=0-100", 206, "bytes 0-9/10", "0123456789"},
+	{"bytes=0-0", 206, "bytes 0-0/10", "0"},
+	{"bytes=0--1", 200, "", "0123456789"},
+	{"bytes=0-1,3-4,7-9", 200, "", "0123456789"},
+	{"0-1", 200, "", "0123456789"},
+	{"bytes=-", 200, "", "0123456789"},
+	{"bytes=-0", 416, "", ""},
+	{"bytes=100-200", 416, "", ""},
+}
+
+func TestParseRangeHeaderMatchesAWS(t *testing.T) {
+	t.Parallel()
+	h, b := newTestHandler(t)
+	mustCreateBucket(t, b, "aws-range")
+	mustPutObject(t, b, "aws-range", "obj", "0123456789")
+	for _, want := range awsRangeResponses {
+		t.Run(want.header, func(t *testing.T) {
+			t.Parallel()
+			w := doRequest(h, newRequest(
+				http.MethodGet,
+				"http://example.test/aws-range/obj",
+				"",
+				map[string]string{"Range": want.header},
+			))
+			if w.Code != want.status {
+				t.Fatalf("status = %d, want %d (body %s)", w.Code, want.status, w.Body.String())
+			}
+			if want.status == http.StatusRequestedRangeNotSatisfiable {
+				requireS3ErrorCode(t, w, "InvalidRange")
+				return
+			}
+			if got := w.Header().Get("Content-Range"); got != want.contentRange {
+				t.Fatalf("Content-Range = %q, want %q", got, want.contentRange)
+			}
+			if got := w.Body.String(); got != want.body {
+				t.Fatalf("body = %q, want %q", got, want.body)
+			}
+			if got := w.Header().Get("Content-Length"); got != strconv.Itoa(len(want.body)) {
+				t.Fatalf("Content-Length = %q, want %d", got, len(want.body))
 			}
 		})
 	}

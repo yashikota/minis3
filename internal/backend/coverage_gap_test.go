@@ -7,6 +7,7 @@ import (
 )
 
 func TestOwnerResolverBranches(t *testing.T) {
+	t.Parallel()
 	known := OwnerForAccessKey("minis3-access-key")
 	if known == nil || known.DisplayName != "minis3" {
 		t.Fatalf("unexpected known owner: %+v", known)
@@ -42,6 +43,7 @@ func TestOwnerResolverBranches(t *testing.T) {
 }
 
 func TestACLAndLifecycleNormalizationBranches(t *testing.T) {
+	t.Parallel()
 	acl := NewDefaultACLForOwner(nil)
 	if acl.Owner == nil || acl.Owner.ID != DefaultOwner().ID {
 		t.Fatalf("unexpected default owner ACL: %+v", acl)
@@ -104,6 +106,7 @@ func TestACLAndLifecycleNormalizationBranches(t *testing.T) {
 }
 
 func TestObjectCurrentVisibleVersionBranches(t *testing.T) {
+	t.Parallel()
 	var nilVersions *ObjectVersions
 	if got := nilVersions.getCurrentVisibleVersion(); got != nil {
 		t.Fatalf("expected nil for nil receiver, got %+v", got)
@@ -129,6 +132,7 @@ func TestObjectCurrentVisibleVersionBranches(t *testing.T) {
 }
 
 func TestPolicyPrincipalHelperBranches(t *testing.T) {
+	t.Parallel()
 	ctx := PolicyEvalContext{AccessKey: "ak"}
 
 	if !matchesPrincipal(nil, ctx) {
@@ -145,24 +149,6 @@ func TestPolicyPrincipalHelperBranches(t *testing.T) {
 	}
 	if matchesPrincipal(map[string]any{"AWS": "other"}, ctx) {
 		t.Fatal("expected non-matching access key principal to not match")
-	}
-
-	if values, ok := extractAWSPrincipals("*"); !ok || len(values) != 1 || values[0] != "*" {
-		t.Fatalf("unexpected extracted principals for string: values=%v ok=%v", values, ok)
-	}
-	if values, ok := extractAWSPrincipals([]any{"a", "b"}); !ok || len(values) != 2 {
-		t.Fatalf("unexpected extracted principals for []any: values=%v ok=%v", values, ok)
-	}
-	if values, ok := extractAWSPrincipals([]any{"a", 1}); ok || values != nil {
-		t.Fatalf("expected []any with non-string to fail: values=%v ok=%v", values, ok)
-	}
-	if values, ok := extractAWSPrincipals(map[string]any{"AWS": []any{"a", "b"}}); !ok ||
-		len(values) != 2 {
-		t.Fatalf("unexpected extracted principals for AWS map: values=%v ok=%v", values, ok)
-	}
-	if values, ok := extractAWSPrincipals(map[string]any{"CanonicalUser": "x"}); ok ||
-		values != nil {
-		t.Fatalf("expected map without AWS key to fail: values=%v ok=%v", values, ok)
 	}
 
 	if !isPublicPrincipal(map[string]any{"AWS": "*"}) {
@@ -186,10 +172,15 @@ func TestPolicyPrincipalHelperBranches(t *testing.T) {
 	) {
 		t.Fatal("expected unconditional public allow policy to be public")
 	}
-	if IsPolicyPublic(
+	if !IsPolicyPublic(
 		`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*","Condition":{"StringEquals":{"aws:Referer":"x"}}}]}`,
 	) {
-		t.Fatal("policy with condition should not be treated as public")
+		t.Fatal("a Referer condition does not restrict who can call: policy is public")
+	}
+	if IsPolicyPublic(
+		`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*","Condition":{"IpAddress":{"aws:SourceIp":"10.0.0.0/24"}}}]}`,
+	) {
+		t.Fatal("policy pinned to a source IP range should not be treated as public")
 	}
 	if IsPolicyPublic(
 		`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`,
@@ -212,6 +203,7 @@ func TestPolicyPrincipalHelperBranches(t *testing.T) {
 }
 
 func TestLifecycleHelperBranches(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 
 	if lifecycleRuleMatchesObject(LifecycleRule{}, "k", nil) {
@@ -558,6 +550,7 @@ func TestLifecycleHelperBranches(t *testing.T) {
 }
 
 func TestApplyLifecycleAndMultipartLifecycleBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	base := time.Now().UTC()
 	now := base.Add(72 * time.Hour)
@@ -749,6 +742,7 @@ func TestApplyLifecycleAndMultipartLifecycleBranches(t *testing.T) {
 }
 
 func TestDirectLifecycleEdgeBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	now := time.Now().UTC()
 	bucket := &Bucket{LifecycleConfiguration: &LifecycleConfiguration{Rules: []LifecycleRule{}}}
@@ -762,6 +756,7 @@ func TestDirectLifecycleEdgeBranches(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadNormalizedPartsGuardBranch(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("multipart-normalize-guard"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

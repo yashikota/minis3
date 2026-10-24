@@ -12,6 +12,7 @@ import (
 )
 
 func TestHandleObjectAnonymousPutWithoutPolicyIsDenied(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-private"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -25,6 +26,7 @@ func TestHandleObjectAnonymousPutWithoutPolicyIsDenied(t *testing.T) {
 		bytes.NewReader([]byte("data")),
 	)
 	w := httptest.NewRecorder()
+	signTestRequest(h, req)
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
@@ -33,6 +35,7 @@ func TestHandleObjectAnonymousPutWithoutPolicyIsDenied(t *testing.T) {
 }
 
 func TestHandleObjectAnonymousPutAllowedOnPublicWriteBucket(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-public-write"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -51,6 +54,7 @@ func TestHandleObjectAnonymousPutAllowedOnPublicWriteBucket(t *testing.T) {
 		bytes.NewReader([]byte("data")),
 	)
 	w := httptest.NewRecorder()
+	signTestRequest(h, req)
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -62,6 +66,7 @@ func TestHandleObjectAnonymousPutAllowedOnPublicWriteBucket(t *testing.T) {
 }
 
 func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-acl"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -89,6 +94,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/bucket-acl/obj", nil)
 		w := httptest.NewRecorder()
+		signTestRequest(h, req)
 		h.ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {
@@ -108,6 +114,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/bucket-acl/obj", nil)
 		w := httptest.NewRecorder()
+		signTestRequest(h, req)
 		h.ServeHTTP(w, req)
 
 		if w.Code != http.StatusForbidden {
@@ -117,6 +124,7 @@ func TestHandleObjectAnonymousGetRespectsObjectACL(t *testing.T) {
 }
 
 func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-acl-roundtrip"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -153,6 +161,7 @@ func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
 	)
 	putReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	putRes := httptest.NewRecorder()
+	signTestRequest(h, putReq)
 	h.ServeHTTP(putRes, putReq)
 	if putRes.Code != http.StatusOK {
 		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
@@ -161,6 +170,7 @@ func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/bucket-acl-roundtrip?acl", nil)
 	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	getRes := httptest.NewRecorder()
+	signTestRequest(h, getReq)
 	h.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf(
@@ -188,6 +198,7 @@ func TestHandleBucketACLRoundTripWithXSITypeGrants(t *testing.T) {
 }
 
 func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-owner-read-test"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -209,6 +220,7 @@ func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
 	putReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
 	putReq.Header.Set("x-amz-acl", "bucket-owner-read")
 	putRes := httptest.NewRecorder()
+	signTestRequest(h, putReq)
 	h.ServeHTTP(putRes, putReq)
 	if putRes.Code != http.StatusOK {
 		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
@@ -217,6 +229,7 @@ func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
 	getACLReq := httptest.NewRequest(http.MethodGet, "/bucket-owner-read-test/foo?acl", nil)
 	getACLReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
 	getACLRes := httptest.NewRecorder()
+	signTestRequest(h, getACLReq)
 	h.ServeHTTP(getACLRes, getACLReq)
 	if getACLRes.Code != http.StatusOK {
 		t.Fatalf("unexpected GetObjectAcl status: got %d, want %d", getACLRes.Code, http.StatusOK)
@@ -232,6 +245,7 @@ func TestHandleObjectACLWithBucketOwnerReadForObjectWriter(t *testing.T) {
 }
 
 func TestExtractAccessKey(t *testing.T) {
+	t.Parallel()
 	t.Run("sigv4 header", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/bucket/obj", nil)
 		req.Header.Set(
@@ -275,6 +289,7 @@ func TestExtractAccessKey(t *testing.T) {
 }
 
 func TestCheckAccessPolicyEvaluation(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("policy-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -298,7 +313,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 	})
 
 	t.Run("explicit deny blocks even owner", func(t *testing.T) {
-		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-bucket/*"}]}`
+		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-bucket/*"}]}`
 		if err := b.PutBucketPolicy("policy-bucket", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
@@ -311,7 +326,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 	})
 
 	t.Run("allow permits non-owner", func(t *testing.T) {
-		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-bucket/*"}]}`
+		policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-bucket/*"}]}`
 		if err := b.PutBucketPolicy("policy-bucket", policy, false); err != nil {
 			t.Fatalf("PutBucketPolicy failed: %v", err)
 		}
@@ -325,6 +340,7 @@ func TestCheckAccessPolicyEvaluation(t *testing.T) {
 }
 
 func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("policy-context-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -332,7 +348,7 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 	b.SetBucketOwner("policy-context-bucket", "minis3-access-key")
 	h := New(b)
 
-	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-context-bucket/*","Condition":{"StringEquals":{"s3:ExistingObjectTag/Project":"alpha"}}}]}`
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy-context-bucket/*","Condition":{"StringEquals":{"s3:ExistingObjectTag/Project":"alpha"}}}]}`
 	if err := b.PutBucketPolicy("policy-context-bucket", policy, false); err != nil {
 		t.Fatalf("PutBucketPolicy failed: %v", err)
 	}
@@ -383,6 +399,7 @@ func TestCheckAccessWithContextUsesObjectTags(t *testing.T) {
 }
 
 func TestCheckAccessWithContextStringLikeIfExistsRefererMismatch(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("policy-referer-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -390,7 +407,7 @@ func TestCheckAccessWithContextStringLikeIfExistsRefererMismatch(t *testing.T) {
 	b.SetBucketOwner("policy-referer-bucket", "minis3-access-key")
 	h := New(b)
 
-	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Principal":"*","Resource":"arn:aws:s3:::policy-referer-bucket/*","Condition":{"StringLikeIfExists":{"aws:Referer":"http://www.example.com/*"}}}]}`
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Principal":"*","Resource":"arn:aws:s3:::policy-referer-bucket/*","Condition":{"StringLikeIfExists":{"aws:Referer":"http://www.example.com/*"}}}]}`
 	if err := b.PutBucketPolicy("policy-referer-bucket", policy, false); err != nil {
 		t.Fatalf("PutBucketPolicy failed: %v", err)
 	}
@@ -413,6 +430,7 @@ func TestCheckAccessWithContextStringLikeIfExistsRefererMismatch(t *testing.T) {
 }
 
 func TestCheckAccessBucketACLCanonicalUserPermissions(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-acl-canonical"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -479,6 +497,7 @@ func TestCheckAccessBucketACLCanonicalUserPermissions(t *testing.T) {
 }
 
 func TestHandlePutBucketACLRejectsUnknownCanonicalUser(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-acl-invalid-user"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -508,6 +527,7 @@ func TestHandlePutBucketACLRejectsUnknownCanonicalUser(t *testing.T) {
 	)
 	req.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	w := httptest.NewRecorder()
+	signTestRequest(h, req)
 	h.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -519,6 +539,7 @@ func TestHandlePutBucketACLRejectsUnknownCanonicalUser(t *testing.T) {
 }
 
 func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-object-grants"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -543,6 +564,7 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 		putReq.Header.Set(header, "id="+alt.ID)
 	}
 	putRes := httptest.NewRecorder()
+	signTestRequest(h, putReq)
 	h.ServeHTTP(putRes, putReq)
 	if putRes.Code != http.StatusOK {
 		t.Fatalf("unexpected PUT status: got %d, want %d", putRes.Code, http.StatusOK)
@@ -551,6 +573,7 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/bucket-object-grants/foo?acl", nil)
 	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	getRes := httptest.NewRecorder()
+	signTestRequest(h, getReq)
 	h.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("unexpected GetObjectAcl status: got %d, want %d", getRes.Code, http.StatusOK)
@@ -592,6 +615,7 @@ func TestHandlePutObjectAppliesGrantHeaders(t *testing.T) {
 }
 
 func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	h := New(b)
 	alt := backend.OwnerForAccessKey("minis3-alt-access-key")
@@ -608,6 +632,7 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 		createReq.Header.Set(header, "id="+alt.ID)
 	}
 	createRes := httptest.NewRecorder()
+	signTestRequest(h, createReq)
 	h.ServeHTTP(createRes, createReq)
 	if createRes.Code != http.StatusOK {
 		t.Fatalf("unexpected CreateBucket status: got %d, want %d", createRes.Code, http.StatusOK)
@@ -616,6 +641,7 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/bucket-create-grants?acl", nil)
 	getReq.Header.Set("Authorization", "AWS minis3-access-key:sig")
 	getRes := httptest.NewRecorder()
+	signTestRequest(h, getReq)
 	h.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("unexpected GetBucketAcl status: got %d, want %d", getRes.Code, http.StatusOK)
@@ -657,6 +683,7 @@ func TestHandleCreateBucketAppliesGrantHeaders(t *testing.T) {
 }
 
 func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	if err := b.CreateBucket("bucket-copy-acl"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -677,6 +704,7 @@ func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
 	copyReq.Header.Set("x-amz-copy-source", "/bucket-copy-acl/src")
 	copyReq.Header.Set("x-amz-acl", "public-read")
 	copyRes := httptest.NewRecorder()
+	signTestRequest(h, copyReq)
 	h.ServeHTTP(copyRes, copyReq)
 	if copyRes.Code != http.StatusOK {
 		t.Fatalf("unexpected CopyObject status: got %d, want %d", copyRes.Code, http.StatusOK)
@@ -685,6 +713,7 @@ func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
 	getReq := httptest.NewRequest(http.MethodGet, "/bucket-copy-acl/dst", nil)
 	getReq.Header.Set("Authorization", "AWS minis3-alt-access-key:sig")
 	getRes := httptest.NewRecorder()
+	signTestRequest(h, getReq)
 	h.ServeHTTP(getRes, getReq)
 	if getRes.Code != http.StatusOK {
 		t.Fatalf("unexpected GET status: got %d, want %d", getRes.Code, http.StatusOK)
@@ -692,6 +721,7 @@ func TestHandleCopyObjectAppliesCannedACL(t *testing.T) {
 }
 
 func TestExtractPolicyHeaders(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodPut, "/bucket/obj", nil)
 	req.Header.Set("x-amz-acl", "private")
 	req.Header.Set("x-amz-copy-source", "/bucket/src")
@@ -718,6 +748,7 @@ func TestExtractPolicyHeaders(t *testing.T) {
 }
 
 func TestHandleRequestOptionsPreflightValidation(t *testing.T) {
+	t.Parallel()
 	b := backend.New()
 	h := New(b)
 
@@ -750,6 +781,7 @@ func TestHandleRequestOptionsPreflightValidation(t *testing.T) {
 				req.Header.Set(k, v)
 			}
 			w := httptest.NewRecorder()
+			signTestRequest(h, req)
 			h.ServeHTTP(w, req)
 
 			if w.Code != http.StatusBadRequest {

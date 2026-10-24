@@ -24,6 +24,7 @@ func encodePolicyWithConditions(t *testing.T, expiration string, conditions []an
 }
 
 func TestValidatePostPolicyFieldRequirementMatrix(t *testing.T) {
+	t.Parallel()
 	expiration := time.Now().UTC().Add(10 * time.Minute).Format("2006-01-02T15:04:05Z")
 
 	type fieldCase struct {
@@ -141,6 +142,7 @@ func TestValidatePostPolicyFieldRequirementMatrix(t *testing.T) {
 }
 
 func TestValidatePostPolicyContentLengthRangeGrid(t *testing.T) {
+	t.Parallel()
 	expiration := time.Now().UTC().Add(10 * time.Minute).Format("2006-01-02T15:04:05Z")
 
 	for min := 0; min <= 4; min++ {
@@ -186,6 +188,7 @@ func TestValidatePostPolicyContentLengthRangeGrid(t *testing.T) {
 }
 
 func TestEffectiveACLForResponseMatrix(t *testing.T) {
+	t.Parallel()
 	owner := backend.OwnerForAccessKey("owner-ak")
 	other := backend.OwnerForAccessKey("other-ak")
 

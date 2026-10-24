@@ -7,6 +7,7 @@ import (
 )
 
 func TestRestoreObjectHappyPath(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("bucket"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -39,6 +40,7 @@ func TestRestoreObjectHappyPath(t *testing.T) {
 }
 
 func TestRestoreObjectDeepArchive(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("bucket"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -61,6 +63,7 @@ func TestRestoreObjectDeepArchive(t *testing.T) {
 }
 
 func TestRestoreObjectNonGlacierFails(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("bucket"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -78,6 +81,7 @@ func TestRestoreObjectNonGlacierFails(t *testing.T) {
 }
 
 func TestRestoreObjectBucketNotFound(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_, err := b.RestoreObject("no-bucket", "key", "", 1)
 	if !errors.Is(err, ErrBucketNotFound) {
@@ -86,6 +90,7 @@ func TestRestoreObjectBucketNotFound(t *testing.T) {
 }
 
 func TestRestoreObjectKeyNotFound(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("bucket"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -98,6 +103,7 @@ func TestRestoreObjectKeyNotFound(t *testing.T) {
 }
 
 func TestRestoreObjectVersionNotFound(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("bucket"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -117,6 +123,7 @@ func TestRestoreObjectVersionNotFound(t *testing.T) {
 }
 
 func TestRestoreObjectDeleteMarker(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("bucket"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock: %v", err)
@@ -143,6 +150,7 @@ func TestRestoreObjectDeleteMarker(t *testing.T) {
 }
 
 func TestRestoreObjectPermanent(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("bucket"); err != nil {
 		t.Fatalf("CreateBucket: %v", err)
@@ -182,6 +190,7 @@ func TestRestoreObjectPermanent(t *testing.T) {
 }
 
 func TestRestoreObjectWithVersionId(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucketWithObjectLock("bucket"); err != nil {
 		t.Fatalf("CreateBucketWithObjectLock: %v", err)
@@ -214,6 +223,7 @@ func TestRestoreObjectWithVersionId(t *testing.T) {
 }
 
 func TestIsArchivedStorageClass(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		sc   string
 		want bool

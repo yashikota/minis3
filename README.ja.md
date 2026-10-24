@@ -184,17 +184,20 @@ curl -i http://127.0.0.1:9191/health
 | `UploadPartCopy` | `CopySourceSSECustomerAlgorithm`, `CopySourceSSECustomerKey`, `CopySourceSSECustomerKeyMD5`, `SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5` |
 | `RestoreObject` | リストアは即時完了。`x-amz-restore` は常に `ongoing-request="false"` を返す |
 | `aws:kms` 指定の `PutObject` / `CopyObject` | `x-amz-server-side-encryption-aws-kms-key-id` は任意（省略時は AWS 同様デフォルトキー扱い）。ヘッダーは保存のみで実際の暗号化はしない |
-| `PutBucketPolicy` | `NotPrincipal` と `Allow` を組み合わせたステートメントは拒否される |
-| SigV2 署名付き URL | `Expires` の形式・期限のみ検証し、署名自体は検証しない（モック用途） |
+| `PutBucketPolicy` | ポリシーは厳格に検証され、未知の要素・アクション・条件演算子や不正な値は `MalformedPolicy` で拒否される。`Principal`/`NotPrincipal`（`AWS` のアカウント ID・アカウント root / ユーザー ARN、`CanonicalUser`、`Service`）、`Action`/`NotAction`、`Resource`/`NotResource`、全 IAM 条件演算子ファミリー（String・Numeric・Date・Bool・Binary・IpAddress・Arn・Null、`IfExists` と `ForAllValues`/`ForAnyValue` 付き）を評価する。`NotPrincipal` と `Allow` の組み合わせは拒否。`Resource` は省略可能で、`Sid` の重複は許容する（RGW と同じ） |
+| `GetObject` の `Range` | AWS と同じく 1 リクエスト 1 範囲のみ。複数範囲・逆順・不正な形式のヘッダーは無視して 200 でオブジェクト全体を返す。末尾より後から始まる範囲と `bytes=-0` は 416 `InvalidRange` |
+| MFA Delete | `x-amz-mfa` が `<シリアル> <コード>` 形式で存在することのみ検証し、コード自体は検証しない |
 
 ### 追加機能
 
 - **条件付きヘッダー:** GetObject/HeadObject で `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since`
-- **署名付き URL:** SigV4 presigned URL の検証。SigV2 は `Expires` の形式・期限のみ検証し、署名自体は検証しない（モック用途）
+- **署名付き URL:** SigV4 / SigV2 presigned URL の署名・アクセスキー・期限を検証
+- **SigV2 `Authorization` ヘッダー:** アクセスキー、HMAC-SHA1 署名、`Date`/`x-amz-date` の時刻ずれを検証
 - **AWS Chunked Encoding:** `aws-chunked` 転送エンコーディングの透過デコード
 - **レスポンスヘッダー上書き:** GetObject の `response-content-type`, `response-content-disposition` など
 - **コピー元条件ヘッダー:** `x-amz-copy-source-if-match`, `x-amz-copy-source-if-none-match`, `x-amz-copy-source-if-modified-since`, `x-amz-copy-source-if-unmodified-since`
-- **Object Lock 強制:** `x-amz-bypass-governance-retention` を含む削除時の保持/リーガルホールド検証
+- **認可:** 全ての操作を S3 API リファレンスどおりの IAM アクション（例: `DeleteBucketTagging` → `s3:PutBucketTagging`、`GetObject?versionId` → `s3:GetObjectVersion`）で、バケットポリシー・所有者・ACL（READ/WRITE/READ_ACP/WRITE_ACP は AWS の対応表どおりのアクションだけを許可）・Object Ownership・パブリックアクセスブロックに照らして認可。`DeleteObjects` はキーごとに認可し、拒否したキーを `AccessDenied` として返す。POST Object はフォームの署名者を認可。RGW と同じく、バケットのログ設定を変更できるのは所有者のみ
+- **Object Lock 強制:** `x-amz-bypass-governance-retention` を含む削除時の保持/リーガルホールド検証（`s3:BypassGovernanceRetention` 権限がある場合のみ有効）
 - **StorageClass:** PutObject, CopyObject, マルチパートアップロードでサポート
 - **SSE ヘッダー:** 保存・返却のみ実装（モック。実暗号化は未実装）
 - **リクエスト ID:** 全レスポンスに `x-amz-request-id`, `x-amz-id-2` を付与
@@ -212,8 +215,28 @@ curl -i http://127.0.0.1:9191/health
 - `task sdk-test`: `integration/sdk` の統合テスト
 - `task s3-test`: Docker で Ceph `s3-tests` を実行
 - `task test`: `unit-test`, `sdk-test`, `s3-test` を順に実行
+- `task formal`: `formal/tla` の TLA+ 仕様を [tlc-static](https://github.com/yashikota/tlc-static) の静的 TLC バイナリ（初回実行時に取得しチェックサムを検証。Java 不要）でモデル検査し、Go のモデルベーステストを実行
 - `task tobari`: tobari でスコープ別カバレッジを測定（`./tobari/tobari.json` に出力）
 - `task tobari-html`: `tobari/tobari.json` から HTML カバレッジレポートを生成
+
+### 形式検証
+
+`formal/tla` には TLA+ 仕様があり、TLC モデル検査器が小さな範囲で全状態を網羅的に探索します。
+
+- `S3Versioning.tla`: バージョニング状態（Unset → Enabled ⇄ Suspended）、null バージョンの置き換え、削除マーカー、完全削除、Object Lock とリーガルホールド。不変条件は「null バージョンは高々1つ」「バージョン ID の一意性」「新しい順の並び」「Object Lock ならバージョニング有効」など。時相性質は「一度バージョニングしたバケットは未設定に戻らない」「リーガルホールド中のバージョンは消えない」など。
+- `S3BucketPolicy.tla`: あらゆるステートメント形（Principal/NotPrincipal、Action/NotAction、Resource/NotResource、条件）でのバケットポリシー評価。実装と同じ形の1パス評価が宣言的な意味（明示的 Deny が優先、なければ Allow が1つでもあれば許可）と一致すること、ステートメントの順序に依存しないこと、Deny は覆らず Allow は単調であること、匿名ユーザーは `*` でしか一致しないこと、Not* 要素が正確な補集合であることを検査します。`S3BucketPolicyPairs.cfg` は2ステートメントの全組み合わせを探索します。
+- `S3Authorization.tla`: 1リクエストのアクセス判定。呼び出し元（所有者・他ユーザー・匿名）、アクションの種類、ポリシーの判定、公開ポリシー、ACL 付与、Object Ownership、パブリックアクセスブロックの全組み合わせ（4,800 リクエスト）について、実装の判定手順が宣言的な規則と一致すること、明示的 Deny が優先される（所有者のポリシー管理は例外）こと、BucketOwnerEnforced では ACL が無視されること、IgnorePublicAcls・RestrictPublicBuckets が仕様どおりに働くこと、条件不成立の Allow が ACL にフォールバックしないこと、設定系アクションには所有者かポリシーが必要なこと、付与と Allow が単調でブロックは制限にしか働かないことを検査します。
+- `S3PolicyCondition.tla`: 全ての一致関係に対する IAM 条件演算子の代数。通常の演算子では否定が補集合になること、`IfExists` はキーが無い場合だけを変えること、空集合での `ForAllValues`/`ForAnyValue`、集合修飾子と否定のド・モルガン双対性、値リストが論理和であること、`Null` が存在判定であることを検査します。
+- `S3ListPaging.tla`: ListObjects V1/V2、ListObjectVersions、ListMultipartUploads に共通する継続マーカーの規則（CommonPrefix も max-keys に数える、`(key, version)` の直後から再開）。全エントリがちょうど1回ずつ順番どおり返ること、IsTruncated が残りがあるときだけ立つこと、ページングが停止することを検査します。
+
+実装とモデルは、同じ規則を実際の backend に対して検査する Go テストで結び付けています。
+
+- `internal/backend/model_versioning_test.go`: バージョニング仕様の参照モデルを backend とロックステップで動かし、ランダムな操作列で比較（`TestVersioningModelRandomSequences`、`FuzzVersioningModel`）
+- `internal/backend/paging_property_test.go`: ページごとの一覧結果を独立したオラクルと比較（`TestListPagingProperties`、`FuzzListPagingProperties`）
+- `internal/handler/authorization_model_test.go`: 認可モデルの全リクエストを実際のバケットに構成し、ルーターの判定をモデルと比較（`TestAuthorizationModel`）。`internal/handler/operations_test.go` は全ルートの操作→IAM アクション表と、各操作がちょうどそのアクションで判定されることを検査（`TestOperationTable`、`TestOperationAuthorizationMatrix`）
+- `internal/backend/policy_model_test.go`: ポリシーと条件のモデルを Go に書き写し、全単一ステートメント・全ステートメント対・ランダムな長いポリシーについて実際のポリシー検証器・評価器と比較（`TestBucketPolicyModel*`、`TestPolicyConditionModel`）
+
+`task formal` で全部、`formal/tla/check.sh` で TLC のみを実行できます。
 
 ### `task s3-test` のマーカーポリシー
 

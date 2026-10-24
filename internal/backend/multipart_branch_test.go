@@ -7,6 +7,7 @@ import (
 )
 
 func TestMultipartCreateAndUploadPartBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	if _, err := b.CreateMultipartUpload(
@@ -84,6 +85,7 @@ func TestMultipartCreateAndUploadPartBranches(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("complete-branch-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -317,6 +319,7 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadDuplicatePartNumberUsesLastEntry(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("complete-duplicate-part"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -373,6 +376,7 @@ func TestCompleteMultipartUploadDuplicatePartNumberUsesLastEntry(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadDuplicatePartNumbersDeduplicated(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		partNums  []int
@@ -441,6 +445,7 @@ func TestCompleteMultipartUploadDuplicatePartNumbersDeduplicated(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadDefaultsAndLocks(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("complete-defaults"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -535,6 +540,7 @@ func TestCompleteMultipartUploadDefaultsAndLocks(t *testing.T) {
 }
 
 func TestMultipartListingAndCopyPartBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("list-multipart-branches"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -570,8 +576,21 @@ func TestMultipartListingAndCopyPartBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMultipartUploads failed: %v", err)
 	}
-	if len(page.CommonPrefixes) == 0 {
-		t.Fatalf("expected common prefixes with delimiter, got %+v", page)
+	// The marker lies inside the "a/dir/" prefix, so that prefix sorts at
+	// or before the marker and counts as already listed (same rule as
+	// ListObjects); returning it again would duplicate it across pages.
+	if len(page.CommonPrefixes) != 0 || len(page.Uploads) != 0 {
+		t.Fatalf("expected marker to skip the already-listed prefix, got %+v", page)
+	}
+	page, err = b.ListMultipartUploads("list-multipart-branches", ListMultipartUploadsOptions{
+		Prefix:    "a/",
+		Delimiter: "/",
+	})
+	if err != nil {
+		t.Fatalf("ListMultipartUploads failed: %v", err)
+	}
+	if len(page.CommonPrefixes) != 1 || page.CommonPrefixes[0] != "a/dir/" {
+		t.Fatalf("expected common prefix a/dir/ with delimiter, got %+v", page)
 	}
 
 	// Branch where marker key matches but upload id is not greater and thus skipped.
@@ -661,9 +680,9 @@ func TestMultipartListingAndCopyPartBranches(t *testing.T) {
 		-1,
 	); !errors.Is(
 		err,
-		ErrSourceObjectNotFound,
+		ErrVersionNotFound,
 	) {
-		t.Fatalf("expected ErrSourceObjectNotFound for missing src version, got %v", err)
+		t.Fatalf("expected ErrVersionNotFound for missing src version, got %v", err)
 	}
 	if _, err := b.CopyPart(
 		"src-copypart-branches",
@@ -757,6 +776,7 @@ func TestMultipartListingAndCopyPartBranches(t *testing.T) {
 }
 
 func TestListMultipartUploadsSameKeyMarkersAndSort(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("multipart-sort-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

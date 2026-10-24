@@ -7,6 +7,7 @@ import (
 )
 
 func TestObjectLockConfigAndBucketCreationBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	if err := b.PutObjectLockConfiguration("missing", &ObjectLockConfiguration{
@@ -87,6 +88,7 @@ func TestObjectLockConfigAndBucketCreationBranches(t *testing.T) {
 }
 
 func TestObjectRetentionBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	if err := b.PutObjectRetention("missing", "key", "", &ObjectLockRetention{}, false); !errors.Is(
@@ -291,6 +293,7 @@ func TestObjectRetentionBranches(t *testing.T) {
 }
 
 func TestObjectLegalHoldBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	if _, err := b.GetObjectLegalHold("missing", "key", ""); !errors.Is(err, ErrBucketNotFound) {

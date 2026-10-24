@@ -3,6 +3,7 @@
 ## Project Structure & Module Organization
 - `minis3.go` is the public entry point for starting the S3 test server.
 - `internal/backend/` contains S3 state and behavior (bucket/object/versioning/lifecycle logic).
+  Its methods return snapshots and copy what they are given (see `internal/backend/snapshot.go`); change stored state only through its methods, or `UpdateBucket`/`UpdateObject`/`UpdateUpload` for state no S3 operation sets.
 - `internal/handler/` contains HTTP/S3 request handling, auth checks, and response shaping.
 - Root tests (for example `minis3_test.go`) cover package behavior.
 - `integration/sdk/` is a separate Go module for AWS SDK integration tests.
@@ -30,6 +31,7 @@
 ## Testing Guidelines
 - Prefer table-driven tests for S3 edge cases and error mapping.
 - Use `t.Cleanup` for server/resource teardown to keep tests isolated.
+- Start top-level tests with `t.Parallel()`. Inject failures through the seams of the value under test (`h.hooks` on a `Handler`, `Minis3.listen`/`fatal`, `deps` in `cmd/minis3`), never through package-level variables; only tests that need `t.Setenv` or `os.Args` stay sequential.
 - Run `task test` before every PR; run `task s3-test` when protocol behavior changes.
 - Target `100%` coverage in touched packages and changed branches.
 - For every implementation change, add meaningful unit tests for happy paths, edge cases, and AWS-spec error behavior.

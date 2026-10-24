@@ -8,6 +8,7 @@ import (
 )
 
 func TestParseRangeHeaderZeroSize(t *testing.T) {
+	t.Parallel()
 	for _, header := range []string{"bytes=-1", "bytes=0-", "bytes=0-0"} {
 		if _, _, err := parseRangeHeader(header, 0); err == nil {
 			t.Fatalf("parseRangeHeader(%q, 0) should fail", header)
@@ -16,6 +17,7 @@ func TestParseRangeHeaderZeroSize(t *testing.T) {
 }
 
 func TestGetEmptyObjectRangeReturns416(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "range-zero")
 	mustPutObject(t, b, "range-zero", "empty", "")
@@ -36,6 +38,7 @@ func TestGetEmptyObjectRangeReturns416(t *testing.T) {
 }
 
 func TestDeleteNonexistentKeyWithVersionIdReturns204(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "delete-missing-versioned")
 	if err := b.SetBucketVersioning(

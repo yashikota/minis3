@@ -17,6 +17,7 @@ import (
 )
 
 func TestCoverageGapAuthAndService(t *testing.T) {
+	t.Parallel()
 	t.Run("verifyAuthorizationHeader v4 body read error", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "http://example.test/bucket/key", nil)
 		req.Host = "example.test"
@@ -56,16 +57,8 @@ func TestCoverageGapAuthAndService(t *testing.T) {
 }
 
 func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("bucket helper branch fill", func(t *testing.T) {
-		if !wildcardMatch("a**c", "ac") {
-			t.Fatal("a**c should match ac")
-		}
-		if !wildcardMatch("a*b*c", "axbyc") {
-			t.Fatal("a*b*c should match axbyc")
-		}
-		if wildcardMatch("a*b*c", "axc") {
-			t.Fatal("a*b*c should not match axc")
-		}
 		if got := qualifiedBucketARN("bucket", "obj"); got != "arn:aws:s3:::bucket/obj" {
 			t.Fatalf("qualifiedBucketARN(bucket,obj) = %q", got)
 		}
@@ -79,7 +72,12 @@ func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
 		if got := h.resolveLoggingTargetBucketName("tenant-access-key", " "); got != "" {
 			t.Fatalf("resolveLoggingTargetBucketName(empty) = %q, want empty", got)
 		}
-		mustPutBucketPolicy(t, b, "dst-h", `{"Statement":["not-map"]}`)
+		mustPutBucketPolicy(
+			t,
+			b,
+			"dst-h",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+		)
 		if ok, code := h.bucketLoggingTargetAllowed("src-h", "dst-h", "logs/"); ok ||
 			code != "AccessDenied" {
 			t.Fatalf("bucketLoggingTargetAllowed invalid statement elem = (%v,%q)", ok, code)
@@ -139,12 +137,12 @@ func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
 		requireStatus(t, wEnforcedACL, http.StatusBadRequest)
 		requireS3ErrorCode(t, wEnforcedACL, "AccessControlListNotSupported")
 
-		origCreateBucket := createBucketFn
-		createBucketFn = func(*Handler, string) error {
+		origCreateBucket := h.hooks.createBucket
+		h.hooks.createBucket = func(*Handler, string) error {
 			return nil
 		}
 		t.Cleanup(func() {
-			createBucketFn = origCreateBucket
+			h.hooks.createBucket = origCreateBucket
 		})
 		wLocationErr := doRequest(
 			h,
@@ -157,14 +155,14 @@ func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
 		)
 		requireStatus(t, wLocationErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wLocationErr, "InternalError")
-		createBucketFn = origCreateBucket
+		h.hooks.createBucket = origCreateBucket
 
-		origPutBucketACL := putBucketACLFn
-		putBucketACLFn = func(*Handler, string, *backend.AccessControlPolicy) error {
+		origPutBucketACL := h.hooks.putBucketACL
+		h.hooks.putBucketACL = func(*Handler, string, *backend.AccessControlPolicy) error {
 			return backend.ErrAccessControlListNotSupported
 		}
 		t.Cleanup(func() {
-			putBucketACLFn = origPutBucketACL
+			h.hooks.putBucketACL = origPutBucketACL
 		})
 
 		wCreateACL := doRequest(
@@ -216,11 +214,12 @@ func TestCoverageGapBucketHelpersAndCreateBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutBody, http.StatusBadRequest)
 		requireS3ErrorCode(t, wPutBody, "AccessControlListNotSupported")
-		putBucketACLFn = origPutBucketACL
+		h.hooks.putBucketACL = origPutBucketACL
 	})
 }
 
 func TestCoverageGapMultipartBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustPublicWriteBucket(t, b, "mp-gap", "minis3-access-key")
 
@@ -293,8 +292,8 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 	})
 
 	t.Run("upload part emits checksum headers from part info", func(t *testing.T) {
-		origUploadPart := uploadPartFn
-		uploadPartFn = func(*Handler, string, string, string, int, []byte) (*backend.PartInfo, error) {
+		origUploadPart := h.hooks.uploadPart
+		h.hooks.uploadPart = func(*Handler, string, string, string, int, []byte) (*backend.PartInfo, error) {
 			return &backend.PartInfo{
 				ETag:              "\"etag\"",
 				ChecksumCRC32:     "a",
@@ -305,7 +304,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 			}, nil
 		}
 		t.Cleanup(func() {
-			uploadPartFn = origUploadPart
+			h.hooks.uploadPart = origUploadPart
 		})
 		w := doRequest(
 			h,
@@ -313,7 +312,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPut,
 				"http://example.test/mp-gap/u?uploadId=fake&partNumber=1",
 				"p",
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, w, http.StatusOK)
@@ -326,7 +325,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 		if got := w.Header().Get("x-amz-checksum-sha256"); got != "e" {
 			t.Fatalf("x-amz-checksum-sha256 = %q, want e", got)
 		}
-		uploadPartFn = origUploadPart
+		h.hooks.uploadPart = origUploadPart
 	})
 
 	t.Run("complete multipart preconditions and checksum branches", func(t *testing.T) {
@@ -338,7 +337,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				"http://example.test/mp-gap/noobj?uploadId=u1",
 				completeBody,
-				map[string]string{"If-Match": `"etag"`},
+				map[string]string{
+					"Authorization": authHeader("minis3-access-key"),
+					"If-Match":      `"etag"`,
+				},
 			),
 		)
 		requireStatus(t, wIfMatchNoObj, http.StatusNotFound)
@@ -351,7 +353,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				"http://example.test/mp-gap/exists?uploadId=u2",
 				completeBody,
-				map[string]string{"If-Match": `"other"`},
+				map[string]string{
+					"Authorization": authHeader("minis3-access-key"),
+					"If-Match":      `"other"`,
+				},
 			),
 		)
 		requireStatus(t, wIfMatchMismatch, http.StatusPreconditionFailed)
@@ -367,7 +372,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				"http://example.test/mp-gap/exists?uploadId=u3",
 				completeBody,
-				map[string]string{"If-None-Match": obj.ETag},
+				map[string]string{
+					"Authorization": authHeader("minis3-access-key"),
+					"If-None-Match": obj.ETag,
+				},
 			),
 		)
 		requireStatus(t, wIfNoneMatch, http.StatusPreconditionFailed)
@@ -405,7 +413,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				fmt.Sprintf("http://example.test/mp-gap/checksum?uploadId=%s", uploadID),
 				`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>`+partETag+`</ETag><ChecksumSHA256>bad</ChecksumSHA256></Part></CompleteMultipartUpload>`,
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, wBadPartDigest, http.StatusBadRequest)
@@ -442,7 +450,10 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				fmt.Sprintf("http://example.test/mp-gap/checksum2?uploadId=%s", uploadID2),
 				`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>`+partETag2+`</ETag></Part></CompleteMultipartUpload>`,
-				map[string]string{"x-amz-checksum-sha256": "wrong"},
+				map[string]string{
+					"Authorization":         authHeader("minis3-access-key"),
+					"x-amz-checksum-sha256": "wrong",
+				},
 			),
 		)
 		requireStatus(t, wHeaderBadDigest, http.StatusBadRequest)
@@ -464,7 +475,7 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				fmt.Sprintf("http://example.test/mp-gap/missing-part?uploadId=%s", uploadID3),
 				`<CompleteMultipartUpload><Part><PartNumber>2</PartNumber><ETag>"x"</ETag></Part></CompleteMultipartUpload>`,
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, wMissingPart, http.StatusBadRequest)
@@ -493,8 +504,11 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 			),
 		)
 		requireStatus(t, wPart4, http.StatusOK)
-		if up, ok := b.GetUpload(uploadID4); ok {
+		if err := b.UpdateUpload(uploadID4, func(up *backend.MultipartUpload) error {
 			up.ChecksumAlgorithm = "UNKNOWN"
+			return nil
+		}); err != nil {
+			t.Fatalf("UpdateUpload: %v", err)
 		}
 		partETag4 := wPart4.Header().Get("ETag")
 		wUnknownAlgo := doRequest(
@@ -503,17 +517,17 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				fmt.Sprintf("http://example.test/mp-gap/unknown-algo?uploadId=%s", uploadID4),
 				`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>`+partETag4+`</ETag></Part></CompleteMultipartUpload>`,
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, wUnknownAlgo, http.StatusOK)
 
-		origComplete := completeMultipartUploadFn
-		completeMultipartUploadFn = func(*Handler, string, string, string, []backend.CompletePart) (*backend.Object, error) {
+		origComplete := h.hooks.completeMultipartUpload
+		h.hooks.completeMultipartUpload = func(*Handler, string, string, string, []backend.CompletePart) (*backend.Object, error) {
 			return nil, backend.ErrBadDigest
 		}
 		t.Cleanup(func() {
-			completeMultipartUploadFn = origComplete
+			h.hooks.completeMultipartUpload = origComplete
 		})
 		wCompleteBadDigest := doRequest(
 			h,
@@ -521,16 +535,17 @@ func TestCoverageGapMultipartBranches(t *testing.T) {
 				http.MethodPost,
 				"http://example.test/mp-gap/complete-hook?uploadId=u-hook",
 				completeBody,
-				nil,
+				map[string]string{"Authorization": authHeader("minis3-access-key")},
 			),
 		)
 		requireStatus(t, wCompleteBadDigest, http.StatusBadRequest)
 		requireS3ErrorCode(t, wCompleteBadDigest, "BadDigest")
-		completeMultipartUploadFn = origComplete
+		h.hooks.completeMultipartUpload = origComplete
 	})
 }
 
 func TestCoverageGapObjectBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("checksum response helpers and torrent", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		setChecksumResponseHeaders(w, &backend.Object{
@@ -615,12 +630,12 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutOK, http.StatusOK)
 
-		origPutObject := putObjectFn
-		putObjectFn = func(*Handler, string, string, []byte, backend.PutObjectOptions) (*backend.Object, error) {
+		origPutObject := h.hooks.putObject
+		h.hooks.putObject = func(*Handler, string, string, []byte, backend.PutObjectOptions) (*backend.Object, error) {
 			return nil, backend.ErrBadDigest
 		}
 		t.Cleanup(func() {
-			putObjectFn = origPutObject
+			h.hooks.putObject = origPutObject
 		})
 		wPutBadDigest := doRequest(
 			h,
@@ -633,7 +648,7 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		)
 		requireStatus(t, wPutBadDigest, http.StatusBadRequest)
 		requireS3ErrorCode(t, wPutBadDigest, "BadDigest")
-		putObjectFn = origPutObject
+		h.hooks.putObject = origPutObject
 
 		mustCreateBucket(t, b, "src-copy-gap")
 		mustPutObject(t, b, "src-copy-gap", "k", "v")
@@ -687,12 +702,12 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls dst writer failed: %v", err)
 		}
-		origPutObjectACL := putObjectACLFn
-		putObjectACLFn = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
+		origPutObjectACL := h.hooks.putObjectACL
+		h.hooks.putObjectACL = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
 			return backend.ErrAccessControlListNotSupported
 		}
 		t.Cleanup(func() {
-			putObjectACLFn = origPutObjectACL
+			h.hooks.putObjectACL = origPutObjectACL
 		})
 		wCopyACLFail := doRequest(
 			h,
@@ -708,7 +723,7 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 		)
 		requireStatus(t, wCopyACLFail, http.StatusBadRequest)
 		requireS3ErrorCode(t, wCopyACLFail, "AccessControlListNotSupported")
-		putObjectACLFn = origPutObjectACL
+		h.hooks.putObjectACL = origPutObjectACL
 
 		rec := httptest.NewRecorder()
 		h.writePutObjectACLError(rec, backend.ErrAccessControlListNotSupported)
@@ -773,19 +788,17 @@ func TestCoverageGapObjectBranches(t *testing.T) {
 			)
 		}
 
-		obj, err := b.GetObject("obj-attrs-gap", "k")
-		if err != nil {
-			t.Fatalf("GetObject failed: %v", err)
-		}
-		obj.Parts = []backend.ObjectPart{{
-			PartNumber:        1,
-			Size:              10,
-			ChecksumCRC32:     "c1",
-			ChecksumCRC32C:    "c2",
-			ChecksumCRC64NVME: "c3",
-			ChecksumSHA1:      "c4",
-			ChecksumSHA256:    "c5",
-		}}
+		mustUpdateObject(t, b, "obj-attrs-gap", "k", func(obj *backend.Object) {
+			obj.Parts = []backend.ObjectPart{{
+				PartNumber:        1,
+				Size:              10,
+				ChecksumCRC32:     "c1",
+				ChecksumCRC32C:    "c2",
+				ChecksumCRC64NVME: "c3",
+				ChecksumSHA1:      "c4",
+				ChecksumSHA256:    "c5",
+			}}
+		})
 
 		wAttrsHeaderFallback := doRequest(
 			h,
@@ -839,17 +852,18 @@ func pendingBatchCount(h *Handler) int {
 }
 
 func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
+	t.Parallel()
 	t.Run("service iam fallback and marshal branches", func(t *testing.T) {
 		h, _ := newTestHandler(t)
 
-		origOwner := ownerForAccessKeyFn
-		origMarshal := xmlMarshalFn
+		origOwner := h.hooks.ownerForAccessKey
+		origMarshal := h.hooks.xmlMarshal
 		t.Cleanup(func() {
-			ownerForAccessKeyFn = origOwner
-			xmlMarshalFn = origMarshal
+			h.hooks.ownerForAccessKey = origOwner
+			h.hooks.xmlMarshal = origMarshal
 		})
 
-		ownerForAccessKeyFn = func(string) *backend.Owner { return nil }
+		h.hooks.ownerForAccessKey = func(string) *backend.Owner { return nil }
 		wNilOwner := doRequest(
 			h,
 			newRequest(http.MethodGet, "http://example.test/?Action=GetUser", "", map[string]string{
@@ -858,7 +872,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wNilOwner, http.StatusOK)
 
-		ownerForAccessKeyFn = func(string) *backend.Owner {
+		h.hooks.ownerForAccessKey = func(string) *backend.Owner {
 			return &backend.Owner{ID: "id-only", DisplayName: ""}
 		}
 		wEmptyName := doRequest(
@@ -872,8 +886,8 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			t.Fatalf("expected fallback username in body: %s", wEmptyName.Body.String())
 		}
 
-		ownerForAccessKeyFn = origOwner
-		xmlMarshalFn = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
+		h.hooks.ownerForAccessKey = origOwner
+		h.hooks.xmlMarshal = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
 		wMarshalErr := doRequest(
 			h,
 			newRequest(http.MethodGet, "http://example.test/?Action=GetUser", "", map[string]string{
@@ -901,26 +915,26 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			allowLoggingPolicy("src-h2", "dst-h2", "logs/", owner.ID),
 		)
 
-		origOwner := ownerForAccessKeyFn
-		origGetBucketForLogging := getBucketForLoggingFn
-		origRequestURI := requestURIForLoggingFn
-		origGetBucketLogging := getBucketLoggingFn
-		origGetBucketACL := getBucketACLForAccessCheckFn
+		origOwner := h.hooks.ownerForAccessKey
+		origGetBucketForLogging := h.hooks.getBucketForLogging
+		origRequestURI := h.hooks.requestURIForLogging
+		origGetBucketLogging := h.hooks.getBucketLogging
+		origGetBucketACL := h.hooks.getBucketACLForAccessCheck
 		t.Cleanup(func() {
-			ownerForAccessKeyFn = origOwner
-			getBucketForLoggingFn = origGetBucketForLogging
-			requestURIForLoggingFn = origRequestURI
-			getBucketLoggingFn = origGetBucketLogging
-			getBucketACLForAccessCheckFn = origGetBucketACL
+			h.hooks.ownerForAccessKey = origOwner
+			h.hooks.getBucketForLogging = origGetBucketForLogging
+			h.hooks.requestURIForLogging = origRequestURI
+			h.hooks.getBucketLogging = origGetBucketLogging
+			h.hooks.getBucketACLForAccessCheck = origGetBucketACL
 		})
 
-		ownerForAccessKeyFn = func(string) *backend.Owner { return nil }
-		if got := tenantFromAccessKey("tenant-access-key"); got != "" {
+		h.hooks.ownerForAccessKey = func(string) *backend.Owner { return nil }
+		if got := h.tenantFromAccessKey("tenant-access-key"); got != "" {
 			t.Fatalf("tenantFromAccessKey with nil owner = %q, want empty", got)
 		}
-		ownerForAccessKeyFn = origOwner
+		h.hooks.ownerForAccessKey = origOwner
 
-		getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
+		h.hooks.getBucketLogging = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 			return &backend.BucketLoggingStatus{
 				LoggingEnabled: &backend.LoggingEnabled{
 					TargetBucket: "dst-h2",
@@ -928,17 +942,17 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 				},
 			}, nil
 		}
-		getBucketForLoggingFn = func(*Handler, string) (*backend.Bucket, bool) {
+		h.hooks.getBucketForLogging = func(*Handler, string) (*backend.Bucket, bool) {
 			return nil, false
 		}
 		reqMissingSrc := newRequest(http.MethodGet, "http://example.test/src-h2/k", "", nil)
 		h.emitServerAccessLog(reqMissingSrc, http.StatusOK, 1, "r", "h")
-		getBucketForLoggingFn = origGetBucketForLogging
+		h.hooks.getBucketForLogging = origGetBucketForLogging
 		if got := pendingBatchCount(h); got != 0 {
 			t.Fatalf("missing source bucket buffered %d batches, want 0", got)
 		}
 
-		getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
+		h.hooks.getBucketLogging = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 			return &backend.BucketLoggingStatus{
 				LoggingEnabled: &backend.LoggingEnabled{
 					TargetBucket: "",
@@ -952,7 +966,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			t.Fatalf("empty target bucket buffered %d batches, want 0", got)
 		}
 
-		getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
+		h.hooks.getBucketLogging = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 			return &backend.BucketLoggingStatus{
 				LoggingEnabled: &backend.LoggingEnabled{
 					TargetBucket: "dst-h2",
@@ -960,7 +974,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 				},
 			}, nil
 		}
-		requestURIForLoggingFn = func(*http.Request) string { return "" }
+		h.hooks.requestURIForLogging = func(*http.Request) string { return "" }
 		reqEmit := newRequest(
 			http.MethodGet,
 			"http://example.test/src-h2/k?X-Amz-Signature=s",
@@ -969,12 +983,12 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		reqEmit.RemoteAddr = ""
 		h.emitServerAccessLog(reqEmit, http.StatusOK, 1, "r", "h")
-		requestURIForLoggingFn = origRequestURI
+		h.hooks.requestURIForLogging = origRequestURI
 		if got := pendingBatchCount(h); got != 1 {
 			t.Fatalf("empty request URI buffered %d batches, want 1", got)
 		}
 
-		getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
+		h.hooks.getBucketLogging = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 			return &backend.BucketLoggingStatus{
 				LoggingEnabled: &backend.LoggingEnabled{
 					TargetBucket: "dst-h2",
@@ -990,7 +1004,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		reqPartitioned := newRequest(http.MethodGet, "http://example.test/src-h2/k", "", nil)
 		reqPartitioned.RemoteAddr = ""
 		h.emitServerAccessLog(reqPartitioned, http.StatusOK, 1, "r", "h")
-		getBucketLoggingFn = origGetBucketLogging
+		h.hooks.getBucketLogging = origGetBucketLogging
 		if got := pendingBatchCount(h); got != 2 {
 			t.Fatalf("partitioned prefix buffered %d batches total, want 2", got)
 		}
@@ -1060,7 +1074,12 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		); got != "-" {
 			t.Fatalf("loggingACLRequired policy allow = %q, want -", got)
 		}
-		mustPutBucketPolicy(t, b, "src-h2", `{"Version":"2012-10-17","Statement":[]}`)
+		mustPutBucketPolicy(
+			t,
+			b,
+			"src-h2",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"s3:GetObject","Resource":"*"}]}`,
+		)
 		if got := h.loggingACLRequired(
 			newRequest(http.MethodGet, "http://example.test/src-h2/k", "", map[string]string{
 				"Authorization": authHeader("root-access-key"),
@@ -1071,7 +1090,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			t.Fatalf("loggingACLRequired non-owner fallback = %q, want -", got)
 		}
 
-		getBucketACLForAccessCheckFn = func(*Handler, string) (*backend.AccessControlPolicy, error) {
+		h.hooks.getBucketACLForAccessCheck = func(*Handler, string) (*backend.AccessControlPolicy, error) {
 			return nil, errors.New("acl read failed")
 		}
 		if ok := h.checkAccess(
@@ -1094,7 +1113,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		); ok {
 			t.Fatal("checkAccess should fail when bucket ACL read fails (put)")
 		}
-		getBucketACLForAccessCheckFn = origGetBucketACL
+		h.hooks.getBucketACLForAccessCheck = origGetBucketACL
 
 		if err := b.PutBucketOwnershipControls("src-h2", &backend.OwnershipControls{
 			Rules: []backend.OwnershipControlsRule{
@@ -1151,12 +1170,12 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wCreateWithOwnership, http.StatusOK)
 
-		origPutOwnership := putBucketOwnershipControlsFn
-		putBucketOwnershipControlsFn = func(*Handler, string, *backend.OwnershipControls) error {
+		origPutOwnership := h.hooks.putBucketOwnershipControls
+		h.hooks.putBucketOwnershipControls = func(*Handler, string, *backend.OwnershipControls) error {
 			return errors.New("create ownership boom")
 		}
 		t.Cleanup(func() {
-			putBucketOwnershipControlsFn = origPutOwnership
+			h.hooks.putBucketOwnershipControls = origPutOwnership
 		})
 		wCreateWithOwnershipErr := doRequest(
 			h,
@@ -1172,7 +1191,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wCreateWithOwnershipErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wCreateWithOwnershipErr, "InternalError")
-		putBucketOwnershipControlsFn = origPutOwnership
+		h.hooks.putBucketOwnershipControls = origPutOwnership
 
 		wNoBucketPutOwnership := doRequest(
 			h,
@@ -1198,25 +1217,25 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wNoBucketPutLogging, http.StatusNotFound)
 		requireS3ErrorCode(t, wNoBucketPutLogging, "NoSuchBucket")
 
-		origGetOwnership := getBucketOwnershipControlsFn
-		origPutOwnership = putBucketOwnershipControlsFn
-		origDeleteOwnership := deleteBucketOwnershipControlsFn
-		origGetPayment := getBucketRequestPaymentFn
-		origPutPayment := putBucketRequestPaymentFn
-		origGetLogging := getBucketLoggingFn
-		origPutLogging := putBucketLoggingFn
-		origDeleteLogging := deleteBucketLoggingFn
-		origMarshal := xmlMarshalFn
+		origGetOwnership := h.hooks.getBucketOwnershipControls
+		origPutOwnership = h.hooks.putBucketOwnershipControls
+		origDeleteOwnership := h.hooks.deleteBucketOwnershipControls
+		origGetPayment := h.hooks.getBucketRequestPayment
+		origPutPayment := h.hooks.putBucketRequestPayment
+		origGetLogging := h.hooks.getBucketLogging
+		origPutLogging := h.hooks.putBucketLogging
+		origDeleteLogging := h.hooks.deleteBucketLogging
+		origMarshal := h.hooks.xmlMarshal
 		t.Cleanup(func() {
-			getBucketOwnershipControlsFn = origGetOwnership
-			putBucketOwnershipControlsFn = origPutOwnership
-			deleteBucketOwnershipControlsFn = origDeleteOwnership
-			getBucketRequestPaymentFn = origGetPayment
-			putBucketRequestPaymentFn = origPutPayment
-			getBucketLoggingFn = origGetLogging
-			putBucketLoggingFn = origPutLogging
-			deleteBucketLoggingFn = origDeleteLogging
-			xmlMarshalFn = origMarshal
+			h.hooks.getBucketOwnershipControls = origGetOwnership
+			h.hooks.putBucketOwnershipControls = origPutOwnership
+			h.hooks.deleteBucketOwnershipControls = origDeleteOwnership
+			h.hooks.getBucketRequestPayment = origGetPayment
+			h.hooks.putBucketRequestPayment = origPutPayment
+			h.hooks.getBucketLogging = origGetLogging
+			h.hooks.putBucketLogging = origPutLogging
+			h.hooks.deleteBucketLogging = origDeleteLogging
+			h.hooks.xmlMarshal = origMarshal
 		})
 
 		if err := b.PutBucketOwnershipControls("ctl", &backend.OwnershipControls{
@@ -1227,7 +1246,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			t.Fatalf("PutBucketOwnershipControls setup failed: %v", err)
 		}
 
-		getBucketOwnershipControlsFn = func(*Handler, string) (*backend.OwnershipControls, error) {
+		h.hooks.getBucketOwnershipControls = func(*Handler, string) (*backend.OwnershipControls, error) {
 			return nil, errors.New("get ownership boom")
 		}
 		wGetOwnershipErr := doRequest(
@@ -1241,9 +1260,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wGetOwnershipErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetOwnershipErr, "InternalError")
-		getBucketOwnershipControlsFn = origGetOwnership
+		h.hooks.getBucketOwnershipControls = origGetOwnership
 
-		xmlMarshalFn = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
+		h.hooks.xmlMarshal = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
 		wGetOwnershipMarshal := doRequest(
 			h,
 			newRequest(
@@ -1254,9 +1273,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			),
 		)
 		requireS3ErrorCode(t, wGetOwnershipMarshal, "InternalError")
-		xmlMarshalFn = origMarshal
+		h.hooks.xmlMarshal = origMarshal
 
-		putBucketOwnershipControlsFn = func(*Handler, string, *backend.OwnershipControls) error {
+		h.hooks.putBucketOwnershipControls = func(*Handler, string, *backend.OwnershipControls) error {
 			return errors.New("put ownership boom")
 		}
 		wPutOwnershipErr := doRequest(
@@ -1270,9 +1289,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wPutOwnershipErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutOwnershipErr, "InternalError")
-		putBucketOwnershipControlsFn = origPutOwnership
+		h.hooks.putBucketOwnershipControls = origPutOwnership
 
-		deleteBucketOwnershipControlsFn = func(*Handler, string) error {
+		h.hooks.deleteBucketOwnershipControls = func(*Handler, string) error {
 			return errors.New("delete ownership boom")
 		}
 		wDeleteOwnershipErr := doRequest(
@@ -1286,9 +1305,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wDeleteOwnershipErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wDeleteOwnershipErr, "InternalError")
-		deleteBucketOwnershipControlsFn = origDeleteOwnership
+		h.hooks.deleteBucketOwnershipControls = origDeleteOwnership
 
-		getBucketRequestPaymentFn = func(*Handler, string) (*backend.RequestPaymentConfiguration, error) {
+		h.hooks.getBucketRequestPayment = func(*Handler, string) (*backend.RequestPaymentConfiguration, error) {
 			return nil, errors.New("get payment boom")
 		}
 		wGetPaymentErr := doRequest(
@@ -1302,9 +1321,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wGetPaymentErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetPaymentErr, "InternalError")
-		getBucketRequestPaymentFn = origGetPayment
+		h.hooks.getBucketRequestPayment = origGetPayment
 
-		xmlMarshalFn = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
+		h.hooks.xmlMarshal = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
 		wGetPaymentMarshal := doRequest(
 			h,
 			newRequest(
@@ -1315,9 +1334,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			),
 		)
 		requireS3ErrorCode(t, wGetPaymentMarshal, "InternalError")
-		xmlMarshalFn = origMarshal
+		h.hooks.xmlMarshal = origMarshal
 
-		putBucketRequestPaymentFn = func(*Handler, string, *backend.RequestPaymentConfiguration) error {
+		h.hooks.putBucketRequestPayment = func(*Handler, string, *backend.RequestPaymentConfiguration) error {
 			return errors.New("put payment boom")
 		}
 		wPutPaymentErr := doRequest(
@@ -1331,9 +1350,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wPutPaymentErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutPaymentErr, "InternalError")
-		putBucketRequestPaymentFn = origPutPayment
+		h.hooks.putBucketRequestPayment = origPutPayment
 
-		getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
+		h.hooks.getBucketLogging = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 			return nil, errors.New("get logging boom")
 		}
 		wGetLoggingErr := doRequest(
@@ -1347,9 +1366,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wGetLoggingErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wGetLoggingErr, "InternalError")
-		getBucketLoggingFn = origGetLogging
+		h.hooks.getBucketLogging = origGetLogging
 
-		xmlMarshalFn = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
+		h.hooks.xmlMarshal = func(any) ([]byte, error) { return nil, errors.New("marshal boom") }
 		wGetLoggingMarshal := doRequest(
 			h,
 			newRequest(
@@ -1360,9 +1379,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			),
 		)
 		requireS3ErrorCode(t, wGetLoggingMarshal, "InternalError")
-		xmlMarshalFn = origMarshal
+		h.hooks.xmlMarshal = origMarshal
 
-		putBucketLoggingFn = func(*Handler, string, *backend.BucketLoggingStatus) error {
+		h.hooks.putBucketLogging = func(*Handler, string, *backend.BucketLoggingStatus) error {
 			return backend.ErrBucketNotFound
 		}
 		wPutLoggingNoBucket := doRequest(
@@ -1377,7 +1396,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wPutLoggingNoBucket, http.StatusNotFound)
 		requireS3ErrorCode(t, wPutLoggingNoBucket, "NoSuchBucket")
 
-		putBucketLoggingFn = func(*Handler, string, *backend.BucketLoggingStatus) error {
+		h.hooks.putBucketLogging = func(*Handler, string, *backend.BucketLoggingStatus) error {
 			return backend.ErrObjectNotFound
 		}
 		wPutLoggingNoKey := doRequest(
@@ -1392,7 +1411,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wPutLoggingNoKey, http.StatusNotFound)
 		requireS3ErrorCode(t, wPutLoggingNoKey, "NoSuchKey")
 
-		putBucketLoggingFn = func(*Handler, string, *backend.BucketLoggingStatus) error {
+		h.hooks.putBucketLogging = func(*Handler, string, *backend.BucketLoggingStatus) error {
 			return errors.New("put logging boom")
 		}
 		wPutLoggingErr := doRequest(
@@ -1406,9 +1425,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wPutLoggingErr, http.StatusInternalServerError)
 		requireS3ErrorCode(t, wPutLoggingErr, "InternalError")
-		putBucketLoggingFn = origPutLogging
+		h.hooks.putBucketLogging = origPutLogging
 
-		deleteBucketLoggingFn = func(*Handler, string) error {
+		h.hooks.deleteBucketLogging = func(*Handler, string) error {
 			return errors.New("delete logging boom")
 		}
 		wDeleteLoggingErr := doRequest(
@@ -1428,14 +1447,22 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		h, b := newTestHandler(t)
 		mustCreateBucket(t, b, "post-gap")
 		b.SetBucketOwner("post-gap", "minis3-access-key")
+		// Anonymous form uploads need s3:PutObject.
+		if err := b.PutBucketPolicy(
+			"post-gap",
+			`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:PutObject","Resource":"arn:aws:s3:::post-gap/*"}]}`,
+			false,
+		); err != nil {
+			t.Fatalf("PutBucketPolicy post-gap failed: %v", err)
+		}
 
-		origOwner := ownerForAccessKeyFn
-		origPostPutACL := postObjectPutACLFn
-		origPutObjectACL := putObjectACLFn
+		origOwner := h.hooks.ownerForAccessKey
+		origPostPutACL := h.hooks.postObjectPutACL
+		origPutObjectACL := h.hooks.putObjectACL
 		t.Cleanup(func() {
-			ownerForAccessKeyFn = origOwner
-			postObjectPutACLFn = origPostPutACL
-			putObjectACLFn = origPutObjectACL
+			h.hooks.ownerForAccessKey = origOwner
+			h.hooks.postObjectPutACL = origPostPutACL
+			h.hooks.putObjectACL = origPutObjectACL
 		})
 
 		if err := b.PutBucketOwnershipControls("post-gap", &backend.OwnershipControls{
@@ -1493,7 +1520,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls writer failed: %v", err)
 		}
-		postObjectPutACLFn = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
+		h.hooks.postObjectPutACL = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
 			return backend.ErrAccessControlListNotSupported
 		}
 		reqPostACLPutFail := makeMultipartReqWithFilename(
@@ -1507,9 +1534,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		wPostACLPutFail := doRequest(h, reqPostACLPutFail)
 		requireStatus(t, wPostACLPutFail, http.StatusBadRequest)
 		requireS3ErrorCode(t, wPostACLPutFail, "AccessControlListNotSupported")
-		postObjectPutACLFn = origPostPutACL
+		h.hooks.postObjectPutACL = origPostPutACL
 
-		ownerForAccessKeyFn = func(string) *backend.Owner { return nil }
+		h.hooks.ownerForAccessKey = func(string) *backend.Owner { return nil }
 		reqPostNilOwner := makeMultipartReqWithFilename(
 			t,
 			"http://example.test/post-gap",
@@ -1520,7 +1547,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		wPostNilOwner := doRequest(h, reqPostNilOwner)
 		requireStatus(t, wPostNilOwner, http.StatusNoContent)
-		ownerForAccessKeyFn = origOwner
+		h.hooks.ownerForAccessKey = origOwner
 
 		// Multipart remaining lines: BOE owner assignment and FULL_OBJECT checksum finalization.
 		mustPublicWriteBucket(t, b, "mp-left", "minis3-access-key")
@@ -1619,7 +1646,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("PutBucketOwnershipControls obj-left writer failed: %v", err)
 		}
-		ownerForAccessKeyFn = func(string) *backend.Owner { return nil }
+		h.hooks.ownerForAccessKey = func(string) *backend.Owner { return nil }
 		wPutNilOwner := doRequest(
 			h,
 			newRequest(
@@ -1630,9 +1657,9 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 			),
 		)
 		requireStatus(t, wPutNilOwner, http.StatusOK)
-		ownerForAccessKeyFn = origOwner
+		h.hooks.ownerForAccessKey = origOwner
 
-		putObjectACLFn = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
+		h.hooks.putObjectACL = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
 			return backend.ErrAccessControlListNotSupported
 		}
 		wPutACLFail := doRequest(
@@ -1646,7 +1673,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		)
 		requireStatus(t, wPutACLFail, http.StatusBadRequest)
 		requireS3ErrorCode(t, wPutACLFail, "AccessControlListNotSupported")
-		putObjectACLFn = origPutObjectACL
+		h.hooks.putObjectACL = origPutObjectACL
 
 		mustPutObject(t, b, "obj-left", "part", "abc")
 		wBadPartNumber := doRequest(
@@ -1776,25 +1803,23 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 		requireStatus(t, wAttrsDenied, http.StatusForbidden)
 		requireS3ErrorCode(t, wAttrsDenied, "AccessDenied")
 
-		obj, err := b.GetObject("obj-left", "part")
-		if err != nil {
-			t.Fatalf("GetObject part failed: %v", err)
-		}
-		obj.Parts = []backend.ObjectPart{
-			{
-				PartNumber:        1,
-				Size:              10,
-				ChecksumCRC32:     "a",
-				ChecksumCRC32C:    "b",
-				ChecksumCRC64NVME: "c",
-				ChecksumSHA1:      "d",
-				ChecksumSHA256:    "e",
-			},
-			{
-				PartNumber: 2,
-				Size:       1,
-			},
-		}
+		mustUpdateObject(t, b, "obj-left", "part", func(obj *backend.Object) {
+			obj.Parts = []backend.ObjectPart{
+				{
+					PartNumber:        1,
+					Size:              10,
+					ChecksumCRC32:     "a",
+					ChecksumCRC32C:    "b",
+					ChecksumCRC64NVME: "c",
+					ChecksumSHA1:      "d",
+					ChecksumSHA256:    "e",
+				},
+				{
+					PartNumber: 2,
+					Size:       1,
+				},
+			}
+		})
 		wAttrsParts := doRequest(
 			h,
 			newRequest(
@@ -1818,6 +1843,7 @@ func TestCoverageGapRemainingServiceHandlerBucketMultipartObject(t *testing.T) {
 }
 
 func TestCoverageGapFlushLogPutPath(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-flush-gap")
 	b.SetBucketOwner("obj-flush-gap", "minis3-access-key")
@@ -1846,6 +1872,7 @@ func TestCoverageGapFlushLogPutPath(t *testing.T) {
 }
 
 func TestCoverageGapEmitRequestURIFallbackBranch(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "uri-gap")
 	mustCreateBucket(t, b, "uri-gap-target")
@@ -1863,14 +1890,14 @@ func TestCoverageGapEmitRequestURIFallbackBranch(t *testing.T) {
 		allowLoggingPolicy("uri-gap", "uri-gap-target", "logs/", owner.ID),
 	)
 
-	origGetLogging := getBucketLoggingFn
-	origReqURI := requestURIForLoggingFn
+	origGetLogging := h.hooks.getBucketLogging
+	origReqURI := h.hooks.requestURIForLogging
 	t.Cleanup(func() {
-		getBucketLoggingFn = origGetLogging
-		requestURIForLoggingFn = origReqURI
+		h.hooks.getBucketLogging = origGetLogging
+		h.hooks.requestURIForLogging = origReqURI
 	})
 
-	getBucketLoggingFn = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
+	h.hooks.getBucketLogging = func(*Handler, string) (*backend.BucketLoggingStatus, error) {
 		return &backend.BucketLoggingStatus{
 			LoggingEnabled: &backend.LoggingEnabled{
 				TargetBucket: "uri-gap-target",
@@ -1878,7 +1905,7 @@ func TestCoverageGapEmitRequestURIFallbackBranch(t *testing.T) {
 			},
 		}, nil
 	}
-	requestURIForLoggingFn = func(*http.Request) string { return "" }
+	h.hooks.requestURIForLogging = func(*http.Request) string { return "" }
 	req := &http.Request{
 		Method:     http.MethodGet,
 		Header:     make(http.Header),
@@ -1891,6 +1918,7 @@ func TestCoverageGapEmitRequestURIFallbackBranch(t *testing.T) {
 }
 
 func TestCoverageGapObjectPartAndDeleteMarkerBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-part-branch")
 	b.SetBucketOwner("obj-part-branch", "minis3-access-key")

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"hash/crc64"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -20,44 +21,6 @@ import (
 	"unicode"
 
 	"github.com/yashikota/minis3/internal/backend"
-)
-
-var (
-	putObjectFn = func(
-		h *Handler,
-		bucketName, key string,
-		data []byte,
-		opts backend.PutObjectOptions,
-	) (*backend.Object, error) {
-		return h.backend.PutObject(bucketName, key, data, opts)
-	}
-	putObjectACLFn = func(
-		h *Handler,
-		bucketName, key, versionID string,
-		acl *backend.AccessControlPolicy,
-	) error {
-		return h.backend.PutObjectACL(bucketName, key, versionID, acl)
-	}
-	copyObjectFn = func(
-		h *Handler,
-		srcBucket, srcKey, srcVersionID, dstBucket, dstKey string,
-		opts backend.CopyObjectOptions,
-	) (*backend.Object, string, error) {
-		return h.backend.CopyObject(srcBucket, srcKey, srcVersionID, dstBucket, dstKey, opts)
-	}
-	getObjectACLFn = func(
-		h *Handler,
-		bucketName, key, versionID string,
-	) (*backend.AccessControlPolicy, error) {
-		return h.backend.GetObjectACL(bucketName, key, versionID)
-	}
-	restoreObjectFn = func(
-		h *Handler,
-		bucketName, key, versionID string,
-		days int,
-	) (*backend.RestoreObjectResult, error) {
-		return h.backend.RestoreObject(bucketName, key, versionID, days)
-	}
 )
 
 // Inverted NVME polynomial value used by Go's crc64 implementation.
@@ -598,81 +561,75 @@ type ConditionalResult struct {
 // Returns whether the request should return early and with what status code.
 // Evaluation order follows S3 spec: If-Match, If-Unmodified-Since, If-None-Match, If-Modified-Since.
 func evaluateConditionalHeaders(r *http.Request, obj *backend.Object) ConditionalResult {
-	// 1. If-Match: return 412 if ETag doesn't match
-	ifMatch := r.Header.Get("If-Match")
-	if ifMatch != "" {
-		if !matchesETag(ifMatch, obj.ETag) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
-		}
+	failed, status := evaluatePreconditions(
+		obj,
+		r.Header.Get("If-Match"),
+		r.Header.Get("If-Unmodified-Since"),
+		r.Header.Get("If-None-Match"),
+		r.Header.Get("If-Modified-Since"),
+	)
+	if !failed {
+		return ConditionalResult{false, 0}
 	}
-
-	// 2. If-Unmodified-Since: return 412 if modified after the given date
-	ifUnmodifiedSince := r.Header.Get("If-Unmodified-Since")
-	if ifUnmodifiedSince != "" {
-		t, err := time.Parse(http.TimeFormat, ifUnmodifiedSince)
-		if err == nil && obj.LastModified.After(t) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
-		}
-	}
-
-	// 3. If-None-Match: return 304 if ETag matches
-	ifNoneMatch := r.Header.Get("If-None-Match")
-	if ifNoneMatch != "" {
-		if matchesETag(ifNoneMatch, obj.ETag) {
-			return ConditionalResult{true, http.StatusNotModified}
-		}
-	}
-
-	// 4. If-Modified-Since: return 304 if not modified after the given date
-	ifModifiedSince := r.Header.Get("If-Modified-Since")
-	if ifModifiedSince != "" {
-		t, err := time.Parse(http.TimeFormat, ifModifiedSince)
-		if err == nil && !obj.LastModified.After(t) {
-			return ConditionalResult{true, http.StatusNotModified}
-		}
-	}
-
-	return ConditionalResult{false, 0}
+	return ConditionalResult{true, status}
 }
 
 // evaluateCopySourceConditionals evaluates copy source conditional headers.
 // Unlike GET/HEAD, CopyObject returns 412 Precondition Failed for all failures (never 304).
 func evaluateCopySourceConditionals(r *http.Request, srcObj *backend.Object) ConditionalResult {
-	// x-amz-copy-source-if-match: 412 if ETag doesn't match
-	ifMatch := r.Header.Get("x-amz-copy-source-if-match")
+	failed, _ := evaluatePreconditions(
+		srcObj,
+		r.Header.Get("x-amz-copy-source-if-match"),
+		r.Header.Get("x-amz-copy-source-if-unmodified-since"),
+		r.Header.Get("x-amz-copy-source-if-none-match"),
+		r.Header.Get("x-amz-copy-source-if-modified-since"),
+	)
+	if !failed {
+		return ConditionalResult{false, 0}
+	}
+	return ConditionalResult{true, http.StatusPreconditionFailed}
+}
+
+// evaluatePreconditions applies RFC 9110 section 13.2.2 precedence, which
+// AWS documents for GetObject, HeadObject and CopyObject:
+//   - If-Match is evaluated first; when present, If-Unmodified-Since is
+//     ignored (If-Match true + If-Unmodified-Since false returns 200).
+//   - If-None-Match is evaluated next; when present, If-Modified-Since is
+//     ignored (If-None-Match true + If-Modified-Since false returns 200).
+//
+// Dates are compared at the one-second resolution of HTTP dates, so the
+// Last-Modified value returned for an object satisfies its own
+// If-Unmodified-Since and If-Modified-Since round trips. It reports whether
+// a precondition failed and the GET/HEAD status for that failure (412 or 304).
+func evaluatePreconditions(
+	obj *backend.Object,
+	ifMatch, ifUnmodifiedSince, ifNoneMatch, ifModifiedSince string,
+) (bool, int) {
+	lastModified := obj.LastModified.Truncate(time.Second)
+
 	if ifMatch != "" {
-		if !matchesETag(ifMatch, srcObj.ETag) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
+		if !matchesETag(ifMatch, obj.ETag) {
+			return true, http.StatusPreconditionFailed
 		}
-	}
-
-	// x-amz-copy-source-if-unmodified-since: 412 if modified after the given date
-	ifUnmodifiedSince := r.Header.Get("x-amz-copy-source-if-unmodified-since")
-	if ifUnmodifiedSince != "" {
+	} else if ifUnmodifiedSince != "" {
 		t, err := time.Parse(http.TimeFormat, ifUnmodifiedSince)
-		if err == nil && srcObj.LastModified.After(t) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
+		if err == nil && lastModified.After(t) {
+			return true, http.StatusPreconditionFailed
 		}
 	}
 
-	// x-amz-copy-source-if-none-match: 412 if ETag matches (not 304 for CopyObject)
-	ifNoneMatch := r.Header.Get("x-amz-copy-source-if-none-match")
 	if ifNoneMatch != "" {
-		if matchesETag(ifNoneMatch, srcObj.ETag) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
+		if matchesETag(ifNoneMatch, obj.ETag) {
+			return true, http.StatusNotModified
 		}
-	}
-
-	// x-amz-copy-source-if-modified-since: 412 if not modified (not 304 for CopyObject)
-	ifModifiedSince := r.Header.Get("x-amz-copy-source-if-modified-since")
-	if ifModifiedSince != "" {
+	} else if ifModifiedSince != "" {
 		t, err := time.Parse(http.TimeFormat, ifModifiedSince)
-		if err == nil && !srcObj.LastModified.After(t) {
-			return ConditionalResult{true, http.StatusPreconditionFailed}
+		if err == nil && !lastModified.After(t) {
+			return true, http.StatusNotModified
 		}
 	}
 
-	return ConditionalResult{false, 0}
+	return false, 0
 }
 
 func parseTimestampFlexible(value string) (*time.Time, error) {
@@ -804,66 +761,78 @@ func applyResponseOverrides(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// parseRangeHeader parses a Range header value and returns start and end positions.
-// Supported formats: "bytes=start-end", "bytes=start-", "bytes=-suffix"
-// Returns start, end (inclusive), and error if invalid.
+// errRangeIgnored reports a Range header that GetObject ignores, serving
+// the whole object with 200: one that is not a single well-formed byte
+// range. That includes multiple ranges, which S3 does not support ("Amazon
+// S3 doesn't support retrieving multiple ranges of data per GET request")
+// and answers with the whole object rather than the first range, as do
+// reversed ranges, other units and other malformed values.
+var errRangeIgnored = errors.New("range header ignored")
+
+// parseRangeHeader parses a GetObject Range header: "bytes=first-last",
+// "bytes=first-" or "bytes=-suffix" (RFC 9110 section 14.1.2). It returns
+// the inclusive start and end of the range to serve, errRangeIgnored when
+// the header is to be ignored, or backend.ErrInvalidRange (416) when a
+// well-formed range cannot be satisfied: the first byte is past the end of
+// the object, the suffix is empty, or the object is empty.
+//
+// TestParseRangeHeaderMatchesAWS checks it against responses recorded from
+// Amazon S3.
 func parseRangeHeader(rangeHeader string, size int64) (int64, int64, error) {
-	if size == 0 {
-		return 0, 0, backend.ErrInvalidRange
+	spec, ok := strings.CutPrefix(rangeHeader, "bytes=")
+	if !ok {
+		return 0, 0, errRangeIgnored
 	}
-	if !strings.HasPrefix(rangeHeader, "bytes=") {
-		return 0, 0, backend.ErrInvalidRange
+	firstStr, lastStr, ok := strings.Cut(spec, "-")
+	if !ok || strings.Contains(lastStr, "-") {
+		return 0, 0, errRangeIgnored
 	}
-
-	rangeSpec := strings.TrimPrefix(rangeHeader, "bytes=")
-
-	// Handle suffix range: bytes=-N (last N bytes)
-	if strings.HasPrefix(rangeSpec, "-") {
-		suffix, err := strconv.ParseInt(rangeSpec[1:], 10, 64)
-		if err != nil || suffix <= 0 {
+	if firstStr == "" {
+		// bytes=-suffix: the last suffix bytes.
+		suffix, ok := parseRangeDigits(lastStr)
+		if !ok {
+			return 0, 0, errRangeIgnored
+		}
+		if suffix == 0 || size == 0 {
 			return 0, 0, backend.ErrInvalidRange
 		}
-		if suffix >= size {
-			// Return entire object
-			return 0, size - 1, nil
+		return max(size-suffix, 0), size - 1, nil
+	}
+	first, ok := parseRangeDigits(firstStr)
+	if !ok {
+		return 0, 0, errRangeIgnored
+	}
+	last := int64(math.MaxInt64)
+	if lastStr != "" {
+		if last, ok = parseRangeDigits(lastStr); !ok || last < first {
+			return 0, 0, errRangeIgnored
 		}
-		return size - suffix, size - 1, nil
 	}
-
-	parts := strings.SplitN(rangeSpec, "-", 2)
-	if len(parts) != 2 {
+	if first >= size {
 		return 0, 0, backend.ErrInvalidRange
 	}
+	return first, min(last, size-1), nil
+}
 
-	start, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return 0, 0, backend.ErrInvalidRange
+// parseRangeDigits parses a non-empty run of ASCII digits, saturating at
+// math.MaxInt64 so huge positions still compare as past the end.
+func parseRangeDigits(s string) (int64, bool) {
+	if s == "" {
+		return 0, false
 	}
-
-	// Handle open-ended range: bytes=N-
-	if parts[1] == "" {
-		if start >= size {
-			return 0, 0, backend.ErrInvalidRange
+	var n int64
+	for _, c := range []byte(s) {
+		if c < '0' || c > '9' {
+			return 0, false
 		}
-		return start, size - 1, nil
+		d := int64(c - '0')
+		if n > (math.MaxInt64-d)/10 {
+			n = math.MaxInt64
+			continue
+		}
+		n = n*10 + d
 	}
-
-	end, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return 0, 0, backend.ErrInvalidRange
-	}
-
-	// Validate range
-	if start > end || start >= size {
-		return 0, 0, backend.ErrInvalidRange
-	}
-
-	// Clamp end to object size
-	if end >= size {
-		end = size - 1
-	}
-
-	return start, end, nil
+	return n, true
 }
 
 // handleObject handles object-level operations.
@@ -1048,7 +1017,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		if isAWSChunkedEncoding(contentEncoding) {
 			data, err = decodeAWSChunkedBody(r.Body)
 		} else {
-			data, err = readAllFn(r.Body)
+			data, err = h.hooks.readAll(r.Body)
 		}
 		if err != nil {
 			backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
@@ -1216,7 +1185,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			opts.ChecksumSHA256 = v
 		}
 
-		requestOwner := requesterOwner(r)
+		requestOwner := h.requesterOwner(r)
 		bucketOwner := h.bucketOwner(bucketName)
 		bucketOwnership := backend.ObjectOwnershipObjectWriter
 		if bucket, ok := h.backend.GetBucket(bucketName); ok && bucket.ObjectOwnership != "" {
@@ -1281,7 +1250,7 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 
-		obj, err := putObjectFn(h, bucketName, key, data, opts)
+		obj, err := h.hooks.putObject(h, bucketName, key, data, opts)
 		if err != nil {
 			if errors.Is(err, backend.ErrInvalidRequest) {
 				backend.WriteError(
@@ -1310,7 +1279,13 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			return
 		}
 		if !strings.EqualFold(bucketOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
-			if err := putObjectACLFn(h, bucketName, key, obj.VersionId, requestedACL); err != nil {
+			if err := h.hooks.putObjectACL(
+				h,
+				bucketName,
+				key,
+				obj.VersionId,
+				requestedACL,
+			); err != nil {
 				if errors.Is(err, backend.ErrAccessControlListNotSupported) {
 					backend.WriteError(
 						w,
@@ -1348,14 +1323,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 	case http.MethodGet:
 		versionId := r.URL.Query().Get("versionId")
-
-		// Check bucket policy for GetObject
-		if !h.checkAccessWithContext(r, bucketName, "s3:GetObject", key, backend.PolicyEvalContext{
-			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
-		}) {
-			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-			return
-		}
 
 		// Reject SSE write-headers on read operations
 		if r.Header.Get("x-amz-server-side-encryption") != "" {
@@ -1405,6 +1372,18 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			if obj.VersionId != backend.NullVersionId {
 				w.Header().Set("x-amz-version-id", obj.VersionId)
 			}
+			if versionId != "" {
+				// AWS: addressing a delete marker by version ID is 405
+				// MethodNotAllowed with its Last-Modified time.
+				w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+				backend.WriteError(
+					w,
+					http.StatusMethodNotAllowed,
+					"MethodNotAllowed",
+					"The specified method is not allowed against this resource.",
+				)
+				return
+			}
 			// Return 404 NoSuchKey when latest version is a delete marker
 			backend.WriteError(
 				w,
@@ -1448,6 +1427,11 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		// Check PartNumber validity before SSE-C access (invalid part takes priority)
 		if partNumberStr := r.URL.Query().Get("partNumber"); partNumberStr != "" {
+			if r.Header.Get("Range") != "" {
+				backend.WriteError(w, http.StatusBadRequest, "InvalidRequest",
+					"Cannot specify both Range header and partNumber query parameter.")
+				return
+			}
 			partNumber, parseErr := strconv.Atoi(partNumberStr)
 			if parseErr != nil || partNumber < 1 {
 				backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
@@ -1558,9 +1542,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		// Handle Range request
 		rangeHeader := r.Header.Get("Range")
-		if rangeHeader != "" {
-			start, end, err := parseRangeHeader(rangeHeader, obj.Size)
-			if err != nil {
+		start, end, rangeErr := parseRangeHeader(rangeHeader, obj.Size)
+		if rangeHeader != "" && !errors.Is(rangeErr, errRangeIgnored) {
+			if rangeErr != nil {
 				w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", obj.Size))
 				backend.WriteError(
 					w,
@@ -1584,46 +1568,27 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 		_, _ = w.Write(obj.Data)
 
 	case http.MethodDelete:
-		// Check bucket policy for DeleteObject
-		if !h.checkAccess(r, bucketName, "s3:DeleteObject", key) {
-			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		versionId := r.URL.Query().Get("versionId")
+		if versionId != "" && !h.mfaDeleteSatisfied(r, bucketName) {
+			backend.WriteError(
+				w,
+				http.StatusForbidden,
+				"AccessDenied",
+				"Mfa Authentication must be used for this request",
+			)
 			return
 		}
-
-		versionId := r.URL.Query().Get("versionId")
 		var conditionalObj *backend.Object
 		if versionId != "" {
 			conditionalObj, _ = h.backend.GetObjectVersion(bucketName, key, versionId)
 		} else {
-			conditionalObj, _ = h.backend.GetObject(bucketName, key)
-			if conditionalObj != nil && conditionalObj.IsDeleteMarker {
-				if bucket, ok := h.backend.GetBucket(bucketName); ok {
-					if versions, exists := bucket.Objects[key]; exists {
-						hasLiveVersion := false
-						for i, version := range versions.Versions {
-							if i == 0 {
-								continue
-							}
-							if !version.IsDeleteMarker {
-								hasLiveVersion = true
-								break
-							}
-						}
-						if !hasLiveVersion {
-							conditionalObj = nil
-						}
-					}
-				}
-			}
+			conditionalObj = h.backend.DeletePreconditionTarget(bucketName, key)
 		}
 		if status, code, msg := evaluateDeletePreconditions(r, conditionalObj); status != 0 {
 			backend.WriteError(w, status, code, msg)
 			return
 		}
-		bypassGovernance := strings.EqualFold(
-			r.Header.Get("x-amz-bypass-governance-retention"),
-			"true",
-		)
+		bypassGovernance := h.bypassGovernanceAllowed(r, bucketName, key)
 		var result *backend.DeleteObjectVersionResult
 		var err error
 
@@ -1684,14 +1649,6 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 	case http.MethodHead:
 		versionId := r.URL.Query().Get("versionId")
 
-		// Check bucket policy for HeadObject
-		if !h.checkAccessWithContext(r, bucketName, "s3:GetObject", key, backend.PolicyEvalContext{
-			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
-		}) {
-			backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-			return
-		}
-
 		// Reject SSE write-headers on read operations
 		if r.Header.Get("x-amz-server-side-encryption") != "" {
 			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
@@ -1721,6 +1678,12 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 			w.Header().Set("x-amz-delete-marker", "true")
 			if obj.VersionId != backend.NullVersionId {
 				w.Header().Set("x-amz-version-id", obj.VersionId)
+			}
+			if versionId != "" {
+				// AWS: HEAD on a delete marker version is 405.
+				w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
 			}
 			// Return 404 when latest version is a delete marker
 			w.WriteHeader(http.StatusNotFound)
@@ -1880,9 +1843,20 @@ func (h *Handler) existingObjectTagsForPolicy(
 	return tags
 }
 
+// mfaDeleteSatisfied reports whether a version-deleting request may proceed
+// under the bucket's MFA Delete setting: when MFA Delete is enabled, AWS
+// requires a well-formed x-amz-mfa header (minis3 checks the format only).
+func (h *Handler) mfaDeleteSatisfied(r *http.Request, bucketName string) bool {
+	_, mfaDelete, err := h.backend.GetBucketVersioning(bucketName)
+	if err != nil || mfaDelete != backend.MFADeleteEnabled {
+		return true
+	}
+	return validateMFAHeader(r.Header.Get("x-amz-mfa")) == nil
+}
+
 // handleDeleteObjects handles batch delete operations.
 func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bucketName string) {
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1935,7 +1909,43 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		*r = *r.WithContext(ctx)
 	}
 
+	// With MFA Delete enabled, deleting specific versions requires a valid
+	// x-amz-mfa header; such entries fail individually with AccessDenied.
+	var mfaDenied []backend.ObjectIdentifier
+	if !h.mfaDeleteSatisfied(r, bucketName) {
+		allowed := deleteReq.Objects[:0:0]
+		for _, obj := range deleteReq.Objects {
+			if obj.VersionId != "" {
+				mfaDenied = append(mfaDenied, obj)
+			} else {
+				allowed = append(allowed, obj)
+			}
+		}
+		deleteReq.Objects = allowed
+	}
+
+	// Each key is authorized on its own, like a single DeleteObject; denied
+	// keys fail individually with AccessDenied.
+	var accessDenied []backend.ObjectIdentifier
+	authorized := deleteReq.Objects[:0:0]
 	bypassGovernance := strings.EqualFold(r.Header.Get("x-amz-bypass-governance-retention"), "true")
+	for _, obj := range deleteReq.Objects {
+		action := "s3:DeleteObject"
+		if obj.VersionId != "" {
+			action = "s3:DeleteObjectVersion"
+		}
+		if !h.checkAccessWithContext(r, bucketName, action, obj.Key, backend.PolicyEvalContext{
+			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, obj.Key, obj.VersionId),
+		}) {
+			accessDenied = append(accessDenied, obj)
+			continue
+		}
+		authorized = append(authorized, obj)
+		bypassGovernance = bypassGovernance &&
+			h.checkAccess(r, bucketName, "s3:BypassGovernanceRetention", obj.Key)
+	}
+	deleteReq.Objects = authorized
+
 	results, err := h.backend.DeleteObjects(bucketName, deleteReq.Objects, bypassGovernance)
 	if err != nil {
 		backend.WriteError(
@@ -1949,6 +1959,22 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 
 	resp := backend.DeleteResult{
 		Xmlns: backend.S3Xmlns,
+	}
+	for _, obj := range accessDenied {
+		resp.Errors = append(resp.Errors, backend.DeleteError{
+			Key:       obj.Key,
+			VersionId: obj.VersionId,
+			Code:      "AccessDenied",
+			Message:   "Access Denied",
+		})
+	}
+	for _, obj := range mfaDenied {
+		resp.Errors = append(resp.Errors, backend.DeleteError{
+			Key:       obj.Key,
+			VersionId: obj.VersionId,
+			Code:      "AccessDenied",
+			Message:   "Mfa Authentication must be used for this request",
+		})
 	}
 
 	for _, result := range results {
@@ -1987,7 +2013,7 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -1998,6 +2024,19 @@ func (h *Handler) handleDeleteObjects(w http.ResponseWriter, r *http.Request, bu
 		return
 	}
 	_, _ = w.Write(output)
+}
+
+// isNoncurrentVersion reports whether versionId names an existing version of
+// key that is not the current version.
+func (h *Handler) isNoncurrentVersion(bucketName, key, versionId string) bool {
+	if versionId == "" {
+		return false
+	}
+	current, err := h.backend.GetObject(bucketName, key)
+	if err != nil {
+		return false
+	}
+	return current.VersionId != versionId
 }
 
 // handleCopyObject handles copy object operations.
@@ -2040,8 +2079,7 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
-	// Check bucket policy on source bucket (GetObject)
-	if !h.checkAccess(r, srcBucket, "s3:GetObject", srcKey) {
+	if !h.authorizeCopySource(r, srcBucket, srcKey, srcVersionId) {
 		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
@@ -2055,6 +2093,11 @@ func (h *Handler) handleCopyObject(
 	metadataDirective := r.Header.Get("x-amz-metadata-directive")
 	if metadataDirective == "" {
 		metadataDirective = "COPY"
+	}
+	if metadataDirective != "COPY" && metadataDirective != "REPLACE" {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
+			"Unknown metadata directive.")
+		return
 	}
 
 	// Evaluate copy source conditional headers if any are present
@@ -2095,6 +2138,15 @@ func (h *Handler) handleCopyObject(
 			return
 		}
 		if srcObj.IsDeleteMarker {
+			if srcVersionId != "" {
+				backend.WriteError(
+					w,
+					http.StatusBadRequest,
+					"InvalidRequest",
+					"The source of a copy request may not specifically refer to a delete marker by version id.",
+				)
+				return
+			}
 			backend.WriteError(
 				w,
 				http.StatusNotFound,
@@ -2119,8 +2171,11 @@ func (h *Handler) handleCopyObject(
 	// Extract Website Redirect Location header for copy
 	websiteRedirect := r.Header.Get("x-amz-website-redirect-location")
 
-	// Check for self-copy without REPLACE
+	// Check for self-copy without REPLACE. Copying an older version onto
+	// its own key is AWS's documented way to restore a previous version,
+	// so a copy source that names a non-current version is allowed.
 	if srcBucket == dstBucket && srcKey == dstKey && metadataDirective != "REPLACE" &&
+		!h.isNoncurrentVersion(srcBucket, srcKey, srcVersionId) &&
 		websiteRedirect == "" &&
 		r.Header.Get("x-amz-storage-class") == "" &&
 		r.Header.Get("x-amz-server-side-encryption") == "" {
@@ -2137,6 +2192,11 @@ func (h *Handler) handleCopyObject(
 	taggingDirective := r.Header.Get("x-amz-tagging-directive")
 	if taggingDirective == "" {
 		taggingDirective = "COPY"
+	}
+	if taggingDirective != "COPY" && taggingDirective != "REPLACE" {
+		backend.WriteError(w, http.StatusBadRequest, "InvalidArgument",
+			"Unknown tagging directive.")
+		return
 	}
 
 	// Build copy options
@@ -2159,6 +2219,10 @@ func (h *Handler) handleCopyObject(
 	// If tagging directive is REPLACE, extract new tags from request header
 	if taggingDirective == "REPLACE" {
 		opts.Tags = parseTaggingHeader(r.Header.Get("x-amz-tagging"))
+		if errCode, errMsg := validateTags(opts.Tags); errCode != "" {
+			backend.WriteError(w, http.StatusBadRequest, errCode, errMsg)
+			return
+		}
 	}
 
 	// Extract Object Lock headers
@@ -2215,7 +2279,7 @@ func (h *Handler) handleCopyObject(
 		opts.ChecksumAlgorithm = checksumAlgo
 	}
 
-	requestOwner := requesterOwner(r)
+	requestOwner := h.requesterOwner(r)
 	bucketOwner := h.bucketOwner(dstBucket)
 	dstOwnership := backend.ObjectOwnershipObjectWriter
 	if bucket, ok := h.backend.GetBucket(dstBucket); ok && bucket.ObjectOwnership != "" {
@@ -2268,7 +2332,8 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 
-	obj, srcVersionIdUsed, err := copyObjectFn(
+	opts.Owner = aclOwner
+	obj, srcVersionIdUsed, err := h.hooks.copyObject(
 		h,
 		srcBucket,
 		srcKey,
@@ -2300,6 +2365,13 @@ func (h *Handler) handleCopyObject(
 				"NoSuchVersion",
 				"The specified version does not exist.",
 			)
+		} else if errors.Is(err, backend.ErrCopySourceDeleteMarker) {
+			backend.WriteError(
+				w,
+				http.StatusBadRequest,
+				"InvalidRequest",
+				"The source of a copy request may not specifically refer to a delete marker by version id.",
+			)
 		} else if errors.Is(err, backend.ErrInvalidRequest) {
 			backend.WriteError(
 				w,
@@ -2313,7 +2385,13 @@ func (h *Handler) handleCopyObject(
 		return
 	}
 	if !strings.EqualFold(dstOwnership, backend.ObjectOwnershipBucketOwnerEnforced) {
-		if err := putObjectACLFn(h, dstBucket, dstKey, obj.VersionId, requestedACL); err != nil {
+		if err := h.hooks.putObjectACL(
+			h,
+			dstBucket,
+			dstKey,
+			obj.VersionId,
+			requestedACL,
+		); err != nil {
 			if errors.Is(err, backend.ErrAccessControlListNotSupported) {
 				backend.WriteError(
 					w,
@@ -2347,7 +2425,7 @@ func (h *Handler) handleCopyObject(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2362,14 +2440,7 @@ func (h *Handler) handleGetObjectACL(
 	bucketName, key string,
 ) {
 	versionId := r.URL.Query().Get("versionId")
-	if !h.checkAccessWithContext(r, bucketName, "s3:GetObjectAcl", key, backend.PolicyEvalContext{
-		ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
-	}) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
-	acl, err := getObjectACLFn(h, bucketName, key, versionId)
+	acl, err := h.hooks.getObjectACL(h, bucketName, key, versionId)
 	if err != nil {
 		if errors.Is(err, backend.ErrBucketNotFound) {
 			backend.WriteError(
@@ -2404,7 +2475,7 @@ func (h *Handler) handleGetObjectACL(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(acl)
+	output, err := h.hooks.xmlMarshal(acl)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2418,11 +2489,6 @@ func (h *Handler) handlePutObjectACL(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:PutObjectAcl", key) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	versionId := r.URL.Query().Get("versionId")
 	config := h.getBucketPublicAccessBlock(bucketName)
 
@@ -2433,7 +2499,7 @@ func (h *Handler) handlePutObjectACL(
 			backend.WriteError(w, http.StatusBadRequest, "InvalidArgument", "Invalid canned ACL.")
 			return
 		}
-		requestOwner := requesterOwner(r)
+		requestOwner := h.requesterOwner(r)
 		bucketOwner := h.bucketOwner(bucketName)
 		acl := backend.CannedACLToPolicyForOwner(cannedACL, requestOwner, bucketOwner)
 		if config != nil && config.BlockPublicAcls && isPublicACL(acl) {
@@ -2450,7 +2516,7 @@ func (h *Handler) handlePutObjectACL(
 
 	// Parse ACL from request body
 	defer func() { _ = r.Body.Close() }()
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2474,11 +2540,11 @@ func (h *Handler) handlePutObjectACL(
 
 	skipACLValidation := false
 	if acl.Owner == nil && len(acl.AccessControlList.Grants) == 0 {
-		owner := requesterOwner(r)
+		owner := h.requesterOwner(r)
 		acl = *backend.NewDefaultACLForOwner(owner)
 		skipACLValidation = true
 	} else if acl.Owner == nil || acl.Owner.ID == "" {
-		acl.Owner = requesterOwner(r)
+		acl.Owner = h.requesterOwner(r)
 	}
 	if !skipACLValidation {
 		if aclErr := normalizeAndValidateACL(&acl); aclErr != nil {
@@ -2541,19 +2607,6 @@ func (h *Handler) handleGetObjectTagging(
 	bucketName, key string,
 ) {
 	versionId := r.URL.Query().Get("versionId")
-	if !h.checkAccessWithContext(
-		r,
-		bucketName,
-		"s3:GetObjectTagging",
-		key,
-		backend.PolicyEvalContext{
-			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
-		},
-	) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	tags, actualVersionId, err := h.backend.GetObjectTagging(bucketName, key, versionId)
 	if err != nil {
 		h.writeObjectTaggingError(w, err)
@@ -2583,7 +2636,7 @@ func (h *Handler) handleGetObjectTagging(
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2600,7 +2653,7 @@ func (h *Handler) handlePutObjectTagging(
 	versionId := r.URL.Query().Get("versionId")
 
 	defer func() { _ = r.Body.Close() }()
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(
 			w,
@@ -2634,10 +2687,14 @@ func (h *Handler) handlePutObjectTagging(
 		tags[tag.Key] = tag.Value
 	}
 
+	action := "s3:PutObjectTagging"
+	if versionId != "" {
+		action = "s3:PutObjectVersionTagging"
+	}
 	if !h.checkAccessWithContext(
 		r,
 		bucketName,
-		"s3:PutObjectTagging",
+		action,
 		key,
 		backend.PolicyEvalContext{
 			ExistingObjectTags: h.existingObjectTagsForPolicy(bucketName, key, versionId),
@@ -2717,10 +2774,6 @@ func (h *Handler) handleGetObjectAttributes(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:GetObject", key) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
 	versionId := r.URL.Query().Get("versionId")
 
 	// Get the requested attributes from header
@@ -2957,7 +3010,7 @@ func (h *Handler) handleGetObjectAttributes(
 	w.Header().Set("Content-Type", "application/xml")
 	w.Header().Set("Last-Modified", obj.LastModified.Format(http.TimeFormat))
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2971,14 +3024,9 @@ func (h *Handler) handleRestoreObject(
 	r *http.Request,
 	bucketName, key string,
 ) {
-	if !h.checkAccess(r, bucketName, "s3:RestoreObject", key) {
-		backend.WriteError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
-		return
-	}
-
 	versionId := r.URL.Query().Get("versionId")
 
-	body, err := readAllFn(r.Body)
+	body, err := h.hooks.readAll(r.Body)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -2997,7 +3045,7 @@ func (h *Handler) handleRestoreObject(
 		}
 	}
 
-	result, err := restoreObjectFn(h, bucketName, key, versionId, restoreReq.Days)
+	result, err := h.hooks.restoreObject(h, bucketName, key, versionId, restoreReq.Days)
 	if err != nil {
 		switch {
 		case errors.Is(err, backend.ErrBucketNotFound):

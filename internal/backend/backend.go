@@ -37,6 +37,12 @@ type Backend struct {
 	mu      sync.RWMutex
 	buckets map[string]*Bucket
 	uploads map[string]*MultipartUpload // key: uploadId
+	// uploadSeq orders generated upload IDs (see generateUploadIdLocked).
+	uploadSeq uint64
+	// completedUploads remembers recently completed uploads so a repeated
+	// CompleteMultipartUpload for the same upload ID can succeed
+	// idempotently, as on AWS. key: uploadId
+	completedUploads map[string]*completedUpload
 
 	// IAM state
 	iamUsers        map[string]*IAMUser          // key: userName
@@ -44,11 +50,6 @@ type Backend struct {
 	iamKeysByUser   map[string][]string          // userName -> []accessKeyId
 	iamUserPolicies map[string]map[string]string // userName -> policyName -> document
 }
-
-var (
-	xmlMarshal = xml.Marshal
-	logFatalf  = log.Fatalf
-)
 
 // Bucket represents an S3 bucket containing objects and metadata
 type Bucket struct {
@@ -185,14 +186,17 @@ var (
 	ErrSourceObjectNotFound      = errors.New("source object not found")
 	ErrVersionNotFound           = errors.New("version not found")
 	ErrMethodNotAllowed          = errors.New("method not allowed")
-	ErrMFADeleteRequired         = errors.New("MFA delete required")
-	ErrNoSuchTagSet              = errors.New("the TagSet does not exist")
-	ErrNoSuchBucketPolicy        = errors.New("the bucket policy does not exist")
-	ErrMalformedPolicy           = errors.New("malformed policy document")
-	ErrMalformedPolicyDocument   = errors.New("malformed IAM policy document")
-	ErrInvalidRequest            = errors.New("invalid request")
-	ErrNoSuchUpload              = errors.New("the specified upload does not exist")
-	ErrInvalidPart               = errors.New(
+	ErrCopySourceDeleteMarker    = errors.New(
+		"the source of a copy request may not specifically refer to a delete marker by version id",
+	)
+	ErrMFADeleteRequired       = errors.New("MFA delete required")
+	ErrNoSuchTagSet            = errors.New("the TagSet does not exist")
+	ErrNoSuchBucketPolicy      = errors.New("the bucket policy does not exist")
+	ErrMalformedPolicy         = errors.New("malformed policy document")
+	ErrMalformedPolicyDocument = errors.New("malformed IAM policy document")
+	ErrInvalidRequest          = errors.New("invalid request")
+	ErrNoSuchUpload            = errors.New("the specified upload does not exist")
+	ErrInvalidPart             = errors.New(
 		"one or more of the specified parts could not be found",
 	)
 	ErrInvalidPartOrder = errors.New("the list of parts was not in ascending order")
@@ -253,12 +257,13 @@ var (
 
 func New() *Backend {
 	return &Backend{
-		buckets:         make(map[string]*Bucket),
-		uploads:         make(map[string]*MultipartUpload),
-		iamUsers:        make(map[string]*IAMUser),
-		iamAccessKeys:   make(map[string]*IAMAccessKey),
-		iamKeysByUser:   make(map[string][]string),
-		iamUserPolicies: make(map[string]map[string]string),
+		buckets:          make(map[string]*Bucket),
+		uploads:          make(map[string]*MultipartUpload),
+		completedUploads: make(map[string]*completedUpload),
+		iamUsers:         make(map[string]*IAMUser),
+		iamAccessKeys:    make(map[string]*IAMAccessKey),
+		iamKeysByUser:    make(map[string][]string),
+		iamUserPolicies:  make(map[string]map[string]string),
 	}
 }
 
@@ -287,7 +292,7 @@ func (b *Backend) CreateIAMUser(userName, path string) (*IAMUser, error) {
 	}
 
 	userID := "AID" + strings.ToUpper(generateRandomID(10))
-	arn := fmt.Sprintf("arn:aws:iam::123456789012:user%s%s", path, userName)
+	arn := fmt.Sprintf("arn:aws:iam::%s:user%s%s", iamAccountID, path, userName)
 
 	user := &IAMUser{
 		UserName:   userName,
@@ -298,7 +303,7 @@ func (b *Backend) CreateIAMUser(userName, path string) (*IAMUser, error) {
 	}
 	b.iamUsers[userName] = user
 
-	return user, nil
+	return snapshot(user), nil
 }
 
 // CreateIAMAccessKey creates a new access key pair for an IAM user.
@@ -323,7 +328,7 @@ func (b *Backend) CreateIAMAccessKey(userName string) (*IAMAccessKey, error) {
 	b.iamAccessKeys[accessKeyID] = key
 	b.iamKeysByUser[userName] = append(b.iamKeysByUser[userName], accessKeyID)
 
-	return key, nil
+	return snapshot(key), nil
 }
 
 // DeleteIAMAccessKey deletes an access key.
@@ -331,7 +336,10 @@ func (b *Backend) DeleteIAMAccessKey(userName, accessKeyID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if _, exists := b.iamAccessKeys[accessKeyID]; !exists {
+	// The key must belong to the named user (IAM returns NoSuchEntity
+	// otherwise), so one user cannot delete another user's key.
+	key, exists := b.iamAccessKeys[accessKeyID]
+	if !exists || key.UserName != userName {
 		return ErrIAMAccessKeyNotFound
 	}
 	delete(b.iamAccessKeys, accessKeyID)
@@ -467,7 +475,7 @@ func (b *Backend) ListIAMUsers(pathPrefix string) []*IAMUser {
 			users = append(users, u)
 		}
 	}
-	return users
+	return snapshot(users)
 }
 
 // ListIAMAccessKeys returns access keys for a user.
@@ -481,7 +489,7 @@ func (b *Backend) ListIAMAccessKeys(userName string) []*IAMAccessKey {
 			keys = append(keys, k)
 		}
 	}
-	return keys
+	return snapshot(keys)
 }
 
 // LookupCredential looks up a secret key for an access key,
@@ -496,7 +504,33 @@ func (b *Backend) LookupCredential(accessKey string) (string, bool) {
 	return "", false
 }
 
+// PrincipalForAccessKey returns the policy identity for an access key,
+// resolving keys of IAM users created through the IAM API to those users.
+func (b *Backend) PrincipalForAccessKey(accessKey string) *PolicyPrincipal {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if k, ok := b.iamAccessKeys[accessKey]; ok {
+		if user, ok := b.iamUsers[k.UserName]; ok {
+			return PrincipalForIAMUser(user, accessKey)
+		}
+	}
+	return PrincipalForAccessKey(accessKey)
+}
+
 func WriteError(w http.ResponseWriter, code int, s3Code, message string) {
+	writeError(w, code, s3Code, message, xml.Marshal, log.Fatalf)
+}
+
+// writeError is WriteError with its marshaller and fatal logger passed in,
+// so a test can make marshalling fail.
+func writeError(
+	w http.ResponseWriter,
+	code int,
+	s3Code, message string,
+	xmlMarshal func(any) ([]byte, error),
+	logFatalf func(string, ...any),
+) {
 	w.WriteHeader(code)
 	// S3 errors are XML
 	resp := ErrorResponse{

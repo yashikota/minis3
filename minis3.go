@@ -11,23 +11,24 @@ import (
 	"github.com/yashikota/minis3/internal/handler"
 )
 
-var (
-	listenFn = net.Listen
-	fatalFn  = log.Fatalln
-)
-
 // Minis3 is the main server struct.
 type Minis3 struct {
 	mu       sync.Mutex
 	listener net.Listener
 	server   *http.Server
 	backend  *backend.Backend
+
+	// listen and fatal are seams for tests.
+	listen func(network, address string) (net.Listener, error)
+	fatal  func(v ...any)
 }
 
 // New creates a new Minis3 server instance.
 func New() *Minis3 {
 	return &Minis3{
 		backend: backend.New(),
+		listen:  net.Listen,
+		fatal:   log.Fatalln,
 	}
 }
 
@@ -35,8 +36,12 @@ func New() *Minis3 {
 // It returns the server instance or an error if it failed to start.
 // Caller is responsible for calling Close().
 func Run() (*Minis3, error) {
-	s := New()
-	if err := s.Start(); err != nil {
+	return startNew(New(), "127.0.0.1:0")
+}
+
+// startNew starts s on addr, returning nil when it fails to start.
+func startNew(s *Minis3, addr string) (*Minis3, error) {
+	if err := s.StartAddr(addr); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -51,11 +56,7 @@ func (m *Minis3) Start() error {
 // It returns the server instance or an error if it failed to start.
 // Caller is responsible for calling Close().
 func RunAddr(addr string) (*Minis3, error) {
-	s := New()
-	if err := s.StartAddr(addr); err != nil {
-		return nil, err
-	}
-	return s, nil
+	return startNew(New(), addr)
 }
 
 // StartAddr starts the Minis3 server on the provided address.
@@ -63,7 +64,7 @@ func (m *Minis3) StartAddr(addr string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	l, err := listenFn("tcp", addr)
+	l, err := m.listen("tcp", addr)
 	if err != nil {
 		return errors.New("failed to listen: " + err.Error())
 	}
@@ -75,7 +76,7 @@ func (m *Minis3) StartAddr(addr string) error {
 
 	go func() {
 		if err := m.server.Serve(l); err != nil && err != http.ErrServerClosed {
-			fatalFn("minis3 server error:", err)
+			m.fatal("minis3 server error:", err)
 		}
 	}()
 

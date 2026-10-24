@@ -53,6 +53,7 @@ func aclHasOwnerFullControl(acl *backend.AccessControlPolicy, ownerID string) bo
 }
 
 func TestCreateBucketWithCannedACLPreservesRequesterOwner(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 
 	w := doRequest(
@@ -97,6 +98,7 @@ func TestCreateBucketWithCannedACLPreservesRequesterOwner(t *testing.T) {
 }
 
 func TestGetBucketLocationAccessControl(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "location-auth-bucket")
 	b.SetBucketOwner("location-auth-bucket", "owner-ak")
@@ -150,6 +152,7 @@ func TestGetBucketLocationAccessControl(t *testing.T) {
 }
 
 func TestIgnorePublicACLsReturnsEffectiveBucketACL(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "ignore-public-bucket")
 	b.SetBucketOwner("ignore-public-bucket", "owner-ak")
@@ -215,6 +218,7 @@ func TestIgnorePublicACLsReturnsEffectiveBucketACL(t *testing.T) {
 }
 
 func TestIgnorePublicACLsReturnsEffectiveObjectACL(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "ignore-public-object")
 	b.SetBucketOwner("ignore-public-object", "owner-ak")
@@ -283,6 +287,7 @@ func TestIgnorePublicACLsReturnsEffectiveObjectACL(t *testing.T) {
 }
 
 func TestGetBucketACLAccessAndErrorBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "bucket-acl-access")
 	b.SetBucketOwner("bucket-acl-access", "owner-ak")

@@ -8,6 +8,7 @@ import (
 )
 
 func TestObjectVersionHelpersBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("getLatestVersion returns nil when only delete markers", func(t *testing.T) {
 		ov := &ObjectVersions{Versions: []*Object{{IsDeleteMarker: true}, {IsDeleteMarker: true}}}
 		if got := ov.getLatestVersion(); got != nil {
@@ -82,6 +83,7 @@ func TestObjectVersionHelpersBranches(t *testing.T) {
 }
 
 func TestPutObjectBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.PutObject("missing", "k", []byte("x"), PutObjectOptions{}); !errors.Is(
 		err,
@@ -129,77 +131,46 @@ func TestPutObjectBranches(t *testing.T) {
 		t.Fatalf("expected SSE-C only without default SSE-S3/KMS, got %+v", obj)
 	}
 
-	obj, err = b.PutObject(
-		"put-branches",
-		"k3",
-		[]byte("hello"),
-		PutObjectOptions{ChecksumAlgorithm: "CRC32C"},
-	)
-	if err != nil || obj.ChecksumCRC32C == "" {
-		t.Fatalf("expected computed CRC32C checksum, err=%v obj=%+v", err, obj)
+	// Each algorithm's checksum is computed when absent and kept when the
+	// client sends the right value.
+	checksumField := map[string]func(*Object) string{
+		"CRC32":     func(o *Object) string { return o.ChecksumCRC32 },
+		"CRC32C":    func(o *Object) string { return o.ChecksumCRC32C },
+		"CRC64NVME": func(o *Object) string { return o.ChecksumCRC64NVME },
+		"SHA1":      func(o *Object) string { return o.ChecksumSHA1 },
+		"SHA256":    func(o *Object) string { return o.ChecksumSHA256 },
 	}
-	checksumCRC32C, _ := ComputeChecksumBase64("CRC32C", []byte("hello"))
-	checksumSHA1, _ := ComputeChecksumBase64("SHA1", []byte("hello"))
-	checksumSHA256, _ := ComputeChecksumBase64("SHA256", []byte("hello"))
-	checksumCRC32, _ := ComputeChecksumBase64("CRC32", []byte("hello"))
-	obj, err = b.PutObject("put-branches", "k3b", []byte("hello"), PutObjectOptions{
-		ChecksumAlgorithm: "CRC32C",
-		ChecksumCRC32C:    checksumCRC32C,
-	})
-	if err != nil || obj.ChecksumCRC32C != checksumCRC32C {
-		t.Fatalf("expected provided CRC32C checksum, err=%v obj=%+v", err, obj)
-	}
-	obj, err = b.PutObject(
-		"put-branches",
-		"k4",
-		[]byte("hello"),
-		PutObjectOptions{ChecksumAlgorithm: "SHA1", ChecksumSHA1: checksumSHA1},
-	)
-	if err != nil || obj.ChecksumSHA1 != checksumSHA1 {
-		t.Fatalf("expected provided SHA1 checksum, err=%v obj=%+v", err, obj)
-	}
-	obj, err = b.PutObject(
-		"put-branches",
-		"k4b",
-		[]byte("hello"),
-		PutObjectOptions{ChecksumAlgorithm: "SHA1"},
-	)
-	if err != nil || obj.ChecksumSHA1 == "" {
-		t.Fatalf("expected computed SHA1 checksum, err=%v obj=%+v", err, obj)
-	}
-	obj, err = b.PutObject(
-		"put-branches",
-		"k5",
-		[]byte("hello"),
-		PutObjectOptions{ChecksumAlgorithm: "SHA256"},
-	)
-	if err != nil || obj.ChecksumSHA256 == "" {
-		t.Fatalf("expected computed SHA256 checksum, err=%v obj=%+v", err, obj)
-	}
-	obj, err = b.PutObject("put-branches", "k5b", []byte("hello"), PutObjectOptions{
-		ChecksumAlgorithm: "SHA256",
-		ChecksumSHA256:    checksumSHA256,
-	})
-	if err != nil || obj.ChecksumSHA256 != checksumSHA256 {
-		t.Fatalf("expected provided SHA256 checksum, err=%v obj=%+v", err, obj)
-	}
-	obj, err = b.PutObject(
-		"put-branches",
-		"k6",
-		[]byte("hello"),
-		PutObjectOptions{ChecksumAlgorithm: "CRC32", ChecksumCRC32: checksumCRC32},
-	)
-	if err != nil || obj.ChecksumCRC32 != checksumCRC32 {
-		t.Fatalf("expected provided CRC32 checksum, err=%v obj=%+v", err, obj)
-	}
-	obj, err = b.PutObject(
-		"put-branches",
-		"k6b",
-		[]byte("hello"),
-		PutObjectOptions{ChecksumAlgorithm: "CRC32"},
-	)
-	if err != nil || obj.ChecksumCRC32 == "" {
-		t.Fatalf("expected computed CRC32 checksum, err=%v obj=%+v", err, obj)
+	for algorithm, field := range checksumField {
+		want, _ := ComputeChecksumBase64(algorithm, []byte("hello"))
+		provided := PutObjectOptions{ChecksumAlgorithm: algorithm}
+		switch algorithm {
+		case "CRC32":
+			provided.ChecksumCRC32 = want
+		case "CRC32C":
+			provided.ChecksumCRC32C = want
+		case "CRC64NVME":
+			provided.ChecksumCRC64NVME = want
+		case "SHA1":
+			provided.ChecksumSHA1 = want
+		case "SHA256":
+			provided.ChecksumSHA256 = want
+		}
+		for name, opts := range map[string]PutObjectOptions{
+			"computed": {ChecksumAlgorithm: algorithm},
+			"provided": provided,
+		} {
+			obj, err := b.PutObject("put-branches", algorithm+"-"+name, []byte("hello"), opts)
+			if err != nil || field(obj) != want {
+				t.Fatalf(
+					"%s %s checksum: err=%v got %q, want %q",
+					name,
+					algorithm,
+					err,
+					field(obj),
+					want,
+				)
+			}
+		}
 	}
 
 	if _, err := b.PutObject(
@@ -219,6 +190,7 @@ func TestPutObjectBranches(t *testing.T) {
 }
 
 func TestDeleteObjectVersionBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.DeleteObjectVersion("missing", "k", "", false); !errors.Is(
 		err,
@@ -300,13 +272,14 @@ func TestDeleteObjectVersionBranches(t *testing.T) {
 	if _, ok := b.GetBucket("delete-version-branches"); !ok {
 		t.Fatal("bucket should still exist")
 	}
-	bucket, _ := b.GetBucket("delete-version-branches")
+	bucket := liveBucket(t, b, "delete-version-branches")
 	if _, exists := bucket.Objects["k"]; exists {
 		t.Fatalf("expected object key cleanup when all versions deleted: %+v", bucket.Objects["k"])
 	}
 }
 
 func TestCopyObjectBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("src-copy-branches"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -388,9 +361,9 @@ func TestCopyObjectBranches(t *testing.T) {
 		CopyObjectOptions{},
 	); !errors.Is(
 		err,
-		ErrSourceObjectNotFound,
+		ErrCopySourceDeleteMarker,
 	) {
-		t.Fatalf("expected ErrSourceObjectNotFound for delete marker version, got %v", err)
+		t.Fatalf("expected ErrCopySourceDeleteMarker for delete marker version, got %v", err)
 	}
 
 	// source latest non-delete-marker nil
@@ -601,6 +574,7 @@ func TestCopyObjectBranches(t *testing.T) {
 }
 
 func TestDeleteObjectsAndListObjectVersionsBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.DeleteObjects("missing", nil, false); !errors.Is(err, ErrBucketNotFound) {
 		t.Fatalf("expected ErrBucketNotFound, got %v", err)
@@ -761,6 +735,7 @@ func TestDeleteObjectsAndListObjectVersionsBranches(t *testing.T) {
 }
 
 func TestObjectTaggingBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.PutObjectTagging("missing", "k", "", map[string]string{"a": "b"}); !errors.Is(
 		err,
@@ -854,6 +829,7 @@ func TestObjectTaggingBranches(t *testing.T) {
 }
 
 func TestListObjectsHidesKeysWithCurrentDeleteMarker(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("list-delete-marker"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

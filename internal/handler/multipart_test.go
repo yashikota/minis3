@@ -45,6 +45,7 @@ func createMultipartUpload(
 }
 
 func TestMultipartHandlers(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustPublicWriteBucket(t, b, "mp-bucket", "minis3-access-key")
 	mustPublicWriteBucket(t, b, "src-bucket", "minis3-access-key")
@@ -717,8 +718,10 @@ func TestMultipartHandlers(t *testing.T) {
 }
 
 func TestMultipartHelperFunctions(t *testing.T) {
+	t.Parallel()
+	h := New(backend.New())
 	t.Run("decode and parse copy source", func(t *testing.T) {
-		info, err := decodeAndParseCopySource("/bucket/key%20name?versionId=v1")
+		info, err := h.decodeAndParseCopySource("/bucket/key%20name?versionId=v1")
 		if err != nil {
 			t.Fatalf("decodeAndParseCopySource error: %v", err)
 		}
@@ -728,7 +731,7 @@ func TestMultipartHelperFunctions(t *testing.T) {
 	})
 
 	t.Run("decode and parse copy source invalid", func(t *testing.T) {
-		if _, err := decodeAndParseCopySource("bucket-only"); err == nil {
+		if _, err := h.decodeAndParseCopySource("bucket-only"); err == nil {
 			t.Fatal("expected error")
 		}
 	})

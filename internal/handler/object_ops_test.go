@@ -10,6 +10,7 @@ import (
 )
 
 func TestObjectDeleteObjectsHandler(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-bucket")
 	mustPutObject(t, b, "obj-bucket", "a.txt", "A")
@@ -70,6 +71,7 @@ func TestObjectDeleteObjectsHandler(t *testing.T) {
 }
 
 func TestObjectCopyHandler(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "src")
 	mustCreateBucket(t, b, "dst")
@@ -150,6 +152,7 @@ func TestObjectCopyHandler(t *testing.T) {
 }
 
 func TestObjectACLAndTaggingHandlers(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj")
 	mustPutObject(t, b, "obj", "k", "v")
@@ -259,6 +262,7 @@ func TestObjectACLAndTaggingHandlers(t *testing.T) {
 }
 
 func TestGetObjectAttributesHandler(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "attrs")
 	mustPutObject(t, b, "attrs", "obj", "data")

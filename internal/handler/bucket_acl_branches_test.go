@@ -8,6 +8,7 @@ import (
 )
 
 func TestHandlePutBucketACLBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "acl-bucket")
 	b.SetBucketOwner("acl-bucket", "minis3-access-key")

@@ -6,6 +6,7 @@ import (
 )
 
 func TestPolicyStringOrSliceUnmarshalJSON(t *testing.T) {
+	t.Parallel()
 	var single PolicyStringOrSlice
 	if err := json.Unmarshal([]byte(`"s3:GetObject"`), &single); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -22,13 +23,29 @@ func TestPolicyStringOrSliceUnmarshalJSON(t *testing.T) {
 		t.Fatalf("unexpected multi value: %+v", multi)
 	}
 
+	// IAM condition values may be JSON numbers or booleans.
+	var scalars PolicyStringOrSlice
+	if err := json.Unmarshal([]byte(`[123, false]`), &scalars); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(scalars) != 2 || scalars[0] != "123" || scalars[1] != "false" {
+		t.Fatalf("unexpected scalar values: %+v", scalars)
+	}
+
 	var invalid PolicyStringOrSlice
-	if err := json.Unmarshal([]byte(`123`), &invalid); err == nil {
-		t.Fatal("expected unmarshal error for numeric value")
+	if err := json.Unmarshal([]byte(`{"a":1}`), &invalid); err == nil {
+		t.Fatal("expected unmarshal error for object value")
+	}
+	if err := json.Unmarshal([]byte(`[null]`), &invalid); err == nil {
+		t.Fatal("expected unmarshal error for null value")
+	}
+	if err := json.Unmarshal([]byte(`[`), &invalid); err == nil {
+		t.Fatal("expected unmarshal error for malformed JSON")
 	}
 }
 
 func TestPolicyMatcherHelpers(t *testing.T) {
+	t.Parallel()
 	t.Run("matches action branches", func(t *testing.T) {
 		if !matchesAction(PolicyStringOrSlice{"*"}, "s3:DeleteObject") {
 			t.Fatal("expected wildcard action to match")
@@ -81,7 +98,7 @@ func TestPolicyMatcherHelpers(t *testing.T) {
 	})
 
 	t.Run("wildcard helper branches", func(t *testing.T) {
-		if !matchWildcard("a*", "abcd") {
+		if !wildcardMatch("a*", "abcd") {
 			t.Fatal("expected wildcard match")
 		}
 		if !wildcardMatch("a?c", "abc") {
@@ -106,6 +123,7 @@ func TestPolicyMatcherHelpers(t *testing.T) {
 }
 
 func TestPolicyConditionHelpers(t *testing.T) {
+	t.Parallel()
 	ctx := PolicyEvalContext{
 		Headers: map[string]string{
 			"referer":                      "https://example.test",
@@ -188,12 +206,12 @@ func TestPolicyConditionHelpers(t *testing.T) {
 		if !evaluateConditions(nil, ctx) {
 			t.Fatal("expected empty conditions to pass")
 		}
-		if evaluateConditions(map[string]map[string]string{
+		if evaluateConditions(map[string]map[string]PolicyStringOrSlice{
 			"StringEquals": {
-				"s3:x-amz-server-side-encryption": "AES256",
+				"s3:x-amz-server-side-encryption": {"AES256"},
 			},
 			"StringLike": {
-				"aws:Referer": "http://*",
+				"aws:Referer": {"http://*"},
 			},
 		}, ctx) {
 			t.Fatal("expected AND conditions to fail when one fails")
@@ -202,6 +220,7 @@ func TestPolicyConditionHelpers(t *testing.T) {
 }
 
 func TestPolicyResourceMismatchAndWildcardMisses(t *testing.T) {
+	t.Parallel()
 	policy := mustPolicyJSON(t, map[string]any{
 		"Version": "2012-10-17",
 		"Statement": []any{

@@ -2,45 +2,28 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/yashikota/minis3"
 )
 
-var (
-	defaultRunAddrFn = runAddrFn
-	defaultAddrFn    = addrFn
-	defaultCloseFn   = closeFn
-	defaultNotifyFn  = notifyFn
-	defaultStopFn    = stopFn
-	defaultPrintfFn  = printfFn
-	defaultFatalfFn  = fatalfFn
-)
-
-func resetMainHooks() {
-	runAddrFn = defaultRunAddrFn
-	addrFn = defaultAddrFn
-	closeFn = defaultCloseFn
-	notifyFn = defaultNotifyFn
-	stopFn = defaultStopFn
-	printfFn = defaultPrintfFn
-	fatalfFn = defaultFatalfFn
-}
-
 // runWithTimeout executes run and reports a hang instead of blocking the
 // suite: run waits for an OS signal, so any bug before signal delivery
 // (e.g. ignoring a parse error) would otherwise hang until the go test
-// timeout. Callers must stub notifyFn to deliver a signal promptly.
+// timeout. Callers must stub notify to deliver a signal promptly.
 func runWithTimeout(
 	t *testing.T,
+	d deps,
 	args []string,
 	sigCh chan os.Signal,
 ) (error, bool) {
 	t.Helper()
 	done := make(chan error, 1)
-	go func() { done <- run(args, sigCh) }()
+	go func() { done <- run(d, args, sigCh) }()
 	select {
 	case err := <-done:
 		return err, true
@@ -50,8 +33,9 @@ func runWithTimeout(
 }
 
 func TestRunParseError(t *testing.T) {
-	resetMainHooks()
-	err, ok := runWithTimeout(t, []string{"-port=not-a-number"}, make(chan os.Signal, 1))
+	t.Parallel()
+	d := defaultDeps()
+	err, ok := runWithTimeout(t, d, []string{"-port=not-a-number"}, make(chan os.Signal, 1))
 	if !ok {
 		t.Fatal("run() hung for invalid port")
 	}
@@ -61,12 +45,13 @@ func TestRunParseError(t *testing.T) {
 }
 
 func TestRunStartError(t *testing.T) {
-	resetMainHooks()
+	t.Parallel()
+	d := defaultDeps()
 	wantErr := errors.New("start boom")
-	runAddrFn = func(string) (*minis3.Minis3, error) {
+	d.runAddr = func(string) (*minis3.Minis3, error) {
 		return nil, wantErr
 	}
-	err, ok := runWithTimeout(t, []string{"-port=9191"}, make(chan os.Signal, 1))
+	err, ok := runWithTimeout(t, d, []string{"-port=9191"}, make(chan os.Signal, 1))
 	if !ok {
 		t.Fatal("run() hung for start error")
 	}
@@ -76,18 +61,19 @@ func TestRunStartError(t *testing.T) {
 }
 
 func TestRunStopError(t *testing.T) {
-	resetMainHooks()
-	runAddrFn = func(string) (*minis3.Minis3, error) {
+	t.Parallel()
+	d := defaultDeps()
+	d.runAddr = func(string) (*minis3.Minis3, error) {
 		return &minis3.Minis3{}, nil
 	}
-	addrFn = func(*minis3.Minis3) string { return "127.0.0.1:9191" }
-	notifyFn = func(c chan<- os.Signal, _ ...os.Signal) {
+	d.addr = func(*minis3.Minis3) string { return "127.0.0.1:9191" }
+	d.notify = func(c chan<- os.Signal, _ ...os.Signal) {
 		c <- os.Interrupt
 	}
 	wantErr := errors.New("stop boom")
-	closeFn = func(*minis3.Minis3) error { return wantErr }
+	d.close = func(*minis3.Minis3) error { return wantErr }
 
-	err, ok := runWithTimeout(t, []string{"-port=9191"}, make(chan os.Signal, 1))
+	err, ok := runWithTimeout(t, d, []string{"-port=9191"}, make(chan os.Signal, 1))
 	if !ok {
 		t.Fatal("run() hung for stop error")
 	}
@@ -97,19 +83,20 @@ func TestRunStopError(t *testing.T) {
 }
 
 func TestRunSuccess(t *testing.T) {
-	resetMainHooks()
-	runAddrFn = func(string) (*minis3.Minis3, error) {
+	t.Parallel()
+	d := defaultDeps()
+	d.runAddr = func(string) (*minis3.Minis3, error) {
 		return &minis3.Minis3{}, nil
 	}
-	addrFn = func(*minis3.Minis3) string { return "127.0.0.1:9191" }
-	notifyFn = func(c chan<- os.Signal, _ ...os.Signal) {
+	d.addr = func(*minis3.Minis3) string { return "127.0.0.1:9191" }
+	d.notify = func(c chan<- os.Signal, _ ...os.Signal) {
 		c <- os.Interrupt
 	}
 	stopped := false
-	stopFn = func(chan<- os.Signal) { stopped = true }
-	closeFn = func(*minis3.Minis3) error { return nil }
+	d.stop = func(chan<- os.Signal) { stopped = true }
+	d.close = func(*minis3.Minis3) error { return nil }
 
-	err, ok := runWithTimeout(t, []string{"-port=9191"}, make(chan os.Signal, 1))
+	err, ok := runWithTimeout(t, d, []string{"-port=9191"}, make(chan os.Signal, 1))
 	if !ok {
 		t.Fatal("run() hung for success case")
 	}
@@ -117,22 +104,23 @@ func TestRunSuccess(t *testing.T) {
 		t.Fatalf("run() failed: %v", err)
 	}
 	if !stopped {
-		t.Fatal("expected stopFn to be called")
+		t.Fatal("expected stop to be called")
 	}
 }
 
 func TestRunSuccessWithNilSignalChannel(t *testing.T) {
-	resetMainHooks()
-	runAddrFn = func(string) (*minis3.Minis3, error) {
+	t.Parallel()
+	d := defaultDeps()
+	d.runAddr = func(string) (*minis3.Minis3, error) {
 		return &minis3.Minis3{}, nil
 	}
-	notifyFn = func(c chan<- os.Signal, _ ...os.Signal) {
+	d.notify = func(c chan<- os.Signal, _ ...os.Signal) {
 		c <- os.Interrupt
 	}
-	stopFn = func(chan<- os.Signal) {}
-	printfFn = func(string, ...any) {}
+	d.stop = func(chan<- os.Signal) {}
+	d.printf = func(string, ...any) {}
 
-	err, ok := runWithTimeout(t, []string{"-port=9191"}, nil)
+	err, ok := runWithTimeout(t, d, []string{"-port=9191"}, nil)
 	if !ok {
 		t.Fatal("run() hung for nil signal channel")
 	}
@@ -140,11 +128,11 @@ func TestRunSuccessWithNilSignalChannel(t *testing.T) {
 		t.Fatalf("run() with nil signal channel failed: %v", err)
 	}
 
-	// The created channel must be the one passed to stopFn, proving run()
+	// The created channel must be the one passed to stop, proving run()
 	// replaced the nil channel instead of using it.
 	var stoppedCh chan<- os.Signal = make(chan os.Signal, 1)
-	stopFn = func(c chan<- os.Signal) { stoppedCh = c }
-	err, ok = runWithTimeout(t, []string{"-port=9191"}, nil)
+	d.stop = func(c chan<- os.Signal) { stoppedCh = c }
+	err, ok = runWithTimeout(t, d, []string{"-port=9191"}, nil)
 	if !ok {
 		t.Fatal("run() hung for nil signal channel on second run")
 	}
@@ -152,25 +140,20 @@ func TestRunSuccessWithNilSignalChannel(t *testing.T) {
 		t.Fatalf("run() with nil signal channel failed: %v", err)
 	}
 	if stoppedCh == nil {
-		t.Fatal("expected stopFn to receive the created non-nil channel")
+		t.Fatal("expected stop to receive the created non-nil channel")
 	}
 }
 
-func TestMainCallsFatalOnError(t *testing.T) {
-	resetMainHooks()
-	origArgs := os.Args
-	os.Args = []string{"minis3", "-port=invalid"}
-	defer func() {
-		os.Args = origArgs
-	}()
-
+func TestMainWithCallsFatalOnError(t *testing.T) {
+	t.Parallel()
+	d := defaultDeps()
 	called := false
-	fatalfFn = func(string, ...any) { called = true }
+	d.fatalf = func(string, ...any) { called = true }
 	// main blocks on signals after a successful start, so run it in a
 	// goroutine: a hang means the parse error was ignored.
 	done := make(chan struct{})
 	go func() {
-		main()
+		mainWith(d, []string{"-port=invalid"})
 		close(done)
 	}()
 	select {
@@ -179,6 +162,23 @@ func TestMainCallsFatalOnError(t *testing.T) {
 		t.Fatal("main() hung for invalid port")
 	}
 	if !called {
-		t.Fatal("expected main() to call fatalfFn on run error")
+		t.Fatal("expected main() to call fatalf on run error")
+	}
+}
+
+// TestMainRunsWithMainDeps is not parallel: it replaces mainDeps and os.Args.
+func TestMainRunsWithMainDeps(t *testing.T) {
+	origDeps, origArgs := mainDeps, os.Args
+	t.Cleanup(func() { mainDeps, os.Args = origDeps, origArgs })
+	var fatal string
+	mainDeps = func() deps {
+		d := defaultDeps()
+		d.fatalf = func(format string, v ...any) { fatal = fmt.Sprintf(format, v...) }
+		return d
+	}
+	os.Args = []string{"minis3", "-port=invalid"}
+	main()
+	if !strings.Contains(fatal, "invalid") {
+		t.Fatalf("main() fatal = %q, want the parse error", fatal)
 	}
 }
