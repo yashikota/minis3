@@ -426,6 +426,7 @@ func denied(t *testing.T, route operationRoute, w *httptest.ResponseRecorder) bo
 }
 
 func TestOperationTable(t *testing.T) {
+	t.Parallel()
 	seen := map[string]bool{}
 	for _, route := range operationRoutes {
 		f := authzFixture{versionID: "v", uploadID: "u"}
@@ -476,6 +477,7 @@ func TestOperationTable(t *testing.T) {
 //   - Deny of the operation's action: the owner is denied too, except for
 //     the bucket policy operations the owner may always manage.
 func TestOperationAuthorizationMatrix(t *testing.T) {
+	t.Parallel()
 	for _, route := range operationRoutes {
 		if route.op == "" {
 			continue
@@ -541,6 +543,7 @@ func TestOperationAuthorizationMatrix(t *testing.T) {
 }
 
 func TestBypassGovernanceRetentionNeedsPermission(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T, actions ...string) (*Handler, string) {
 		t.Helper()
 		h, b := newTestHandler(t)
@@ -647,6 +650,7 @@ func TestBypassGovernanceRetentionNeedsPermission(t *testing.T) {
 }
 
 func TestDeleteObjectsAuthorizesEachKey(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, authzBucket)
 	b.SetBucketOwner(authzBucket, authzOwnerKey)
@@ -681,6 +685,7 @@ func TestDeleteObjectsAuthorizesEachKey(t *testing.T) {
 }
 
 func TestPostObjectAuthorizesTheFormSigner(t *testing.T) {
+	t.Parallel()
 	post := func(t *testing.T, h *Handler, accessKey string) *httptest.ResponseRecorder {
 		t.Helper()
 		fields := map[string]string{"key": "form-obj"}

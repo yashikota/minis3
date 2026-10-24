@@ -47,6 +47,7 @@ func postMultipartForm(
 }
 
 func TestBucketOperationHandlers(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "bucket")
 	mustPutObject(t, b, "bucket", "a/1.txt", "one")

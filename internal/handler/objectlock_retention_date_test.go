@@ -7,6 +7,7 @@ import (
 )
 
 func TestPutObjectRetentionDateFormatsBranch(t *testing.T) {
+	t.Parallel()
 	validDates := []string{
 		"2030-06-01T00:00:00Z",
 		"2030-06-01T00:00:00.000Z",

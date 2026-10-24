@@ -2,20 +2,24 @@ package handler
 
 import (
 	"testing"
+
+	"github.com/yashikota/minis3/internal/backend"
 )
 
 func FuzzTenantFromAccessKey(f *testing.F) {
+	h := New(backend.New())
 	f.Add("AKIAIOSFODNN7EXAMPLE")
 	f.Add("")
 	f.Add("testuser")
 	f.Add("tenant$user")
 
 	f.Fuzz(func(t *testing.T, accessKey string) {
-		_ = tenantFromAccessKey(accessKey)
+		_ = h.tenantFromAccessKey(accessKey)
 	})
 }
 
 func FuzzNormalizeBucketNameForRequestAccessKey(f *testing.F) {
+	h := New(backend.New())
 	f.Add("my-bucket", "AKIAIOSFODNN7EXAMPLE")
 	f.Add(":global-bucket", "AKID")
 	f.Add("tenant:bucket", "AKID")
@@ -23,7 +27,7 @@ func FuzzNormalizeBucketNameForRequestAccessKey(f *testing.F) {
 	f.Add("bucket", "")
 
 	f.Fuzz(func(t *testing.T, bucketName, accessKey string) {
-		_ = normalizeBucketNameForRequestAccessKey(bucketName, accessKey)
+		_ = h.normalizeBucketNameForRequestAccessKey(bucketName, accessKey)
 	})
 }
 

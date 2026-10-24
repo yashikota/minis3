@@ -14,17 +14,31 @@ import (
 
 const defaultPort = 9191
 
-var (
-	runAddrFn = minis3.RunAddr
-	addrFn    = func(s *minis3.Minis3) string { return s.Addr() }
-	closeFn   = func(s *minis3.Minis3) error { return s.Close() }
-	notifyFn  = signal.Notify
-	stopFn    = signal.Stop
-	printfFn  = log.Printf
-	fatalfFn  = log.Fatalf
-)
+// deps are what run and main use from the outside world; tests replace
+// them.
+type deps struct {
+	runAddr func(addr string) (*minis3.Minis3, error)
+	addr    func(s *minis3.Minis3) string
+	close   func(s *minis3.Minis3) error
+	notify  func(c chan<- os.Signal, sig ...os.Signal)
+	stop    func(c chan<- os.Signal)
+	printf  func(format string, v ...any)
+	fatalf  func(format string, v ...any)
+}
 
-func run(args []string, sigCh chan os.Signal) error {
+func defaultDeps() deps {
+	return deps{
+		runAddr: minis3.RunAddr,
+		addr:    func(s *minis3.Minis3) string { return s.Addr() },
+		close:   func(s *minis3.Minis3) error { return s.Close() },
+		notify:  signal.Notify,
+		stop:    signal.Stop,
+		printf:  log.Printf,
+		fatalf:  log.Fatalf,
+	}
+}
+
+func run(d deps, args []string, sigCh chan os.Signal) error {
 	fs := flag.NewFlagSet("minis3", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	port := fs.Int("port", defaultPort, "listen port")
@@ -32,27 +46,34 @@ func run(args []string, sigCh chan os.Signal) error {
 		return err
 	}
 
-	server, err := runAddrFn(fmt.Sprintf(":%d", *port))
+	server, err := d.runAddr(fmt.Sprintf(":%d", *port))
 	if err != nil {
 		return fmt.Errorf("failed to start minis3: %w", err)
 	}
-	printfFn("minis3 listening on %s", addrFn(server))
+	d.printf("minis3 listening on %s", d.addr(server))
 
 	if sigCh == nil {
 		sigCh = make(chan os.Signal, 1)
 	}
-	notifyFn(sigCh, os.Interrupt, syscall.SIGTERM)
+	d.notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
-	stopFn(sigCh)
+	d.stop(sigCh)
 
-	if err := closeFn(server); err != nil {
+	if err := d.close(server); err != nil {
 		return fmt.Errorf("failed to stop minis3: %w", err)
 	}
 	return nil
 }
 
+// mainDeps is main's only seam, so a test can run main itself.
+var mainDeps = defaultDeps
+
 func main() {
-	if err := run(os.Args[1:], nil); err != nil {
-		fatalfFn("%v", err)
+	mainWith(mainDeps(), os.Args[1:])
+}
+
+func mainWith(d deps, args []string) {
+	if err := run(d, args, nil); err != nil {
+		d.fatalf("%v", err)
 	}
 }

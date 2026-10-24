@@ -9,6 +9,7 @@ import (
 )
 
 func TestHandleRequestAppliesLifecycleOnInterval(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "lifecycle-interval")
 	mustPutObject(t, b, "lifecycle-interval", "past/foo", "data")

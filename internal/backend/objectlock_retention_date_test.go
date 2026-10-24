@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseRetainUntilDateFormats(t *testing.T) {
+	t.Parallel()
 	valid := []string{
 		// RFC3339 (SDK default) and plain Zulu.
 		"2030-01-02T15:04:05Z",
@@ -51,6 +52,7 @@ func TestParseRetainUntilDateFormats(t *testing.T) {
 }
 
 func TestPutObjectRetentionRetainUntilDateFormats(t *testing.T) {
+	t.Parallel()
 	validDates := []string{
 		"2030-06-01T00:00:00Z",           // RFC3339 / plain Zulu
 		"2030-06-01T00:00:00.000Z",       // millisecond Zulu

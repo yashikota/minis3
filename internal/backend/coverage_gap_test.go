@@ -7,6 +7,7 @@ import (
 )
 
 func TestOwnerResolverBranches(t *testing.T) {
+	t.Parallel()
 	known := OwnerForAccessKey("minis3-access-key")
 	if known == nil || known.DisplayName != "minis3" {
 		t.Fatalf("unexpected known owner: %+v", known)
@@ -42,6 +43,7 @@ func TestOwnerResolverBranches(t *testing.T) {
 }
 
 func TestACLAndLifecycleNormalizationBranches(t *testing.T) {
+	t.Parallel()
 	acl := NewDefaultACLForOwner(nil)
 	if acl.Owner == nil || acl.Owner.ID != DefaultOwner().ID {
 		t.Fatalf("unexpected default owner ACL: %+v", acl)
@@ -104,6 +106,7 @@ func TestACLAndLifecycleNormalizationBranches(t *testing.T) {
 }
 
 func TestObjectCurrentVisibleVersionBranches(t *testing.T) {
+	t.Parallel()
 	var nilVersions *ObjectVersions
 	if got := nilVersions.getCurrentVisibleVersion(); got != nil {
 		t.Fatalf("expected nil for nil receiver, got %+v", got)
@@ -129,6 +132,7 @@ func TestObjectCurrentVisibleVersionBranches(t *testing.T) {
 }
 
 func TestPolicyPrincipalHelperBranches(t *testing.T) {
+	t.Parallel()
 	ctx := PolicyEvalContext{AccessKey: "ak"}
 
 	if !matchesPrincipal(nil, ctx) {
@@ -199,6 +203,7 @@ func TestPolicyPrincipalHelperBranches(t *testing.T) {
 }
 
 func TestLifecycleHelperBranches(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 
 	if lifecycleRuleMatchesObject(LifecycleRule{}, "k", nil) {
@@ -545,6 +550,7 @@ func TestLifecycleHelperBranches(t *testing.T) {
 }
 
 func TestApplyLifecycleAndMultipartLifecycleBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	base := time.Now().UTC()
 	now := base.Add(72 * time.Hour)
@@ -736,6 +742,7 @@ func TestApplyLifecycleAndMultipartLifecycleBranches(t *testing.T) {
 }
 
 func TestDirectLifecycleEdgeBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	now := time.Now().UTC()
 	bucket := &Bucket{LifecycleConfiguration: &LifecycleConfiguration{Rules: []LifecycleRule{}}}
@@ -749,6 +756,7 @@ func TestDirectLifecycleEdgeBranches(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadNormalizedPartsGuardBranch(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("multipart-normalize-guard"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

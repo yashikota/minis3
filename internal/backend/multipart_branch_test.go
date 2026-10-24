@@ -7,6 +7,7 @@ import (
 )
 
 func TestMultipartCreateAndUploadPartBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	if _, err := b.CreateMultipartUpload(
@@ -84,6 +85,7 @@ func TestMultipartCreateAndUploadPartBranches(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("complete-branch-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -317,6 +319,7 @@ func TestCompleteMultipartUploadBranches(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadDuplicatePartNumberUsesLastEntry(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("complete-duplicate-part"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -373,6 +376,7 @@ func TestCompleteMultipartUploadDuplicatePartNumberUsesLastEntry(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadDuplicatePartNumbersDeduplicated(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		partNums  []int
@@ -441,6 +445,7 @@ func TestCompleteMultipartUploadDuplicatePartNumbersDeduplicated(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadDefaultsAndLocks(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("complete-defaults"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -535,6 +540,7 @@ func TestCompleteMultipartUploadDefaultsAndLocks(t *testing.T) {
 }
 
 func TestMultipartListingAndCopyPartBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("list-multipart-branches"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -770,6 +776,7 @@ func TestMultipartListingAndCopyPartBranches(t *testing.T) {
 }
 
 func TestListMultipartUploadsSameKeyMarkersAndSort(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("multipart-sort-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

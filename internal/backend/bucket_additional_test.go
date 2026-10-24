@@ -9,6 +9,7 @@ import (
 )
 
 func TestBucketManagementAndListing(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	for _, name := range []string{"alpha-bucket", "beta-bucket", "gamma-bucket"} {
@@ -85,6 +86,7 @@ func TestBucketManagementAndListing(t *testing.T) {
 }
 
 func TestBucketVersioningAndTypeHelpers(t *testing.T) {
+	t.Parallel()
 	if got := VersioningEnabled.String(); got != "Enabled" {
 		t.Fatalf("VersioningEnabled.String() = %q", got)
 	}
@@ -175,6 +177,7 @@ func TestBucketVersioningAndTypeHelpers(t *testing.T) {
 }
 
 func TestACLAndPublicAccessHelpers(t *testing.T) {
+	t.Parallel()
 	owner := DefaultOwner()
 	if owner == nil || owner.ID == "" || owner.DisplayName == "" {
 		t.Fatalf("unexpected default owner: %+v", owner)
@@ -362,6 +365,7 @@ func TestACLAndPublicAccessHelpers(t *testing.T) {
 }
 
 func TestIsValidCannedACL(t *testing.T) {
+	t.Parallel()
 	valid := []string{
 		"private",
 		"public-read",
@@ -393,6 +397,7 @@ func TestIsValidCannedACL(t *testing.T) {
 }
 
 func TestPutBucketLifecycleConfigurationAssignsRuleIDWhenMissing(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-id-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -437,6 +442,7 @@ func TestPutBucketLifecycleConfigurationAssignsRuleIDWhenMissing(t *testing.T) {
 }
 
 func TestACLNormalizationForXMLRoundTrip(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("acl-xml-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -538,6 +544,7 @@ func TestACLNormalizationForXMLRoundTrip(t *testing.T) {
 }
 
 func TestCannedACLToPolicyForOwnerBucketOwnerVariants(t *testing.T) {
+	t.Parallel()
 	objectOwner := OwnerForAccessKey("minis3-alt-access-key")
 	bucketOwner := OwnerForAccessKey("minis3-access-key")
 
@@ -594,6 +601,7 @@ func TestCannedACLToPolicyForOwnerBucketOwnerVariants(t *testing.T) {
 }
 
 func TestNormalizeACLFillsKnownCanonicalDisplayName(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("acl-displayname-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -644,6 +652,7 @@ func TestNormalizeACLFillsKnownCanonicalDisplayName(t *testing.T) {
 }
 
 func TestBucketConfigurationCRUD(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("config-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -870,6 +879,7 @@ func TestBucketConfigurationCRUD(t *testing.T) {
 }
 
 func TestGetObjectVersionLookup(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("obj-version-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -924,6 +934,7 @@ func TestGetObjectVersionLookup(t *testing.T) {
 }
 
 func TestPutBucketPolicyRejectsAllowNotPrincipal(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("policy-notprincipal"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -944,6 +955,7 @@ func TestPutBucketPolicyRejectsAllowNotPrincipal(t *testing.T) {
 }
 
 func TestPutBucketOwnershipControlsRejectsIncompatibleACL(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("ownership-acl"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -1000,6 +1012,7 @@ func TestPutBucketOwnershipControlsRejectsIncompatibleACL(t *testing.T) {
 }
 
 func TestBucketACLCompatibleWithOwnerEnforced(t *testing.T) {
+	t.Parallel()
 	if !bucketACLCompatibleWithOwnerEnforced(nil) {
 		t.Fatal("nil bucket should be compatible")
 	}

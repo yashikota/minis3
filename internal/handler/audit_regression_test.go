@@ -35,6 +35,7 @@ func mustVersionedBucketWithObject(
 }
 
 func TestConditionalHeadersFollowRFC9110Precedence(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	obj := mustVersionedBucketWithObject(t, b, "cond-bucket", "k")
 	lastModified := obj.LastModified.Format(http.TimeFormat)
@@ -77,6 +78,7 @@ func TestConditionalHeadersFollowRFC9110Precedence(t *testing.T) {
 }
 
 func TestCopySourceConditionalsFollowRFC9110Precedence(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	obj := mustVersionedBucketWithObject(t, b, "copy-cond", "src")
 	old := "Mon, 01 Jan 2001 00:00:00 GMT"
@@ -112,6 +114,7 @@ func TestCopySourceConditionalsFollowRFC9110Precedence(t *testing.T) {
 }
 
 func TestGetAndHeadDeleteMarkerVersionIs405(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustVersionedBucketWithObject(t, b, "dm-405", "k")
 	dm, err := b.DeleteObject("dm-405", "k", false)
@@ -137,6 +140,7 @@ func TestGetAndHeadDeleteMarkerVersionIs405(t *testing.T) {
 }
 
 func TestGetObjectRangeWithPartNumberIsInvalid(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "range-part")
 	mustPutObject(t, b, "range-part", "k", "abcdef")
@@ -149,6 +153,7 @@ func TestGetObjectRangeWithPartNumberIsInvalid(t *testing.T) {
 }
 
 func TestPutBucketVersioningPreservesUnspecifiedFields(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "versioning-keep")
 	put := func(body string, headers map[string]string) int {
@@ -215,6 +220,7 @@ func TestPutBucketVersioningPreservesUnspecifiedFields(t *testing.T) {
 }
 
 func TestMFADeleteEnforcedForVersionDeletes(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	obj := mustVersionedBucketWithObject(t, b, "mfa-delete", "k")
 	if err := b.SetBucketVersioning(
@@ -260,6 +266,7 @@ func TestMFADeleteEnforcedForVersionDeletes(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadUnknownUploadOnExistingKey(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "mpu-retry")
 	mustPutObject(t, b, "mpu-retry", "k", "existing")
@@ -290,6 +297,7 @@ func TestCompleteMultipartUploadUnknownUploadOnExistingKey(t *testing.T) {
 }
 
 func TestCopyObjectRestoresPreviousVersionOntoSameKey(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	v1 := mustVersionedBucketWithObject(t, b, "restore-version", "k")
 	if _, err := b.PutObject(
@@ -323,6 +331,7 @@ func TestCopyObjectRestoresPreviousVersionOntoSameKey(t *testing.T) {
 }
 
 func TestCopyObjectValidatesDirectivesAndTags(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "copy-validate")
 	mustPutObject(t, b, "copy-validate", "src", "x")
@@ -346,6 +355,7 @@ func TestCopyObjectValidatesDirectivesAndTags(t *testing.T) {
 }
 
 func TestListingsReportObjectOwner(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "owner-list")
 	alt := backend.OwnerForAccessKey("minis3-alt-access-key")
@@ -371,6 +381,7 @@ func TestListingsReportObjectOwner(t *testing.T) {
 }
 
 func TestListObjectsCapsMaxKeysAt1000(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "max-keys-cap")
 	for i := range 1001 {
@@ -393,6 +404,7 @@ func TestListObjectsCapsMaxKeysAt1000(t *testing.T) {
 }
 
 func TestListObjectVersionsChecksAccess(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "versions-private")
 	b.SetBucketOwner("versions-private", "minis3-access-key")
@@ -406,6 +418,7 @@ func TestListObjectVersionsChecksAccess(t *testing.T) {
 }
 
 func TestIAMCredentialsAreScopedPerHandler(t *testing.T) {
+	t.Parallel()
 	// Two minis3 instances in one process (e.g. parallel tests) must each
 	// resolve their own IAM access keys.
 	h1, b1 := newTestHandler(t)
@@ -436,6 +449,7 @@ func TestIAMCredentialsAreScopedPerHandler(t *testing.T) {
 }
 
 func TestConcurrentDeleteAndPutDoNotRace(t *testing.T) {
+	t.Parallel()
 	// Run with -race: DELETE preconditions used to read the bucket's object
 	// map without the backend lock.
 	h, b := newTestHandler(t)
@@ -469,6 +483,7 @@ func TestConcurrentDeleteAndPutDoNotRace(t *testing.T) {
 }
 
 func TestCopyFromDeleteMarkerVersionIs400(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustVersionedBucketWithObject(t, b, "copy-dm", "src")
 	dm, _ := b.DeleteObject("copy-dm", "src", false)
@@ -511,9 +526,9 @@ func TestCopyFromDeleteMarkerVersionIs400(t *testing.T) {
 	requireS3ErrorCode(t, w, "NoSuchKey")
 
 	// The version can vanish between the handler's checks and the copy.
-	restore := copyPartFn
-	t.Cleanup(func() { copyPartFn = restore })
-	copyPartFn = func(*Handler, string, string, string, string, string, string, int, int64, int64) (*backend.PartInfo, error) {
+	restore := h.hooks.copyPart
+	t.Cleanup(func() { h.hooks.copyPart = restore })
+	h.hooks.copyPart = func(*Handler, string, string, string, string, string, string, int, int64, int64) (*backend.PartInfo, error) {
 		return nil, backend.ErrVersionNotFound
 	}
 	w = doRequest(
@@ -530,6 +545,7 @@ func TestCopyFromDeleteMarkerVersionIs400(t *testing.T) {
 }
 
 func TestIsNoncurrentVersionMissingKey(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 	if h.isNoncurrentVersion("no-bucket", "k", "v1") {
 		t.Fatal("missing key must not count as a noncurrent version")

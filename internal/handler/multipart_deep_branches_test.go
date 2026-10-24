@@ -12,6 +12,7 @@ import (
 )
 
 func TestUploadPartSSEResponseHeaderBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustPublicWriteBucket(t, b, "mp-sse", "minis3-access-key")
 
@@ -76,6 +77,7 @@ func TestUploadPartSSEResponseHeaderBranches(t *testing.T) {
 }
 
 func TestCompleteMultipartUploadAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustPublicWriteBucket(t, b, "mp-complete", "minis3-access-key")
 	if err := b.SetBucketVersioning(
@@ -219,6 +221,7 @@ func TestCompleteMultipartUploadAdditionalBranches(t *testing.T) {
 }
 
 func TestUploadPartCopyAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "src-copy-branch")
 	mustPutObject(t, b, "src-copy-branch", "src", "source-data")

@@ -51,11 +51,6 @@ type Backend struct {
 	iamUserPolicies map[string]map[string]string // userName -> policyName -> document
 }
 
-var (
-	xmlMarshal = xml.Marshal
-	logFatalf  = log.Fatalf
-)
-
 // Bucket represents an S3 bucket containing objects and metadata
 type Bucket struct {
 	Name                    string
@@ -524,6 +519,18 @@ func (b *Backend) PrincipalForAccessKey(accessKey string) *PolicyPrincipal {
 }
 
 func WriteError(w http.ResponseWriter, code int, s3Code, message string) {
+	writeError(w, code, s3Code, message, xml.Marshal, log.Fatalf)
+}
+
+// writeError is WriteError with its marshaller and fatal logger passed in,
+// so a test can make marshalling fail.
+func writeError(
+	w http.ResponseWriter,
+	code int,
+	s3Code, message string,
+	xmlMarshal func(any) ([]byte, error),
+	logFatalf func(string, ...any),
+) {
 	w.WriteHeader(code)
 	// S3 errors are XML
 	resp := ErrorResponse{

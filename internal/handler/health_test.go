@@ -6,6 +6,7 @@ import (
 )
 
 func TestHealthEndpoint(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHandler(t)
 
 	t.Run("get", func(t *testing.T) {

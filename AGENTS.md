@@ -31,6 +31,7 @@
 ## Testing Guidelines
 - Prefer table-driven tests for S3 edge cases and error mapping.
 - Use `t.Cleanup` for server/resource teardown to keep tests isolated.
+- Start top-level tests with `t.Parallel()`. Inject failures through the seams of the value under test (`h.hooks` on a `Handler`, `Minis3.listen`/`fatal`, `deps` in `cmd/minis3`), never through package-level variables; only tests that need `t.Setenv` or `os.Args` stay sequential.
 - Run `task test` before every PR; run `task s3-test` when protocol behavior changes.
 - Target `100%` coverage in touched packages and changed branches.
 - For every implementation change, add meaningful unit tests for happy paths, edge cases, and AWS-spec error behavior.

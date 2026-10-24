@@ -6,6 +6,7 @@ import (
 )
 
 func TestPolicyStringOrSliceUnmarshalJSON(t *testing.T) {
+	t.Parallel()
 	var single PolicyStringOrSlice
 	if err := json.Unmarshal([]byte(`"s3:GetObject"`), &single); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -44,6 +45,7 @@ func TestPolicyStringOrSliceUnmarshalJSON(t *testing.T) {
 }
 
 func TestPolicyMatcherHelpers(t *testing.T) {
+	t.Parallel()
 	t.Run("matches action branches", func(t *testing.T) {
 		if !matchesAction(PolicyStringOrSlice{"*"}, "s3:DeleteObject") {
 			t.Fatal("expected wildcard action to match")
@@ -121,6 +123,7 @@ func TestPolicyMatcherHelpers(t *testing.T) {
 }
 
 func TestPolicyConditionHelpers(t *testing.T) {
+	t.Parallel()
 	ctx := PolicyEvalContext{
 		Headers: map[string]string{
 			"referer":                      "https://example.test",
@@ -217,6 +220,7 @@ func TestPolicyConditionHelpers(t *testing.T) {
 }
 
 func TestPolicyResourceMismatchAndWildcardMisses(t *testing.T) {
+	t.Parallel()
 	policy := mustPolicyJSON(t, map[string]any{
 		"Version": "2012-10-17",
 		"Statement": []any{

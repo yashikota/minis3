@@ -9,6 +9,7 @@ import (
 )
 
 func TestValidateMultipartSSECustomerHeaders(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodPut, "http://example.test", nil)
 
 	if code, msg := validateMultipartSSECustomerHeaders(nil, req); code != "" || msg != "" {
@@ -59,6 +60,7 @@ func TestValidateMultipartSSECustomerHeaders(t *testing.T) {
 }
 
 func TestValidateCopySourceSSECustomerHeaders(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodPut, "http://example.test", nil)
 
 	if code, msg := validateCopySourceSSECustomerHeaders(nil, req); code != "" || msg != "" {
@@ -109,6 +111,7 @@ func TestValidateCopySourceSSECustomerHeaders(t *testing.T) {
 }
 
 func TestLoadCopySourceObjectForUploadPart(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 
 	obj, code, _, status := h.loadCopySourceObjectForUploadPart(nil)
@@ -195,6 +198,7 @@ func TestLoadCopySourceObjectForUploadPart(t *testing.T) {
 }
 
 func TestHandleCompleteMultipartUploadRejectsMissingSSECHeaders(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustPublicWriteBucket(t, b, "complete-ssec", "minis3-access-key")
 

@@ -14,6 +14,7 @@ import (
 )
 
 func TestExtractMetadata(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest(http.MethodPut, "http://example.test/bucket/key", nil)
 	r.Header.Set("X-Amz-Meta-User", "Alice")
 	r.Header.Set("x-amz-meta-note", "caf%C3%A9")
@@ -38,6 +39,7 @@ func TestExtractMetadata(t *testing.T) {
 }
 
 func TestSetMetadataHeadersAndEncoding(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	setMetadataHeaders(w, map[string]string{
 		"plain": "value",
@@ -76,6 +78,7 @@ func getHeaderValuesCaseInsensitive(h http.Header, key string) []string {
 }
 
 func TestParseTaggingAndValidation(t *testing.T) {
+	t.Parallel()
 	if got := parseTaggingHeader(""); got != nil {
 		t.Fatalf("expected nil for empty tagging header, got %+v", got)
 	}
@@ -120,6 +123,7 @@ func TestParseTaggingAndValidation(t *testing.T) {
 }
 
 func TestObjectResponseHeaderSetters(t *testing.T) {
+	t.Parallel()
 	obj := &backend.Object{
 		RetentionMode:        backend.RetentionModeGovernance,
 		RetainUntilDate:      ptrTime(time.Date(2026, 2, 7, 12, 0, 0, 0, time.UTC)),
@@ -189,6 +193,7 @@ func TestObjectResponseHeaderSetters(t *testing.T) {
 }
 
 func TestValidateSSEHeaders(t *testing.T) {
+	t.Parallel()
 	req := func() *http.Request {
 		return httptest.NewRequest(http.MethodPut, "http://example.test/bucket/key", nil)
 	}
@@ -292,6 +297,7 @@ func TestValidateSSEHeaders(t *testing.T) {
 }
 
 func TestValidateSSEHeaders_SSEKMSKeyIdOptional(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		sse       string
@@ -361,6 +367,7 @@ func TestValidateSSEHeaders_SSEKMSKeyIdOptional(t *testing.T) {
 }
 
 func TestValidateSSECAccess(t *testing.T) {
+	t.Parallel()
 	obj := &backend.Object{SSECustomerAlgorithm: "AES256", SSECustomerKeyMD5: "expected-md5"}
 
 	t.Run("not sse-c object", func(t *testing.T) {
@@ -407,6 +414,7 @@ func TestValidateSSECAccess(t *testing.T) {
 }
 
 func TestInferChecksumAlgorithmFromTrailer(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		trailer string
 		want    string
@@ -430,6 +438,7 @@ func TestInferChecksumAlgorithmFromTrailer(t *testing.T) {
 }
 
 func TestGetPartData(t *testing.T) {
+	t.Parallel()
 	obj := &backend.Object{Data: []byte("hello"), Size: 5}
 	if data, size, _, ok := getPartData(obj, 1); !ok || string(data) != "hello" || size != 5 {
 		t.Fatalf(
@@ -473,6 +482,7 @@ func TestGetPartData(t *testing.T) {
 }
 
 func TestParseRangeHeader(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		header    string

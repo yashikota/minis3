@@ -16,6 +16,7 @@ func mustCreateBucketCov(t *testing.T, b *Backend, name string) {
 }
 
 func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateBucketCov(t, b, "src-controls")
 	mustCreateBucketCov(t, b, "dst-controls")
@@ -353,6 +354,7 @@ func TestBackendBucketControlsAndLoggingCoverage(t *testing.T) {
 }
 
 func TestBackendBucketLoggingEqualityHelpersCoverage(t *testing.T) {
+	t.Parallel()
 	if !bucketLoggingConfigEqual(nil, nil) {
 		t.Fatal("bucketLoggingConfigEqual(nil,nil) should be true")
 	}
@@ -585,6 +587,7 @@ func TestBackendBucketLoggingEqualityHelpersCoverage(t *testing.T) {
 }
 
 func TestBackendObjectACLAndDeletePreconditionHelpersCoverage(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateBucketCov(t, b, "objacl-controls")
 
@@ -1056,6 +1059,7 @@ func TestBackendRestoreAndLifecycleHelperCoverage(t *testing.T) {
 }
 
 func TestBackendMultipartChecksumBranchesCoverage(t *testing.T) {
+	t.Parallel()
 	makeUploadAndComplete := func(
 		t *testing.T,
 		algorithm string,
@@ -1165,6 +1169,7 @@ func TestBackendMultipartChecksumBranchesCoverage(t *testing.T) {
 }
 
 func TestBackendPutCopyDeletePolicyAndRetentionRemainingBranches(t *testing.T) {
+	t.Parallel()
 	b := New()
 	mustCreateBucketCov(t, b, "put-rem")
 	putBucket := liveBucket(t, b, "put-rem")

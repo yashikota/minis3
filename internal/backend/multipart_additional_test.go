@@ -7,6 +7,7 @@ import (
 )
 
 func TestMultipartUploadLifecycleHelpers(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("multipart-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -46,6 +47,7 @@ func TestMultipartUploadLifecycleHelpers(t *testing.T) {
 }
 
 func TestListMultipartUploadsWithFiltersAndPagination(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("list-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -115,6 +117,7 @@ func TestListMultipartUploadsWithFiltersAndPagination(t *testing.T) {
 }
 
 func TestListPartsScenarios(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("parts-bucket"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

@@ -10,6 +10,7 @@ import (
 // TestExpectedBucketOwnerUsesRealOwner verifies that x-amz-expected-bucket-owner
 // is compared against the actual bucket owner instead of only DefaultOwner.
 func TestExpectedBucketOwnerUsesRealOwner(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "expowner-alt")
 	b.SetBucketOwner("expowner-alt", "minis3-alt-access-key")

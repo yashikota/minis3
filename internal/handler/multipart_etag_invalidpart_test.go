@@ -12,6 +12,7 @@ import (
 // a CompleteMultipartUpload referencing a non-hex ETag is a client error and
 // must yield 400 InvalidPart, never 500 InternalError.
 func TestCompleteMultipartUploadNonHexETagIsInvalidPart(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "mp-etag-err")
 	b.SetBucketOwner("mp-etag-err", "minis3-access-key")
@@ -56,13 +57,14 @@ func TestCompleteMultipartUploadNonHexETagIsInvalidPart(t *testing.T) {
 // ErrInvalidPart (not a plain error), so the handler must respond with
 // 400 InvalidPart instead of 500 InternalError.
 func TestCompleteMultipartUploadCorruptStoredETagIsInvalidPart(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "mp-etag-corrupt")
 	b.SetBucketOwner("mp-etag-corrupt", "minis3-access-key")
 
-	restore := completeMultipartUploadFn
-	t.Cleanup(func() { completeMultipartUploadFn = restore })
-	completeMultipartUploadFn = func(
+	restore := h.hooks.completeMultipartUpload
+	t.Cleanup(func() { h.hooks.completeMultipartUpload = restore })
+	h.hooks.completeMultipartUpload = func(
 		*Handler,
 		string,
 		string,

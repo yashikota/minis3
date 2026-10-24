@@ -7,6 +7,7 @@ import (
 )
 
 func TestApplyLifecycleExpiresCurrentObjectByPrefix(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-apply"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -55,6 +56,7 @@ func TestApplyLifecycleExpiresCurrentObjectByPrefix(t *testing.T) {
 }
 
 func TestApplyLifecycleExpiresByTagAndAndFilter(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-tags"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -112,6 +114,7 @@ func TestApplyLifecycleExpiresByTagAndAndFilter(t *testing.T) {
 }
 
 func TestApplyLifecycleExpiresNoncurrentVersions(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-noncurrent"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -167,6 +170,7 @@ func TestApplyLifecycleExpiresNoncurrentVersions(t *testing.T) {
 }
 
 func TestApplyLifecycleDeletesExpiredObjectDeleteMarker(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-delete-marker"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -236,6 +240,7 @@ func TestApplyLifecycleDeletesExpiredObjectDeleteMarker(t *testing.T) {
 }
 
 func TestApplyLifecycleDeletesOrphanDeleteMarkerAfterExpirationDays(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-delete-marker-days"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -299,6 +304,7 @@ func TestApplyLifecycleDeletesOrphanDeleteMarkerAfterExpirationDays(t *testing.T
 }
 
 func TestApplyLifecycleAbortsIncompleteMultipartUpload(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-multipart"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -352,6 +358,7 @@ func TestApplyLifecycleAbortsIncompleteMultipartUpload(t *testing.T) {
 }
 
 func TestApplyLifecycleTransitionsCurrentObjectStorageClass(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-current-transition"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)
@@ -409,6 +416,7 @@ func TestApplyLifecycleTransitionsCurrentObjectStorageClass(t *testing.T) {
 }
 
 func TestApplyLifecycleTransitionsNoncurrentVersionsStorageClass(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if err := b.CreateBucket("lifecycle-noncurrent-transition"); err != nil {
 		t.Fatalf("CreateBucket failed: %v", err)

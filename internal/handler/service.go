@@ -115,7 +115,7 @@ func (h *Handler) handleService(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(resp)
+	output, err := h.hooks.xmlMarshal(resp)
 	if err != nil {
 		backend.WriteError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
@@ -198,7 +198,7 @@ type iamResponseMetadata struct {
 
 func (h *Handler) handleIAMGetUser(w http.ResponseWriter, r *http.Request) {
 	accessKey := extractAccessKey(r)
-	owner := ownerForAccessKeyFn(accessKey)
+	owner := h.hooks.ownerForAccessKey(accessKey)
 	if owner == nil {
 		owner = backend.DefaultOwner()
 	}
@@ -239,7 +239,7 @@ const iamXmlns = "https://iam.amazonaws.com/doc/2010-05-08/"
 func (h *Handler) writeIAMResponse(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "text/xml")
 	_, _ = w.Write([]byte(xml.Header))
-	output, err := xmlMarshalFn(v)
+	output, err := h.hooks.xmlMarshal(v)
 	if err != nil {
 		writeIAMError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return

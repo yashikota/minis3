@@ -1,6 +1,10 @@
 package handler
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/yashikota/minis3/internal/backend"
+)
 
 func FuzzParseRangeHeader(f *testing.F) {
 	f.Add("bytes=0-10", int64(100))
@@ -50,6 +54,7 @@ func FuzzDecodeURI(f *testing.F) {
 }
 
 func FuzzDecodeAndParseCopySource(f *testing.F) {
+	h := New(backend.New())
 	f.Add("/bucket/key")
 	f.Add("/bucket/key?versionId=abc")
 	f.Add("")
@@ -66,7 +71,7 @@ func FuzzDecodeAndParseCopySource(f *testing.F) {
 	f.Add("/bucket/")
 
 	f.Fuzz(func(t *testing.T, src string) {
-		_, _ = decodeAndParseCopySource(src)
+		_, _ = h.decodeAndParseCopySource(src)
 	})
 }
 

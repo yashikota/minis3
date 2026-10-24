@@ -8,6 +8,7 @@ import (
 // known access key owner and the default owner must resolve by canonical ID,
 // and unknown IDs must resolve to nil.
 func TestBuildOwnersByCanonicalID(t *testing.T) {
+	t.Parallel()
 	owners := buildOwnersByCanonicalID()
 	// The default owner shares its canonical ID with minis3-access-key,
 	// so the index holds one entry per distinct canonical ID.

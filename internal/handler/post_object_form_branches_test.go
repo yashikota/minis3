@@ -77,6 +77,7 @@ func encodePostPolicyWithKeyPrefix(t *testing.T, bucket, keyPrefix string) strin
 }
 
 func TestHandlePostObjectFormUploadBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "form-bucket")
 

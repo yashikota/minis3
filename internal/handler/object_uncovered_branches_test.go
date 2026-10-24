@@ -21,6 +21,7 @@ func mustChecksumBase64(t *testing.T, algorithm string, data []byte) string {
 }
 
 func TestObjectHelperUncoveredBranches(t *testing.T) {
+	t.Parallel()
 	if got := parseTaggingHeader("&"); got != nil {
 		t.Fatalf("parseTaggingHeader(\"&\") = %#v, want nil", got)
 	}
@@ -72,6 +73,7 @@ func TestObjectHelperUncoveredBranches(t *testing.T) {
 }
 
 func TestHandleObjectPutAdditionalBranchesUncovered(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-put-branch")
 
@@ -98,12 +100,12 @@ func TestHandleObjectPutAdditionalBranchesUncovered(t *testing.T) {
 	)
 
 	t.Run("put object ACL write failure after put", func(t *testing.T) {
-		origPutACL := putObjectACLFn
-		putObjectACLFn = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
+		origPutACL := h.hooks.putObjectACL
+		h.hooks.putObjectACL = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
 			return errors.New("put object acl boom")
 		}
 		t.Cleanup(func() {
-			putObjectACLFn = origPutACL
+			h.hooks.putObjectACL = origPutACL
 		})
 
 		w := doRequest(
@@ -116,6 +118,7 @@ func TestHandleObjectPutAdditionalBranchesUncovered(t *testing.T) {
 }
 
 func TestHandleObjectReadDeleteHeadAdditionalBranchesUncovered(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-rdh")
 	if err := b.SetBucketVersioning(
@@ -272,6 +275,7 @@ func TestHandleObjectReadDeleteHeadAdditionalBranchesUncovered(t *testing.T) {
 }
 
 func TestHandleCopyObjectAdditionalBranchesUncovered(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "copy-src")
 	mustCreateBucket(t, b, "copy-dst")
@@ -379,8 +383,8 @@ func TestHandleCopyObjectAdditionalBranchesUncovered(t *testing.T) {
 	})
 
 	t.Run("copy unexpected backend error", func(t *testing.T) {
-		origCopy := copyObjectFn
-		copyObjectFn = func(
+		origCopy := h.hooks.copyObject
+		h.hooks.copyObject = func(
 			*Handler,
 			string,
 			string,
@@ -392,7 +396,7 @@ func TestHandleCopyObjectAdditionalBranchesUncovered(t *testing.T) {
 			return nil, "", errors.New("copy boom")
 		}
 		t.Cleanup(func() {
-			copyObjectFn = origCopy
+			h.hooks.copyObject = origCopy
 		})
 
 		req := newRequest(
@@ -404,13 +408,13 @@ func TestHandleCopyObjectAdditionalBranchesUncovered(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		copyObjectFn = origCopy
+		h.hooks.copyObject = origCopy
 	})
 
 	t.Run("copy put object ACL failure after copy", func(t *testing.T) {
-		origCopy := copyObjectFn
-		origPutACL := putObjectACLFn
-		copyObjectFn = func(
+		origCopy := h.hooks.copyObject
+		origPutACL := h.hooks.putObjectACL
+		h.hooks.copyObject = func(
 			*Handler,
 			string,
 			string,
@@ -425,12 +429,12 @@ func TestHandleCopyObjectAdditionalBranchesUncovered(t *testing.T) {
 				VersionId:    backend.NullVersionId,
 			}, "", nil
 		}
-		putObjectACLFn = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
+		h.hooks.putObjectACL = func(*Handler, string, string, string, *backend.AccessControlPolicy) error {
 			return errors.New("put acl after copy boom")
 		}
 		t.Cleanup(func() {
-			copyObjectFn = origCopy
-			putObjectACLFn = origPutACL
+			h.hooks.copyObject = origCopy
+			h.hooks.putObjectACL = origPutACL
 		})
 
 		req := newRequest(
@@ -442,12 +446,13 @@ func TestHandleCopyObjectAdditionalBranchesUncovered(t *testing.T) {
 		w := doRequest(h, req)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		copyObjectFn = origCopy
-		putObjectACLFn = origPutACL
+		h.hooks.copyObject = origCopy
+		h.hooks.putObjectACL = origPutACL
 	})
 }
 
 func TestObjectACLAndAttributesAdditionalBranchesUncovered(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj-acl-attr")
 	if err := b.SetBucketVersioning(
@@ -474,12 +479,12 @@ func TestObjectACLAndAttributesAdditionalBranchesUncovered(t *testing.T) {
 	}
 
 	t.Run("get object ACL internal error", func(t *testing.T) {
-		orig := getObjectACLFn
-		getObjectACLFn = func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
+		orig := h.hooks.getObjectACL
+		h.hooks.getObjectACL = func(*Handler, string, string, string) (*backend.AccessControlPolicy, error) {
 			return nil, errors.New("get acl boom")
 		}
 		t.Cleanup(func() {
-			getObjectACLFn = orig
+			h.hooks.getObjectACL = orig
 		})
 
 		w := doRequest(
@@ -488,7 +493,7 @@ func TestObjectACLAndAttributesAdditionalBranchesUncovered(t *testing.T) {
 		)
 		requireStatus(t, w, http.StatusInternalServerError)
 		requireS3ErrorCode(t, w, "InternalError")
-		getObjectACLFn = orig
+		h.hooks.getObjectACL = orig
 	})
 
 	t.Run("put object ACL body path key not found", func(t *testing.T) {

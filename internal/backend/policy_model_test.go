@@ -349,6 +349,7 @@ func allSubsets(items []string) [][]string {
 // textual name exactly as a policy spells it, with the condition model, for
 // every presence/value-set combination over three values.
 func TestPolicyConditionModel(t *testing.T) {
+	t.Parallel()
 	values := []string{"a", "b", "c"}
 	// Policy values for the Like family include patterns.
 	likeValues := []string{"a", "?", "*"}

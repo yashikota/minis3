@@ -8,6 +8,7 @@ import (
 )
 
 func TestBucketErrorBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "bucket-errors")
 
@@ -264,6 +265,7 @@ func TestBucketErrorBranches(t *testing.T) {
 }
 
 func TestObjectErrorBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "obj")
 	mustPutObject(t, b, "obj", "k", "v")

@@ -61,6 +61,7 @@ func requirePresignedErrorCode(t *testing.T, err error, wantCode string) {
 }
 
 func TestIsPresignedURL(t *testing.T) {
+	t.Parallel()
 	t.Run("detects v4 presigned URL", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/bucket/key?X-Amz-Signature=sig", nil)
 		if !isPresignedURL(req) {
@@ -84,6 +85,7 @@ func TestIsPresignedURL(t *testing.T) {
 }
 
 func TestVerifyPresignedURLV4(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Add(-1 * time.Minute)
 
 	t.Run("valid signature", func(t *testing.T) {
@@ -283,6 +285,7 @@ func TestVerifyPresignedURLV4(t *testing.T) {
 }
 
 func TestVerifyPresignedURLV2(t *testing.T) {
+	t.Parallel()
 	t.Run("valid non-expired request", func(t *testing.T) {
 		expires := strconv.FormatInt(time.Now().Add(5*time.Minute).Unix(), 10)
 		unsigned := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
@@ -331,6 +334,7 @@ func TestVerifyPresignedURLV2(t *testing.T) {
 }
 
 func TestVerifyPresignedURLWithoutSignatureReturnsNil(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest(http.MethodGet, "/bucket/key?foo=bar", nil)
 	if err := verifyPresignedURL(req); err != nil {
 		t.Fatalf("expected nil for non-presigned URL, got %v", err)

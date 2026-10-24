@@ -6,9 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/yashikota/minis3/internal/backend"
 )
 
 func TestIsAnonymousRequest(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		build  func(*http.Request)
@@ -69,6 +72,8 @@ func TestIsAnonymousRequest(t *testing.T) {
 }
 
 func TestMultipartFieldHelpers(t *testing.T) {
+	t.Parallel()
+	h := New(backend.New())
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField("Policy", "policy-value"); err != nil {
@@ -104,7 +109,7 @@ func TestMultipartFieldHelpers(t *testing.T) {
 		t.Fatalf("ParseMultipartForm failed: %v", err)
 	}
 
-	fields := parseMultipartFormFields(r)
+	fields := h.parseMultipartFormFields(r)
 	if got := getMultipartFormValue(fields, "POLICY"); got != "policy-value" {
 		t.Fatalf("getMultipartFormValue(POLICY) = %q", got)
 	}
@@ -117,7 +122,7 @@ func TestMultipartFieldHelpers(t *testing.T) {
 
 	t.Run("nil multipart form returns empty map", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "http://example.test/upload", nil)
-		got := parseMultipartFormFields(req)
+		got := h.parseMultipartFormFields(req)
 		if len(got) != 0 {
 			t.Fatalf("expected empty fields for nil multipart form, got %+v", got)
 		}
@@ -133,7 +138,7 @@ func TestMultipartFieldHelpers(t *testing.T) {
 				"Policy": {{Filename: "policy.txt"}},
 			},
 		}
-		got := parseMultipartFormFields(req)
+		got := h.parseMultipartFormFields(req)
 		if got["policy"] != "from-value" {
 			t.Fatalf("expected value-form field to win, got %+v", got)
 		}
@@ -146,7 +151,7 @@ func TestMultipartFieldHelpers(t *testing.T) {
 				"X-Amz-Signature": {{Filename: "sig.txt"}},
 			},
 		}
-		got := parseMultipartFormFields(req)
+		got := h.parseMultipartFormFields(req)
 		if _, ok := got["x-amz-signature"]; ok {
 			t.Fatalf("expected x-amz-signature to be skipped on open error, got %+v", got)
 		}
@@ -154,6 +159,7 @@ func TestMultipartFieldHelpers(t *testing.T) {
 }
 
 func TestParsePolicyInt64(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  any
@@ -188,6 +194,7 @@ func TestParsePolicyInt64(t *testing.T) {
 }
 
 func TestS3URLEncode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -205,6 +212,7 @@ func TestS3URLEncode(t *testing.T) {
 }
 
 func TestParseOptionalObjectAttributes(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest(http.MethodGet, "http://example.test/bucket", nil)
 
 	attrs := parseOptionalObjectAttributes(r)
@@ -220,6 +228,7 @@ func TestParseOptionalObjectAttributes(t *testing.T) {
 }
 
 func TestResolvePostObjectFormKey(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		rawKey    string

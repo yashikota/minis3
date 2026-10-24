@@ -30,6 +30,7 @@ func allowLoggingPolicy(sourceBucket, targetBucket, targetPrefix, sourceAccount 
 }
 
 func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "src-log")
 	mustCreateBucket(t, b, "dst-log")
@@ -451,6 +452,7 @@ func TestBucketLoggingOwnershipAndRequestPaymentBranches(t *testing.T) {
 }
 
 func TestBucketLoggingHelperFunctions(t *testing.T) {
+	t.Parallel()
 	tenant, bucket := splitQualifiedBucketName("tenant:bucket")
 	if tenant != "tenant" || bucket != "bucket" {
 		t.Fatalf("splitQualifiedBucketName = (%q,%q), want (tenant,bucket)", tenant, bucket)
@@ -498,6 +500,7 @@ func TestBucketLoggingHelperFunctions(t *testing.T) {
 }
 
 func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "src-policy")
 	mustCreateBucket(t, b, "dst-policy")
@@ -634,6 +637,7 @@ func TestBucketLoggingTargetAllowedBranches(t *testing.T) {
 }
 
 func TestServerAccessLoggingHelperBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "src-access-log")
 	mustCreateBucket(t, b, "dst-access-log")
@@ -660,19 +664,19 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 	}
 
 	t.Run("basic helper functions", func(t *testing.T) {
-		if got := tenantFromAccessKey("tenant-access-key"); got != "tenant" {
+		if got := h.tenantFromAccessKey("tenant-access-key"); got != "tenant" {
 			t.Fatalf("tenantFromAccessKey = %q, want tenant", got)
 		}
-		if got := tenantFromAccessKey("missing"); got != "" {
+		if got := h.tenantFromAccessKey("missing"); got != "" {
 			t.Fatalf("tenantFromAccessKey unknown = %q, want empty", got)
 		}
-		if got := normalizeBucketNameForRequestAccessKey(
+		if got := h.normalizeBucketNameForRequestAccessKey(
 			"bucket",
 			"tenant-access-key",
 		); got != "tenant:bucket" {
 			t.Fatalf("normalizeBucketNameForRequestAccessKey = %q, want tenant:bucket", got)
 		}
-		if got := normalizeBucketNameForRequestAccessKey(
+		if got := h.normalizeBucketNameForRequestAccessKey(
 			"tenant:bucket",
 			"tenant-access-key",
 		); got != "tenant:bucket" {
@@ -867,8 +871,8 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 		)
 
 		wantErr := errors.New("put object failed")
-		origPutObjectForLogging := putObjectForLoggingFn
-		putObjectForLoggingFn = func(
+		origPutObjectForLogging := h.hooks.putObjectForLogging
+		h.hooks.putObjectForLogging = func(
 			_ *Handler,
 			_, _ string,
 			_ []byte,
@@ -877,7 +881,7 @@ func TestServerAccessLoggingHelperBranches(t *testing.T) {
 			return nil, wantErr
 		}
 		t.Cleanup(func() {
-			putObjectForLoggingFn = origPutObjectForLogging
+			h.hooks.putObjectForLogging = origPutObjectForLogging
 		})
 
 		_, err = h.flushServerAccessLogBatch(&serverAccessLogBatch{

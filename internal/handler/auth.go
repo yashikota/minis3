@@ -39,22 +39,18 @@ func defaultCredentialLookup(accessKey string) (string, bool) {
 	return secret, ok
 }
 
-// credentialLookupFn resolves an access key to its secret key when the
-// request carries no handler-specific lookup (see lookupCredential).
-var credentialLookupFn = defaultCredentialLookup
-
 // credentialLookupContextKey carries the serving handler's credential lookup
 // on the request, so several minis3 instances in one process each resolve
 // their own IAM access keys instead of sharing a package-level hook.
 type credentialLookupContextKey struct{}
 
 // lookupCredential resolves accessKey with the lookup of the handler serving
-// r, falling back to credentialLookupFn.
+// r, falling back to the default credentials.
 func lookupCredential(r *http.Request, accessKey string) (string, bool) {
 	if fn, ok := r.Context().Value(credentialLookupContextKey{}).(func(string) (string, bool)); ok {
 		return fn(accessKey)
 	}
-	return credentialLookupFn(accessKey)
+	return defaultCredentialLookup(accessKey)
 }
 
 // isPresignedURL checks if the request is a presigned URL request.

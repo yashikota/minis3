@@ -11,6 +11,7 @@ import (
 )
 
 func TestPresignedErrorError(t *testing.T) {
+	t.Parallel()
 	e := &presignedError{message: "msg"}
 	if got := e.Error(); got != "msg" {
 		t.Fatalf("Error() = %q, want %q", got, "msg")
@@ -18,6 +19,7 @@ func TestPresignedErrorError(t *testing.T) {
 }
 
 func TestACLHelpers(t *testing.T) {
+	t.Parallel()
 	if isPublicACL(nil) {
 		t.Fatal("nil ACL should not be public")
 	}
@@ -58,6 +60,7 @@ func TestACLHelpers(t *testing.T) {
 }
 
 func TestACLAllowsACPAdditionalBranches(t *testing.T) {
+	t.Parallel()
 	t.Run("all users and authenticated users branches", func(t *testing.T) {
 		acl := &backend.AccessControlPolicy{
 			AccessControlList: backend.AccessControlList{
@@ -114,6 +117,7 @@ func TestACLAllowsACPAdditionalBranches(t *testing.T) {
 }
 
 func TestNormalizeAndValidateACL(t *testing.T) {
+	t.Parallel()
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 
 	t.Run("normalizes owner and email grantee", func(t *testing.T) {
@@ -178,6 +182,7 @@ func TestNormalizeAndValidateACL(t *testing.T) {
 }
 
 func TestACLFromGrantHeaders(t *testing.T) {
+	t.Parallel()
 	owner := backend.OwnerForAccessKey("minis3-access-key")
 
 	t.Run("no headers", func(t *testing.T) {
@@ -223,6 +228,7 @@ func TestACLFromGrantHeaders(t *testing.T) {
 }
 
 func TestHandlerMiscBranches(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "bucket")
 
@@ -264,6 +270,7 @@ func TestHandlerMiscBranches(t *testing.T) {
 }
 
 func TestCORSOriginMatchBranches(t *testing.T) {
+	t.Parallel()
 	if !corsOriginMatch("*", "https://example.com") {
 		t.Fatal("wildcard origin should match")
 	}

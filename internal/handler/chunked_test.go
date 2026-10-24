@@ -18,6 +18,7 @@ func (errReader) Read(_ []byte) (int, error) {
 }
 
 func TestDecodeAWSChunkedBody(t *testing.T) {
+	t.Parallel()
 	t.Run("decode success", func(t *testing.T) {
 		body := "4;chunk-signature=abc\r\ntest\r\n5;chunk-signature=def\r\n-body\r\n0;chunk-signature=end\r\n\r\n"
 		got, err := decodeAWSChunkedBody(strings.NewReader(body))
@@ -87,6 +88,7 @@ func TestDecodeAWSChunkedBody(t *testing.T) {
 }
 
 func TestChunkedHelpers(t *testing.T) {
+	t.Parallel()
 	t.Run("readLine without trailing newline", func(t *testing.T) {
 		cr := &chunkedReader{r: strings.NewReader("abc")}
 		line, err := cr.readLine()
@@ -236,6 +238,7 @@ func (r *zeroThenDataReader) Read(p []byte) (int, error) {
 }
 
 func TestValidateContentMD5(t *testing.T) {
+	t.Parallel()
 	body := []byte("bar")
 	sum := md5.Sum(body)
 	valid := base64.StdEncoding.EncodeToString(sum[:])
@@ -262,6 +265,7 @@ func TestValidateContentMD5(t *testing.T) {
 }
 
 func TestPutObjectContentMD5Validation(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "md5-bucket")
 

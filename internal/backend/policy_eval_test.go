@@ -16,6 +16,7 @@ func evalOne(t *testing.T, statement string, ctx PolicyEvalContext) PolicyEffect
 }
 
 func TestPolicyConditionOperatorKinds(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 	keys := map[string][]string{
 		"s3:max-keys":         {"50"},
@@ -99,6 +100,7 @@ func TestPolicyConditionOperatorKinds(t *testing.T) {
 }
 
 func TestPolicyMultivaluedConditionKeys(t *testing.T) {
+	t.Parallel()
 	ctx := PolicyEvalContext{
 		Action:            "s3:PutObject",
 		Resource:          "arn:aws:s3:::b/k",
@@ -147,6 +149,7 @@ func TestPolicyMultivaluedConditionKeys(t *testing.T) {
 }
 
 func TestPolicyPrincipalMatching(t *testing.T) {
+	t.Parallel()
 	root := PrincipalForAccessKey("root-access-key")
 	alt := PrincipalForAccessKey("minis3-alt-access-key")
 	iamUser := PrincipalForIAMUser(&IAMUser{
@@ -221,6 +224,7 @@ func TestPolicyPrincipalMatching(t *testing.T) {
 }
 
 func TestPrincipalForAccessKeyMatchesIAMGetUser(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		accessKey, account, arn, userName string
 	}{
@@ -266,6 +270,7 @@ func TestPrincipalForAccessKeyMatchesIAMGetUser(t *testing.T) {
 }
 
 func TestPolicyPrincipalConditionKeys(t *testing.T) {
+	t.Parallel()
 	ctx := PolicyEvalContext{
 		Action:    "s3:GetObject",
 		Resource:  "arn:aws:s3:::b/k",
@@ -310,6 +315,7 @@ func TestPolicyPrincipalConditionKeys(t *testing.T) {
 }
 
 func TestPolicyNotActionAndNotResource(t *testing.T) {
+	t.Parallel()
 	ctx := func(action, resource string) PolicyEvalContext {
 		return PolicyEvalContext{
 			Action:    action,
@@ -348,6 +354,7 @@ func TestPolicyNotActionAndNotResource(t *testing.T) {
 }
 
 func TestHasAllowStatementForRequestHonoursNotElements(t *testing.T) {
+	t.Parallel()
 	policy := `{"Statement":[{"Effect":"Allow","Principal":"*","NotAction":"s3:PutObject","Resource":"*",` +
 		`"Condition":{"Bool":{"aws:SecureTransport":"true"}}}]}`
 	get := PolicyEvalContext{Action: "s3:GetObject", Resource: "arn:aws:s3:::b/k", AccessKey: "x"}
@@ -365,6 +372,7 @@ func TestHasAllowStatementForRequestHonoursNotElements(t *testing.T) {
 }
 
 func TestPolicyStringOrSliceKeepsNumberSpelling(t *testing.T) {
+	t.Parallel()
 	var p PolicyStringOrSlice
 	if err := p.UnmarshalJSON([]byte(`[123456789012, 1.50, true, "x"]`)); err != nil {
 		t.Fatal(err)
@@ -389,6 +397,7 @@ func TestPolicyStringOrSliceKeepsNumberSpelling(t *testing.T) {
 }
 
 func TestIsPolicyPublicFollowsAWSDefinition(t *testing.T) {
+	t.Parallel()
 	wrap := func(effect, principal, condition string) string {
 		s := `{"Statement":[{"Effect":"` + effect + `","Principal":` + principal +
 			`,"Action":"s3:GetObject","Resource":"*"`
@@ -491,6 +500,7 @@ func TestIsPolicyPublicFollowsAWSDefinition(t *testing.T) {
 }
 
 func TestEvaluateRejectsMalformedStoredPolicyAsDefault(t *testing.T) {
+	t.Parallel()
 	ctx := PolicyEvalContext{Action: "s3:GetObject", Resource: "arn:aws:s3:::b/k"}
 	for _, policy := range []string{"", "{", `{"Statement":"x"}`} {
 		if got := EvaluateBucketPolicyAccess(policy, ctx); got != PolicyEffectDefault {
@@ -507,6 +517,7 @@ func TestEvaluateRejectsMalformedStoredPolicyAsDefault(t *testing.T) {
 }
 
 func TestPolicyEvaluationEdgeCases(t *testing.T) {
+	t.Parallel()
 	var list PolicyStatementList
 	if err := list.UnmarshalJSON([]byte(`{"Effect":1}`)); err == nil {
 		t.Fatal("a malformed single statement must fail to decode")
@@ -571,6 +582,7 @@ func TestPolicyEvaluationEdgeCases(t *testing.T) {
 }
 
 func TestIsPolicyPublicIgnoresNonRestrictingConditionShapes(t *testing.T) {
+	t.Parallel()
 	for _, condition := range []string{
 		// IpAddress restricts only on aws:SourceIp.
 		`{"IpAddress":{"aws:SourceArn":"10.0.0.0/8"}}`,
@@ -588,6 +600,7 @@ func TestIsPolicyPublicIgnoresNonRestrictingConditionShapes(t *testing.T) {
 }
 
 func TestPolicyValidationErrorMessage(t *testing.T) {
+	t.Parallel()
 	err := ValidateBucketPolicy(
 		`{"Statement":[{"Effect":"Allow","Principal":["*"],"Action":"s3:GetObject","Resource":"*"}]}`,
 		"",

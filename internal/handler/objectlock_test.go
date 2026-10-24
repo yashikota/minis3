@@ -9,6 +9,7 @@ import (
 )
 
 func TestObjectLockConfigurationHandlers(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "plain-bucket")
 	mustCreateObjectLockBucket(t, b, "lock-bucket")
@@ -109,6 +110,7 @@ func TestObjectLockConfigurationHandlers(t *testing.T) {
 }
 
 func TestObjectRetentionHandlers(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "plain-bucket")
 	mustCreateObjectLockBucket(t, b, "lock-bucket")
@@ -253,6 +255,7 @@ func TestObjectRetentionHandlers(t *testing.T) {
 }
 
 func TestPutObjectRetentionBypassCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	for _, bypassValue := range []string{"true", "True", "TRUE", "tRuE"} {
 		t.Run("bypass "+bypassValue, func(t *testing.T) {
 			h, b := newTestHandler(t)
@@ -297,6 +300,7 @@ func TestPutObjectRetentionBypassCaseInsensitive(t *testing.T) {
 }
 
 func TestObjectLegalHoldHandlers(t *testing.T) {
+	t.Parallel()
 	h, b := newTestHandler(t)
 	mustCreateBucket(t, b, "plain-bucket")
 	mustCreateObjectLockBucket(t, b, "lock-bucket")

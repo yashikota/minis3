@@ -7,6 +7,7 @@ import (
 )
 
 func TestIAMUserCRUD(t *testing.T) {
+	t.Parallel()
 	b := New()
 
 	t.Run("create user", func(t *testing.T) {
@@ -69,6 +70,7 @@ func TestIAMUserCRUD(t *testing.T) {
 }
 
 func TestIAMAccessKeyCRUD(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_, _ = b.CreateIAMUser("testuser", "/")
 
@@ -161,6 +163,7 @@ func TestIAMAccessKeyCRUD(t *testing.T) {
 }
 
 func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
+	t.Parallel()
 	b := New()
 	_ = b.CreateBucket("test-bucket")
 
@@ -193,6 +196,7 @@ func TestPutBucketPolicyDenySelfAccess(t *testing.T) {
 }
 
 func TestIAMUserPolicyCRUD(t *testing.T) {
+	t.Parallel()
 	b := New()
 	if _, err := b.CreateIAMUser("poluser", "/"); err != nil {
 		t.Fatalf("CreateIAMUser failed: %v", err)
@@ -289,6 +293,7 @@ func TestIAMUserPolicyCRUD(t *testing.T) {
 }
 
 func TestValidateIAMUserPolicyDocument(t *testing.T) {
+	t.Parallel()
 	valid := []string{
 		`{"Version":"2012-10-17","Statement":{"Effect":"Allow","Action":"*","Resource":"*"}}`,
 		`{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Action":"s3:GetObject","Resource":"*"}]}`,
@@ -317,6 +322,7 @@ func TestValidateIAMUserPolicyDocument(t *testing.T) {
 }
 
 func TestIsValidIAMPolicyName(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"AllAccessPolicy", "a", "a+b=c,d.e@f-g_h", strings.Repeat("x", 128)} {
 		if !IsValidIAMPolicyName(name) {
 			t.Fatalf("IsValidIAMPolicyName(%q) = false, want true", name)

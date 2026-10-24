@@ -29,6 +29,8 @@ type Handler struct {
 
 	credentialsMu    sync.RWMutex
 	extraCredentials map[string]string
+
+	hooks handlerHooks
 }
 
 const serverAccessLogRollInterval = 5 * time.Second
@@ -82,48 +84,13 @@ func (rw *recordingResponseWriter) Write(b []byte) (int, error) {
 var (
 	lifecycleIntervalOnce  sync.Once
 	lifecycleIntervalValue time.Duration
-
-	verifyPresignedURLFn        = verifyPresignedURL
-	verifyAuthorizationHeaderFn = verifyAuthorizationHeader
-	ownerForAccessKeyFn         = backend.OwnerForAccessKey
-	getBucketForLoggingFn       = func(h *Handler, bucketName string) (*backend.Bucket, bool) {
-		return h.backend.GetBucket(bucketName)
-	}
-	requestURIForLoggingFn = func(r *http.Request) string {
-		return r.URL.RequestURI()
-	}
-	getBucketACLForAccessCheckFn = func(
-		h *Handler,
-		bucketName string,
-	) (*backend.AccessControlPolicy, error) {
-		return h.backend.GetBucketACL(bucketName)
-	}
-	getObjectACLForAccessCheckFn = func(
-		h *Handler,
-		bucketName, key, versionID string,
-	) (*backend.AccessControlPolicy, error) {
-		return h.backend.GetObjectACL(bucketName, key, versionID)
-	}
-	getObjectVersionForLoggingFn = func(
-		h *Handler,
-		bucketName, key, versionID string,
-	) (*backend.Object, error) {
-		return h.backend.GetObjectVersion(bucketName, key, versionID)
-	}
-	putObjectForLoggingFn = func(
-		h *Handler,
-		bucketName, key string,
-		data []byte,
-		opts backend.PutObjectOptions,
-	) (*backend.Object, error) {
-		return h.backend.PutObject(bucketName, key, data, opts)
-	}
 )
 
 // New creates a new Handler with the given backend.
 func New(b *backend.Backend) *Handler {
 	return &Handler{
 		backend:           b,
+		hooks:             defaultHooks(),
 		pendingLogBatches: make(map[string]*serverAccessLogBatch),
 	}
 }
@@ -205,7 +172,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		bucketName, _ := extractBucketAndKey(pathValue)
 		accessKey := extractAccessKey(r)
-		bucketName = normalizeBucketNameForRequestAccessKey(bucketName, accessKey)
+		bucketName = h.normalizeBucketNameForRequestAccessKey(bucketName, accessKey)
 		if h.setCORSHeadersForRequest(
 			w,
 			bucketName,
@@ -247,7 +214,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Verify presigned URL if applicable
 	if isPresignedURL(r) {
-		if err := verifyPresignedURLFn(r); err != nil {
+		if err := h.hooks.verifyPresignedURL(r); err != nil {
 			if pe, ok := err.(*presignedError); ok {
 				backend.WriteError(w, http.StatusForbidden, pe.code, pe.message)
 			} else {
@@ -256,7 +223,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := verifyAuthorizationHeaderFn(r); err != nil {
+	if err := h.hooks.verifyAuthorizationHeader(r); err != nil {
 		if pe, ok := err.(*presignedError); ok {
 			backend.WriteError(w, http.StatusForbidden, pe.code, pe.message)
 		} else {
@@ -273,7 +240,7 @@ func (h *Handler) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 	accessKey := extractAccessKey(r)
 	bucketName, key := extractBucketAndKey(path)
-	bucketName = normalizeBucketNameForRequestAccessKey(bucketName, accessKey)
+	bucketName = h.normalizeBucketNameForRequestAccessKey(bucketName, accessKey)
 	if origin := r.Header.Get("Origin"); origin != "" {
 		corsMethod := r.Header.Get("Access-Control-Request-Method")
 		if corsMethod == "" {
@@ -402,11 +369,11 @@ func extractAccessKey(r *http.Request) string {
 	return ""
 }
 
-func tenantFromAccessKey(accessKey string) string {
+func (h *Handler) tenantFromAccessKey(accessKey string) string {
 	if accessKey == "" {
 		return ""
 	}
-	owner := ownerForAccessKeyFn(accessKey)
+	owner := h.hooks.ownerForAccessKey(accessKey)
 	if owner == nil {
 		return ""
 	}
@@ -416,7 +383,7 @@ func tenantFromAccessKey(accessKey string) string {
 	return ""
 }
 
-func normalizeBucketNameForRequestAccessKey(bucketName, accessKey string) string {
+func (h *Handler) normalizeBucketNameForRequestAccessKey(bucketName, accessKey string) string {
 	if bucketName == "" {
 		return bucketName
 	}
@@ -428,7 +395,7 @@ func normalizeBucketNameForRequestAccessKey(bucketName, accessKey string) string
 	if strings.Contains(bucketName, ":") {
 		return bucketName
 	}
-	tenant := tenantFromAccessKey(accessKey)
+	tenant := h.tenantFromAccessKey(accessKey)
 	if tenant == "" {
 		return bucketName
 	}
@@ -541,9 +508,9 @@ func (h *Handler) loggingJournalMetadata(
 	r *http.Request,
 ) (string, string, string) {
 	versionID := queryValueInsensitive(r, "versionId")
-	obj, err := getObjectVersionForLoggingFn(h, bucketName, key, versionID)
+	obj, err := h.hooks.getObjectVersionForLogging(h, bucketName, key, versionID)
 	if err != nil && versionID != "" {
-		obj, err = getObjectVersionForLoggingFn(h, bucketName, key, "")
+		obj, err = h.hooks.getObjectVersionForLogging(h, bucketName, key, "")
 	}
 	if err != nil || obj == nil {
 		return "-", "-", "-"
@@ -567,15 +534,15 @@ func (h *Handler) emitServerAccessLog(
 ) {
 	accessKey := extractAccessKey(r)
 	bucketName, key := extractBucketAndKey(r.URL.Path)
-	bucketName = normalizeBucketNameForRequestAccessKey(bucketName, accessKey)
+	bucketName = h.normalizeBucketNameForRequestAccessKey(bucketName, accessKey)
 	if bucketName == "" {
 		return
 	}
-	logging, err := getBucketLoggingFn(h, bucketName)
+	logging, err := h.hooks.getBucketLogging(h, bucketName)
 	if err != nil || logging == nil || logging.LoggingEnabled == nil {
 		return
 	}
-	sourceBucket, ok := getBucketForLoggingFn(h, bucketName)
+	sourceBucket, ok := h.hooks.getBucketForLogging(h, bucketName)
 	if !ok {
 		return
 	}
@@ -608,7 +575,7 @@ func (h *Handler) emitServerAccessLog(
 	if loggingType == backend.BucketLoggingTypeJournal && !shouldLogJournalOperation(op) {
 		return
 	}
-	requestURI := requestURIForLoggingFn(r)
+	requestURI := h.hooks.requestURIForLogging(r)
 	if requestURI == "" {
 		requestURI = r.URL.Path
 	}
@@ -863,7 +830,7 @@ func (h *Handler) flushServerAccessLogBatch(
 		body.WriteString(entry.Line)
 		body.WriteByte('\n')
 	}
-	_, err := putObjectForLoggingFn(
+	_, err := h.hooks.putObjectForLogging(
 		h,
 		batch.TargetBucket,
 		logKey,
@@ -1105,28 +1072,28 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 	switch action {
 	case "s3:ListBucket", "s3:ListBucketVersions", "s3:ListBucketMultipartUploads",
 		"s3:ListMultipartUploadParts":
-		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
+		acl, err := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 		if err != nil {
 			return false
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsRead(acl, requesterCanonicalID, isAnonymous)
 	case "s3:PutObject", "s3:AbortMultipartUpload":
-		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
+		acl, err := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 		if err != nil {
 			return false
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsWrite(acl, requesterCanonicalID, isAnonymous)
 	case "s3:GetBucketAcl":
-		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
+		acl, err := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 		if err != nil {
 			return false
 		}
 		acl = effectiveACLForResponse(acl, ignorePublicACLs)
 		return aclAllowsACP(acl, requesterCanonicalID, isAnonymous, backend.PermissionReadACP)
 	case "s3:PutBucketAcl":
-		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
+		acl, err := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 		if err != nil {
 			return false
 		}
@@ -1136,11 +1103,11 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
+		acl, err := h.hooks.getObjectACLForAccessCheck(h, bucketName, key, "")
 		if err != nil {
 			if errors.Is(err, backend.ErrObjectNotFound) ||
 				errors.Is(err, backend.ErrVersionNotFound) {
-				bucketACL, bucketErr := getBucketACLForAccessCheckFn(h, bucketName)
+				bucketACL, bucketErr := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 				if bucketErr != nil {
 					return false
 				}
@@ -1160,11 +1127,11 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
+		acl, err := h.hooks.getObjectACLForAccessCheck(h, bucketName, key, "")
 		if err != nil {
 			if errors.Is(err, backend.ErrObjectNotFound) ||
 				errors.Is(err, backend.ErrVersionNotFound) {
-				bucketACL, bucketErr := getBucketACLForAccessCheckFn(h, bucketName)
+				bucketACL, bucketErr := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 				if bucketErr != nil {
 					return false
 				}
@@ -1185,7 +1152,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
+		acl, err := h.hooks.getObjectACLForAccessCheck(h, bucketName, key, "")
 		if err == nil {
 			acl = effectiveACLForResponse(acl, ignorePublicACLs)
 			return aclAllowsRead(acl, requesterCanonicalID, isAnonymous)
@@ -1193,7 +1160,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		// Missing objects (including latest delete marker) should be authorized
 		// by bucket read ACL so the caller gets 404 instead of 403.
 		if errors.Is(err, backend.ErrObjectNotFound) || errors.Is(err, backend.ErrVersionNotFound) {
-			bucketACL, bucketErr := getBucketACLForAccessCheckFn(h, bucketName)
+			bucketACL, bucketErr := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 			if bucketErr != nil {
 				return false
 			}
@@ -1205,13 +1172,13 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
+		acl, err := h.hooks.getObjectACLForAccessCheck(h, bucketName, key, "")
 		if err == nil {
 			acl = effectiveACLForResponse(acl, ignorePublicACLs)
 			return aclAllowsRead(acl, requesterCanonicalID, isAnonymous)
 		}
 		if errors.Is(err, backend.ErrObjectNotFound) || errors.Is(err, backend.ErrVersionNotFound) {
-			bucketACL, bucketErr := getBucketACLForAccessCheckFn(h, bucketName)
+			bucketACL, bucketErr := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 			if bucketErr != nil {
 				return false
 			}
@@ -1223,7 +1190,7 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := getBucketACLForAccessCheckFn(h, bucketName)
+		acl, err := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 		if err != nil {
 			return false
 		}
@@ -1238,13 +1205,13 @@ func (h *Handler) checkAccess(r *http.Request, bucketName, action, key string) b
 		if key == "" {
 			return false
 		}
-		acl, err := getObjectACLForAccessCheckFn(h, bucketName, key, "")
+		acl, err := h.hooks.getObjectACLForAccessCheck(h, bucketName, key, "")
 		if err == nil {
 			acl = effectiveACLForResponse(acl, ignorePublicACLs)
 			return aclAllowsWrite(acl, requesterCanonicalID, isAnonymous)
 		}
 		if errors.Is(err, backend.ErrObjectNotFound) || errors.Is(err, backend.ErrVersionNotFound) {
-			bucketACL, bucketErr := getBucketACLForAccessCheckFn(h, bucketName)
+			bucketACL, bucketErr := h.hooks.getBucketACLForAccessCheck(h, bucketName)
 			if bucketErr != nil {
 				return false
 			}
@@ -1361,8 +1328,8 @@ func (h *Handler) getBucketPublicAccessBlock(
 	return config
 }
 
-func requesterOwner(r *http.Request) *backend.Owner {
-	return ownerForAccessKeyFn(extractAccessKey(r))
+func (h *Handler) requesterOwner(r *http.Request) *backend.Owner {
+	return h.hooks.ownerForAccessKey(extractAccessKey(r))
 }
 
 func (h *Handler) bucketOwner(bucketName string) *backend.Owner {
@@ -1370,7 +1337,7 @@ func (h *Handler) bucketOwner(bucketName string) *backend.Owner {
 	if !ok {
 		return backend.DefaultOwner()
 	}
-	return ownerForAccessKeyFn(bucket.OwnerAccessKey)
+	return h.hooks.ownerForAccessKey(bucket.OwnerAccessKey)
 }
 
 func isPublicACL(acl *backend.AccessControlPolicy) bool {

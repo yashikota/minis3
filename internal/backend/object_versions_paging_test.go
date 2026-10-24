@@ -13,6 +13,7 @@ import (
 // starts right after the exact (key, version-id) entry. A trailing marker
 // returns an empty result.
 func TestListObjectVersionsKeyMarkerPaging(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*Backend, string, []string, map[string][]string) {
 		t.Helper()
 		b := New()

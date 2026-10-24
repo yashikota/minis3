@@ -321,6 +321,7 @@ func runPagingProperties(t *testing.T, r *rand.Rand) {
 }
 
 func TestListPagingProperties(t *testing.T) {
+	t.Parallel()
 	for seed := range uint64(300) {
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
 			runPagingProperties(t, rand.New(rand.NewPCG(seed, 0x9a9e)))
