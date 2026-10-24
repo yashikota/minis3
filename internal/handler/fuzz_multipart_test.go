@@ -1,6 +1,11 @@
 package handler
 
-import "testing"
+import (
+	"math"
+	"regexp"
+	"strconv"
+	"testing"
+)
 
 func FuzzParseByteRange(f *testing.F) {
 	f.Add("bytes=0-100")
@@ -19,7 +24,36 @@ func FuzzParseByteRange(f *testing.F) {
 	f.Add("bytes =0-100")
 	f.Add("bytes=0 - 100")
 
+	f.Add("bytes=+1-+2")
+	copySourceRange := regexp.MustCompile(`\Abytes=([0-9]+)-([0-9]+)\z`)
 	f.Fuzz(func(t *testing.T, rangeHeader string) {
-		_, _, _ = parseByteRange(rangeHeader)
+		start, end, err := parseByteRange(rangeHeader)
+		m := copySourceRange.FindStringSubmatch(rangeHeader)
+		if m == nil {
+			if err == nil {
+				t.Fatalf("parseByteRange(%q) = (%d, %d), want an error", rangeHeader, start, end)
+			}
+			return
+		}
+		// Positions past int64 saturate.
+		wantStart, wantEnd := saturatingInt64(m[1]), saturatingInt64(m[2])
+		if wantStart > wantEnd {
+			if err == nil {
+				t.Fatalf("parseByteRange(%q) accepted a reversed range", rangeHeader)
+			}
+			return
+		}
+		if err != nil || start != wantStart || end != wantEnd {
+			t.Fatalf("parseByteRange(%q) = (%d, %d, %v), want (%d, %d)",
+				rangeHeader, start, end, err, wantStart, wantEnd)
+		}
 	})
+}
+
+func saturatingInt64(digits string) int64 {
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return math.MaxInt64
+	}
+	return n
 }

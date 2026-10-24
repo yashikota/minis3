@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"hash/crc64"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -760,66 +761,78 @@ func applyResponseOverrides(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// parseRangeHeader parses a Range header value and returns start and end positions.
-// Supported formats: "bytes=start-end", "bytes=start-", "bytes=-suffix"
-// Returns start, end (inclusive), and error if invalid.
+// errRangeIgnored reports a Range header that GetObject ignores, serving
+// the whole object with 200: one that is not a single well-formed byte
+// range. That includes multiple ranges, which S3 does not support ("Amazon
+// S3 doesn't support retrieving multiple ranges of data per GET request")
+// and answers with the whole object rather than the first range, as do
+// reversed ranges, other units and other malformed values.
+var errRangeIgnored = errors.New("range header ignored")
+
+// parseRangeHeader parses a GetObject Range header: "bytes=first-last",
+// "bytes=first-" or "bytes=-suffix" (RFC 9110 section 14.1.2). It returns
+// the inclusive start and end of the range to serve, errRangeIgnored when
+// the header is to be ignored, or backend.ErrInvalidRange (416) when a
+// well-formed range cannot be satisfied: the first byte is past the end of
+// the object, the suffix is empty, or the object is empty.
+//
+// TestParseRangeHeaderMatchesAWS checks it against responses recorded from
+// Amazon S3.
 func parseRangeHeader(rangeHeader string, size int64) (int64, int64, error) {
-	if size == 0 {
-		return 0, 0, backend.ErrInvalidRange
+	spec, ok := strings.CutPrefix(rangeHeader, "bytes=")
+	if !ok {
+		return 0, 0, errRangeIgnored
 	}
-	if !strings.HasPrefix(rangeHeader, "bytes=") {
-		return 0, 0, backend.ErrInvalidRange
+	firstStr, lastStr, ok := strings.Cut(spec, "-")
+	if !ok || strings.Contains(lastStr, "-") {
+		return 0, 0, errRangeIgnored
 	}
-
-	rangeSpec := strings.TrimPrefix(rangeHeader, "bytes=")
-
-	// Handle suffix range: bytes=-N (last N bytes)
-	if strings.HasPrefix(rangeSpec, "-") {
-		suffix, err := strconv.ParseInt(rangeSpec[1:], 10, 64)
-		if err != nil || suffix <= 0 {
+	if firstStr == "" {
+		// bytes=-suffix: the last suffix bytes.
+		suffix, ok := parseRangeDigits(lastStr)
+		if !ok {
+			return 0, 0, errRangeIgnored
+		}
+		if suffix == 0 || size == 0 {
 			return 0, 0, backend.ErrInvalidRange
 		}
-		if suffix >= size {
-			// Return entire object
-			return 0, size - 1, nil
+		return max(size-suffix, 0), size - 1, nil
+	}
+	first, ok := parseRangeDigits(firstStr)
+	if !ok {
+		return 0, 0, errRangeIgnored
+	}
+	last := int64(math.MaxInt64)
+	if lastStr != "" {
+		if last, ok = parseRangeDigits(lastStr); !ok || last < first {
+			return 0, 0, errRangeIgnored
 		}
-		return size - suffix, size - 1, nil
 	}
-
-	parts := strings.SplitN(rangeSpec, "-", 2)
-	if len(parts) != 2 {
+	if first >= size {
 		return 0, 0, backend.ErrInvalidRange
 	}
+	return first, min(last, size-1), nil
+}
 
-	start, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return 0, 0, backend.ErrInvalidRange
+// parseRangeDigits parses a non-empty run of ASCII digits, saturating at
+// math.MaxInt64 so huge positions still compare as past the end.
+func parseRangeDigits(s string) (int64, bool) {
+	if s == "" {
+		return 0, false
 	}
-
-	// Handle open-ended range: bytes=N-
-	if parts[1] == "" {
-		if start >= size {
-			return 0, 0, backend.ErrInvalidRange
+	var n int64
+	for _, c := range []byte(s) {
+		if c < '0' || c > '9' {
+			return 0, false
 		}
-		return start, size - 1, nil
+		d := int64(c - '0')
+		if n > (math.MaxInt64-d)/10 {
+			n = math.MaxInt64
+			continue
+		}
+		n = n*10 + d
 	}
-
-	end, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return 0, 0, backend.ErrInvalidRange
-	}
-
-	// Validate range
-	if start > end || start >= size {
-		return 0, 0, backend.ErrInvalidRange
-	}
-
-	// Clamp end to object size
-	if end >= size {
-		end = size - 1
-	}
-
-	return start, end, nil
+	return n, true
 }
 
 // handleObject handles object-level operations.
@@ -1529,9 +1542,9 @@ func (h *Handler) handleObject(w http.ResponseWriter, r *http.Request, bucketNam
 
 		// Handle Range request
 		rangeHeader := r.Header.Get("Range")
-		if rangeHeader != "" {
-			start, end, err := parseRangeHeader(rangeHeader, obj.Size)
-			if err != nil {
+		start, end, rangeErr := parseRangeHeader(rangeHeader, obj.Size)
+		if rangeHeader != "" && !errors.Is(rangeErr, errRangeIgnored) {
+			if rangeErr != nil {
 				w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", obj.Size))
 				backend.WriteError(
 					w,

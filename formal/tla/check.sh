@@ -8,13 +8,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-TLC_VERSION="v2026.10.23.034533"
+TLC_VERSION="v2026.10.23.134125"
 
 tlc_asset() {
   case "$(uname -s)-$(uname -m)" in
-    Linux-x86_64 | Linux-amd64) echo "tlc-linux-amd64.tar.gz a9b209feda43a6742be127597f7bf5f52d9b4481e6fb625fbc90a3d277bc1b81" ;;
-    Linux-aarch64 | Linux-arm64) echo "tlc-linux-arm64.tar.gz 61816d2654b8fb00775a3e2f1f688079872623c94f0e13ce213abe03772c9d99" ;;
-    Darwin-arm64) echo "tlc-macos-arm64.tar.gz 8a0241feeb192599e38173f4c38f2259204622d57448a09f59e764fd3dd6e912" ;;
+    Linux-x86_64 | Linux-amd64) echo "tlc-linux-amd64.tar.gz 7ce9bd9144a9f39c6b7bdec1bfc38a41c8cf883bda57034ecd02b89a410a2b3a" ;;
+    Linux-aarch64 | Linux-arm64) echo "tlc-linux-arm64.tar.gz a39f7ace30a36980459d594590aefcfef4bb08931595e100cbb2f47e9a01b26e" ;;
+    Darwin-arm64) echo "tlc-macos-arm64.tar.gz 2b0aee1d643137d45598293c2c67ea93cbd5679ac6d9d1486e3329b3131ab10a" ;;
     *)
       echo "unsupported platform $(uname -s)-$(uname -m); set TLC_BIN" >&2
       return 1

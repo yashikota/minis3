@@ -1217,13 +1217,14 @@ func parseByteRange(rangeHeader string) (int64, int64, error) {
 	startStr := rangeSpec[:dashIdx]
 	endStr := rangeSpec[dashIdx+1:]
 
-	start, err := strconv.ParseInt(startStr, 10, 64)
-	if err != nil {
+	// Positions are plain digits: strconv.ParseInt would also take "+1".
+	start, ok := parseRangeDigits(startStr)
+	if !ok {
 		return 0, 0, errors.New("invalid start")
 	}
 
-	end, err := strconv.ParseInt(endStr, 10, 64)
-	if err != nil {
+	end, ok := parseRangeDigits(endStr)
+	if !ok {
 		return 0, 0, errors.New("invalid end")
 	}
 

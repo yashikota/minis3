@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -20,7 +21,24 @@ func FuzzExtractBucketAndKey(f *testing.F) {
 	f.Add("//double//slashes")
 
 	f.Fuzz(func(t *testing.T, path string) {
-		_, _ = extractBucketAndKey(path)
+		bucket, key := extractBucketAndKey(path)
+		if strings.Contains(bucket, "/") {
+			t.Fatalf("extractBucketAndKey(%q) bucket %q contains a slash", path, bucket)
+		}
+		rest := strings.TrimPrefix(path, "/")
+		if want := bucket + "/" + key; rest != want && (key != "" || rest != bucket) {
+			t.Fatalf(
+				"extractBucketAndKey(%q) = (%q, %q) does not rejoin to %q",
+				path,
+				bucket,
+				key,
+				rest,
+			)
+		}
+		// Round trip from the parts.
+		if b2, k2 := extractBucketAndKey("/" + bucket + "/" + key); b2 != bucket || k2 != key {
+			t.Fatalf("extractBucketAndKey(/%s/%s) = (%q, %q)", bucket, key, b2, k2)
+		}
 	})
 }
 
