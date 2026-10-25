@@ -85,8 +85,8 @@ jobs:
         with:
             aqua_version: v2.65.2
 
-      # check.sh downloads the pinned static TLC binary
-      # (github.com/yashikota/tlc-static); no Java is needed.
+      # TLC is the static binary from github.com/yashikota/tlc-static,
+      # installed through aqua (aqua.yaml); no Java is needed.
       - name: Run formal verification
         run: task formal
 

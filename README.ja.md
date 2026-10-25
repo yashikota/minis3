@@ -215,7 +215,7 @@ curl -i http://127.0.0.1:9191/health
 - `task sdk-test`: `integration/sdk` の統合テスト
 - `task s3-test`: Docker で Ceph `s3-tests` を実行
 - `task test`: `unit-test`, `sdk-test`, `s3-test` を順に実行
-- `task formal`: `formal/tla` の TLA+ 仕様を [tlc-static](https://github.com/yashikota/tlc-static) の静的 TLC バイナリ（初回実行時に取得しチェックサムを検証。Java 不要）でモデル検査し、Go のモデルベーステストを実行
+- `task formal`: `formal/tla` の TLA+ 仕様を [tlc-static](https://github.com/yashikota/tlc-static) の静的 TLC バイナリ（aqua でインストール。Java 不要）でモデル検査し、Go のモデルベーステストを実行
 - `task tobari`: tobari でスコープ別カバレッジを測定（`./tobari/tobari.json` に出力）
 - `task tobari-html`: `tobari/tobari.json` から HTML カバレッジレポートを生成
 

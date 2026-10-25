@@ -214,7 +214,7 @@ curl -i http://127.0.0.1:9191/health
 - `task sdk-test`: Run integration tests in `integration/sdk`.
 - `task s3-test`: Run Ceph `s3-tests` in Docker.
 - `task test`: Run `unit-test`, `sdk-test`, and `s3-test`.
-- `task formal`: Model-check the TLA+ specifications in `formal/tla` with the static TLC binary from [tlc-static](https://github.com/yashikota/tlc-static) (downloaded and checksum-verified on first run; no Java needed) and run the Go model-based tests.
+- `task formal`: Model-check the TLA+ specifications in `formal/tla` with the static TLC binary from [tlc-static](https://github.com/yashikota/tlc-static) (installed through aqua; no Java needed) and run the Go model-based tests.
 - `task tobari`: Measure scoped coverage with tobari (outputs `./tobari/tobari.json`).
 - `task tobari-html`: Generate an HTML coverage report from `tobari/tobari.json`.
 

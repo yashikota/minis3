@@ -1,4 +1,3 @@
-.tlc-v*/
 .tlc-*.log
 states/
 *_TTrace_*.tla
