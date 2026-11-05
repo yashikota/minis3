@@ -35,7 +35,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@611554c6f0137ba41c8dd15aca8bee82504ea461 # v4.1.1
         with:
-            aqua_version: v2.65.2
+            aqua_version: v2.66.0
 
       - name: Run lint
         run: task lint
@@ -59,7 +59,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@611554c6f0137ba41c8dd15aca8bee82504ea461 # v4.1.1
         with:
-            aqua_version: v2.65.2
+            aqua_version: v2.66.0
 
       - name: Run test
         run: |
@@ -83,7 +83,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@611554c6f0137ba41c8dd15aca8bee82504ea461 # v4.1.1
         with:
-            aqua_version: v2.65.2
+            aqua_version: v2.66.0
 
       # TLC is the static binary from github.com/yashikota/tlc-static,
       # installed through aqua (aqua.yaml); no Java is needed.
@@ -107,7 +107,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@611554c6f0137ba41c8dd15aca8bee82504ea461 # v4.1.1
         with:
-            aqua_version: v2.65.2
+            aqua_version: v2.66.0
 
       - name: Run fuzz tests
         run: task fuzz FUZZ_TIME=1m FUZZ_PARALLEL=0
@@ -132,7 +132,7 @@ jobs:
 
       - uses: aquaproj/aqua-installer@611554c6f0137ba41c8dd15aca8bee82504ea461 # v4.1.1
         with:
-            aqua_version: v2.65.2
+            aqua_version: v2.66.0
 
       - name: Run mutation tests for PR diff
         if: github.event_name == 'pull_request'
