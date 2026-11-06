@@ -7,7 +7,7 @@ COPY internal ./internal
 COPY integration/s3-test/main.go ./integration/s3-test/
 RUN CGO_ENABLED=0 go build -o minis3 ./integration/s3-test
 
-FROM alpine:3.24@sha256:ce9e1e6d23f04a0b7593445a062a9fc73ed52f8260b9396f77a958295ad18ee7
+FROM alpine:3.24@sha256:3f4d6b32e26703c6082839234f43769d5046b3ac7c910033911d1e71d8cd630a
 RUN apk add --no-cache wget
 COPY --from=builder /app/minis3 /usr/local/bin/
 EXPOSE 9000
